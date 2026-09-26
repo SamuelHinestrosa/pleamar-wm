@@ -119,6 +119,7 @@ impl pleamar::Platform for Headless {
                 sc
             })
             .collect();
+        crate::layers::register(screens.iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * size.0 as i32, mhz: 60_000 }, sc.clone())).collect());
         let cursor = Arc::new(Mutex::new(Cursor::Normal));
         let mut id = 7000;
         for (k, s) in surfaces.iter().enumerate() {

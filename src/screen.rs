@@ -10,7 +10,8 @@
 //! when something new has been painted. Where it ends up —the card's buffers
 //! with page flips, or textures for a picture with no screen— is its `Output`.
 
-use pleamar::scene::{Cursor, Keyboard, Level, Surface, SurfaceAnchor, ToRender};
+use crate::layers::{self, ClientLayer, ToLayers};
+use pleamar::scene::{Cursor, Keyboard, Level, PieceContent, Surface, SurfaceAnchor, ToRender};
 use pleamar::wgpu;
 use pleamar::{Frames, PlatformWindow};
 use std::sync::mpsc::Sender;
@@ -61,6 +62,13 @@ pub struct ScreenState {
     pub fresh: Vec<u32>,
     pub on_flip: Vec<u32>,
     pub modifiers: Vec<u64>,
+    /// The programs' surfaces on it (layer-shell): Marea, a bar, a wallpaper.
+    pub clients: Vec<ClientLayer>,
+    /// The programs' buffers it read the last time it was put together: lent
+    /// until it no longer shows them.
+    pub held: Vec<u64>,
+    /// Buffers the programs destroyed, to drop what was kept of them.
+    pub forget: Vec<u64>,
     output: Option<Box<dyn Output>>,
     pub quit: bool,
 }
@@ -69,7 +77,7 @@ pub type Screen = Arc<(Mutex<ScreenState>, Condvar)>;
 
 pub fn screen(name: String, size: (u32, u32), output: Box<dyn Output>) -> Screen {
     Arc::new((
-        Mutex::new(ScreenState { name, size, layers: Vec::new(), dirty: false, idle: true, paused: false, anew: true, fresh: Vec::new(), on_flip: Vec::new(), modifiers: Vec::new(), output: Some(output), quit: false }),
+        Mutex::new(ScreenState { name, size, layers: Vec::new(), dirty: false, idle: true, paused: false, anew: true, fresh: Vec::new(), on_flip: Vec::new(), modifiers: Vec::new(), clients: Vec::new(), held: Vec::new(), forget: Vec::new(), output: Some(output), quit: false }),
         Condvar::new(),
     ))
 }
@@ -103,29 +111,72 @@ pub fn layer(sheet: u32, k: usize, s: &Surface, monitor: (u32, u32)) -> Layer {
     Layer { sheet, surface: k, origin: s.origin, rect, level: s.level, main, anchor: s.anchor, margin: s.margin, latest: None, region: Vec::new() }
 }
 
-/// The layers in the order they are put together: by level, and within a
-/// level the scene's own first, then in the order they were declared.
-pub fn in_order(layers: &[Layer]) -> Vec<usize> {
-    let mut order: Vec<usize> = (0..layers.len()).collect();
-    order.sort_by_key(|k| (level_rank(layers[*k].level), !layers[*k].main, layers[*k].surface));
-    order
+/// Who takes the pointer at a point of a monitor.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Hit {
+    /// The scene, at that point of its plane (none: nowhere).
+    Scene(Option<(f32, f32)>),
+    /// A program's surface, at that point of it.
+    Client(u64, (f64, f64)),
 }
 
-/// The pointer at that point of a monitor: which surface takes it —the
-/// highest with a zone there; the scene's own if none—, and the point in
-/// the scene's plane.
-pub fn pointer_at(st: &ScreenState, (x, y): (f64, f64)) -> Option<(f32, f32)> {
-    let order = in_order(&st.layers);
+/// What is put together on a monitor, bottom to top: by level; within a
+/// level the scene's own surface, then its named ones in the order they were
+/// declared, then the programs' in the order they came.
+enum Item {
+    Scene(usize),
+    Client(usize),
+}
+
+fn stacked(st: &ScreenState) -> Vec<Item> {
+    let mut all: Vec<((u8, u8, usize), Item)> = Vec::new();
+    for (k, l) in st.layers.iter().enumerate() {
+        all.push(((level_rank(l.level), if l.main { 0 } else { 1 }, l.surface), Item::Scene(k)));
+    }
+    for (k, c) in st.clients.iter().enumerate() {
+        all.push(((c.level, 2, k), Item::Client(k)));
+    }
+    all.sort_by_key(|(key, _)| *key);
+    all.into_iter().map(|(_, i)| i).collect()
+}
+
+/// The pointer at that point of a monitor: the highest surface that takes
+/// it there —a named one only where it has zones, a program's where its
+/// input region says—; the scene's own takes whatever is left above it.
+pub fn pointer_at(st: &ScreenState, (x, y): (f64, f64)) -> Hit {
     let inside = |r: &[i32; 4], px: f64, py: f64| px >= r[0] as f64 && py >= r[1] as f64 && px < (r[0] + r[2]) as f64 && py < (r[1] + r[3]) as f64;
-    let hit = order.iter().rev().map(|k| &st.layers[*k]).find(|l| {
-        if l.main {
-            return false;
+    let scene = |l: &Layer| Hit::Scene(Some((l.origin.0 + (x - l.rect[0] as f64) as f32, l.origin.1 + (y - l.rect[1] as f64) as f32)));
+    for item in stacked(st).iter().rev() {
+        match item {
+            Item::Scene(k) => {
+                let l = &st.layers[*k];
+                if l.main {
+                    return scene(l);
+                }
+                let (lx, ly) = (x - l.rect[0] as f64, y - l.rect[1] as f64);
+                if l.latest.is_some() && inside(&l.rect, x, y) && l.region.iter().any(|b| lx >= b[0] as f64 && ly >= b[1] as f64 && lx < b[2] as f64 && ly < b[3] as f64) {
+                    return scene(l);
+                }
+            }
+            Item::Client(k) => {
+                let c = &st.clients[*k];
+                if c.takes(x, y) {
+                    return Hit::Client(c.id, (x - c.rect[0] as f64, y - c.rect[1] as f64));
+                }
+            }
         }
-        let (lx, ly) = (x - l.rect[0] as f64, y - l.rect[1] as f64);
-        l.latest.is_some() && inside(&l.rect, x, y) && l.region.iter().any(|b| lx >= b[0] as f64 && ly >= b[1] as f64 && lx < b[2] as f64 && ly < b[3] as f64)
-    });
-    let l = hit.or_else(|| st.layers.iter().find(|l| l.main))?;
-    Some((l.origin.0 + (x - l.rect[0] as f64) as f32, l.origin.1 + (y - l.rect[1] as f64) as f32))
+    }
+    Hit::Scene(None)
+}
+
+/// The program's surface that takes all the keyboard on this monitor, if one does.
+pub fn keyboard_taker(st: &ScreenState) -> Option<u64> {
+    st.clients.iter().rev().find(|c| c.keyboard == 1 && c.level >= 2 && !c.pieces.is_empty()).map(|c| c.id)
+}
+
+/// Whether that program's surface takes the keyboard when clicked.
+pub fn takes_keyboard_on_click(st: &ScreenState, id: u64) -> bool {
+    st.clients.iter().any(|c| c.id == id && c.keyboard != 0)
 }
 
 /// A surface's frames: two textures of its own, lent in turn to the render;
@@ -215,7 +266,7 @@ impl PlatformWindow for LayerWindow {
 }
 
 const SHADER: &str = r#"
-struct Rect { r: vec4<f32> };
+struct Rect { r: vec4<f32>, f: vec4<f32> };
 @group(0) @binding(0) var t: texture_2d<f32>;
 @group(0) @binding(1) var s: sampler;
 @group(0) @binding(2) var<uniform> q: Rect;
@@ -229,9 +280,30 @@ struct V { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
     return v;
 }
 @fragment fn fs(v: V) -> @location(0) vec4<f32> {
-    return textureSample(t, s, v.uv);
+    let c = textureSample(t, s, v.uv);
+    // A buffer without alpha (XRGB) covers, whatever its fourth byte holds.
+    return select(c, vec4<f32>(c.rgb, 1.0), q.f.x > 0.5);
 }
 "#;
+
+/// Where a quad takes its pixels from.
+enum Source {
+    Texture(wgpu::Texture),
+    /// A program's buffer on the card, by number.
+    Buffer(u64),
+    /// A program's pixels, copied into a texture of the surface's.
+    Pixels(u64),
+}
+
+/// A bind group already made for a texture at a place: remade only when
+/// either changes, not every time the monitor is put together.
+struct Bound {
+    texture: wgpu::Texture,
+    uniform: [f32; 8],
+    group: wgpu::BindGroup,
+    /// The last time it was put together with it.
+    used: u64,
+}
 
 /// Puts the monitor together whenever something new has been painted and
 /// the last flip has landed: at most once per refresh.
@@ -248,16 +320,23 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
             module: &module,
             entry_point: Some("fs"),
             compilation_options: Default::default(),
-            // What the render paints is premultiplied.
+            // What the render paints is premultiplied, and so is what the programs hand over.
             targets: &[Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::Bgra8Unorm, blend: Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), write_mask: wgpu::ColorWrites::ALL })],
         }),
         multiview_mask: None,
         cache: None,
     });
     let sampler = device.create_sampler(&wgpu::SamplerDescriptor { mag_filter: wgpu::FilterMode::Nearest, min_filter: wgpu::FilterMode::Nearest, ..Default::default() });
+    let layout = pipeline.get_bind_group_layout(0);
+    let mut bound: Vec<Bound> = Vec::new();
+    let mut round = 0u64;
+    // The programs' buffers read so far, and each surface's copied pixels.
+    let mut buffers: std::collections::HashMap<u64, wgpu::Texture> = Default::default();
+    let mut pixels: std::collections::HashMap<u64, wgpu::Texture> = Default::default();
+    let debug = std::env::var_os("PLEAMAR_DEBUG_SCREEN").is_some();
     let (lock, cv) = &*screen;
     loop {
-        let (layers, size, modifiers, fresh, anew) = {
+        let (quads, size, modifiers, fresh, anew, arrived, forget, shows, drew_clients) = {
             let mut st = lock.lock().unwrap();
             while !st.quit && !(st.dirty && st.idle && !st.paused) {
                 st = cv.wait_timeout(st, Duration::from_millis(500)).unwrap().0;
@@ -266,14 +345,83 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
                 return;
             }
             st.dirty = false;
-            let order = in_order(&st.layers);
-            let layers: Vec<(wgpu::Texture, [i32; 4])> = order.iter().filter_map(|k| st.layers[*k].latest.clone().map(|t| (t, st.layers[*k].rect))).collect();
-            if std::env::var_os("PLEAMAR_DEBUG_SCREEN").is_some() {
-                eprintln!("screen · {}: {:?}", st.name, layers.iter().map(|(t, r)| (r, t.size().width, t.size().height)).collect::<Vec<_>>());
+            let mut quads: Vec<(Source, [i32; 4], bool)> = Vec::new();
+            let mut arrived: Vec<(u64, Option<u64>, (u32, u32), PieceContent)> = Vec::new();
+            let mut shows: Vec<u64> = Vec::new();
+            let order = stacked(&st);
+            for item in &order {
+                match item {
+                    Item::Scene(k) => {
+                        let l = &st.layers[*k];
+                        if let Some(t) = &l.latest {
+                            quads.push((Source::Texture(t.clone()), l.rect, false));
+                        }
+                    }
+                    Item::Client(k) => {
+                        let c = &st.clients[*k];
+                        for p in &c.pieces {
+                            let r = [c.rect[0] + p.at.0, c.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32];
+                            let source = match p.buffer {
+                                Some(b) => Source::Buffer(b),
+                                None => Source::Pixels(p.key),
+                            };
+                            quads.push((source, r, p.opaque));
+                        }
+                    }
+                }
+            }
+            for c in &mut st.clients {
+                for p in &mut c.pieces {
+                    if let Some(content) = p.content.take() {
+                        arrived.push((p.key, p.buffer, p.size, content));
+                    }
+                    shows.extend(p.buffer);
+                }
+            }
+            if debug {
+                eprintln!("screen · {}: {} surfaces of the scene, {} of programs, {} new", st.name, st.layers.len(), st.clients.len(), arrived.len());
             }
             let anew = std::mem::take(&mut st.anew);
-            (layers, st.size, st.modifiers.clone(), std::mem::take(&mut st.fresh), anew)
+            let drew_clients = !st.clients.is_empty();
+            (quads, st.size, st.modifiers.clone(), std::mem::take(&mut st.fresh), anew, arrived, std::mem::take(&mut st.forget), shows, drew_clients)
         };
+        for b in forget {
+            buffers.remove(&b);
+        }
+        // What the programs brought since the last time: their buffers on the
+        // card are read where they are; their pixels, copied.
+        for (key, buffer, (w, h), content) in arrived {
+            match content {
+                PieceContent::Dmabuf(d) => {
+                    let Some(b) = buffer else { continue };
+                    if buffers.contains_key(&b) {
+                        continue;
+                    }
+                    match pleamar::gpu::Gpu::import_dmabuf(&device, d.fd, (w, h), d.modifier, d.stride, d.offset, wgpu::TextureUses::RESOURCE, wgpu::TextureUsages::TEXTURE_BINDING, wgpu::TextureUses::RESOURCE) {
+                        Ok(t) => {
+                            buffers.insert(b, t);
+                        }
+                        Err(e) => eprintln!("screen · a program's buffer could not be read: {e}"),
+                    }
+                }
+                PieceContent::Pixels(data) => {
+                    if data.len() < (w * h * 4) as usize {
+                        continue;
+                    }
+                    let t = pixels.entry(key).or_insert_with(|| client_texture(&device, (w, h)));
+                    if t.size().width != w || t.size().height != h {
+                        *t = client_texture(&device, (w, h));
+                    }
+                    queue.write_texture(
+                        wgpu::TexelCopyTextureInfo { texture: t, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+                        &data,
+                        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(w * 4), rows_per_image: None },
+                        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                    );
+                }
+                PieceContent::Kept => {}
+            }
+        }
         let Some((which, target)) = output.buffer(&device, &modifiers) else {
             // Nothing to put it together in yet: again as soon as there is.
             let mut st = lock.lock().unwrap();
@@ -285,25 +433,44 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
         };
         let view = target.create_view(&Default::default());
         let mut encoder = device.create_command_encoder(&Default::default());
-        let groups: Vec<wgpu::BindGroup> = layers
-            .iter()
-            .map(|(t, r)| {
-                let (w, h) = (size.0 as f32, size.1 as f32);
-                let rect = [r[0] as f32 / w, r[1] as f32 / h, (r[0] + r[2]) as f32 / w, (r[1] + r[3]) as f32 / h];
-                let uniform = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: 16, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
-                queue.write_buffer(&uniform, 0, bytemuck_f32(&rect));
-                let tv = t.create_view(&Default::default());
-                device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout: &pipeline.get_bind_group_layout(0),
-                    entries: &[
-                        wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&tv) },
-                        wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
-                        wgpu::BindGroupEntry { binding: 2, resource: uniform.as_entire_binding() },
-                    ],
-                })
-            })
-            .collect();
+        round += 1;
+        let mut groups: Vec<usize> = Vec::new();
+        for (source, r, opaque) in &quads {
+            let texture = match source {
+                Source::Texture(t) => t,
+                Source::Buffer(b) => match buffers.get(b) {
+                    Some(t) => t,
+                    None => continue,
+                },
+                Source::Pixels(k) => match pixels.get(k) {
+                    Some(t) => t,
+                    None => continue,
+                },
+            };
+            let (w, h) = (size.0 as f32, size.1 as f32);
+            let uniform = [r[0] as f32 / w, r[1] as f32 / h, (r[0] + r[2]) as f32 / w, (r[1] + r[3]) as f32 / h, if *opaque { 1.0 } else { 0.0 }, 0.0, 0.0, 0.0];
+            let k = match bound.iter().position(|b| b.used != round && &b.texture == texture && b.uniform == uniform) {
+                Some(k) => k,
+                None => {
+                    let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: 32, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+                    queue.write_buffer(&buffer, 0, as_bytes(&uniform));
+                    let tv = texture.create_view(&Default::default());
+                    let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                        label: None,
+                        layout: &layout,
+                        entries: &[
+                            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&tv) },
+                            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
+                            wgpu::BindGroupEntry { binding: 2, resource: buffer.as_entire_binding() },
+                        ],
+                    });
+                    bound.push(Bound { texture: texture.clone(), uniform, group, used: round });
+                    bound.len() - 1
+                }
+            };
+            bound[k].used = round;
+            groups.push(k);
+        }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("screen"),
@@ -319,23 +486,54 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
                 multiview_mask: None,
             });
             pass.set_pipeline(&pipeline);
-            for g in &groups {
-                pass.set_bind_group(0, g, &[]);
+            for k in &groups {
+                pass.set_bind_group(0, &bound[*k].group, &[]);
                 pass.draw(0..4, 0..1);
             }
         }
+        // What has not been shown for a while is not kept (a surface's frames
+        // take turns, so one that was not used this time may be the next).
+        bound.retain(|b| round - b.used < 8);
         let done = queue.submit(Some(encoder.finish()));
         let flying = output.show(which, done, &device, &queue, anew);
-        let mut st = lock.lock().unwrap();
-        if flying {
-            st.idle = false;
-            st.on_flip.extend(fresh);
-        } else {
-            for id in fresh {
-                let _ = to_render.send(ToRender::Frame(id));
+        // The buffers read before and no longer shown go back to their programs
+        // (`show` waited for the card to finish with them).
+        let released: Vec<u64> = {
+            let mut st = lock.lock().unwrap();
+            let gone: Vec<u64> = st.held.iter().copied().filter(|b| !shows.contains(b)).collect();
+            st.held = shows;
+            if flying {
+                st.idle = false;
+                st.on_flip.extend(fresh);
+            } else {
+                for id in fresh {
+                    let _ = to_render.send(ToRender::Frame(id));
+                }
             }
+            gone
+        };
+        buffers.retain(|b, _| !released.contains(b));
+        pixels.retain(|k, _| quads.iter().any(|(s, _, _)| matches!(s, Source::Pixels(p) if p == k)));
+        if !released.is_empty() {
+            layers::tell(ToLayers::Released(released));
+        }
+        if drew_clients {
+            layers::tell(ToLayers::FrameDone);
         }
     }
+}
+
+fn client_texture(device: &wgpu::Device, (w, h): (u32, u32)) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("a program's pixels"),
+        size: wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Bgra8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+        view_formats: &[],
+    })
 }
 
 /// A flip has landed on this monitor: the sheets whose frame it carried may
@@ -350,7 +548,7 @@ pub fn landed(screen: &Screen, to_render: &Sender<ToRender>) {
     cv.notify_all();
 }
 
-fn bytemuck_f32(v: &[f32; 4]) -> &[u8] {
-    // SAFETY: four f32 are sixteen bytes, laid out as the uniform wants them.
-    unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, 16) }
+fn as_bytes(v: &[f32; 8]) -> &[u8] {
+    // SAFETY: eight f32 are thirty-two bytes, laid out as the uniform wants them.
+    unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, 32) }
 }

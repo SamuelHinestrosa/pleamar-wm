@@ -12,11 +12,24 @@
 //! that floods it or stalls does not reach the render; the render does not
 //! wait for it either, it paints the last image it has.
 //!
-//! What it does not do yet: dmabuf (programs that draw with the GPU are
-//! started with Mesa's software GL, which hands over shared memory), XWayland,
-//! and more than one scale.
+//! In a session of its own it is also the desktop's compositor: other
+//! programs' layer-shell surfaces (the wallpaper, Marea) go to the monitors
+//! (see `layers`), and the windows are listed with wlr-foreign-toplevel.
+//!
+//! What it does not do yet: XWayland, and more than one scale.
 
+use crate::layers::{self, ClientLayer, ClientPiece, ToLayers};
 use pleamar::scene::{DmabufPiece, NestEvent, PieceContent, ToNest, ToRender, WindowPiece};
+use smithay::delegate_layer_shell;
+use smithay::reexports::wayland_protocols_wlr::foreign_toplevel::v1::server::{
+    zwlr_foreign_toplevel_handle_v1::{self as toplevel_handle, ZwlrForeignToplevelHandleV1},
+    zwlr_foreign_toplevel_manager_v1::{self as toplevel_manager, ZwlrForeignToplevelManagerV1},
+};
+use smithay::reexports::wayland_server::{DataInit, Dispatch, GlobalDispatch, New};
+use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
+use smithay::wayland::compositor::RectangleKind;
+use smithay::wayland::output::OutputManagerState;
+use smithay::wayland::shell::wlr_layer::{Anchor, KeyboardInteractivity, Layer as ShellLayer, LayerSurface, LayerSurfaceCachedState, WlrLayerShellHandler, WlrLayerShellState};
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::{Buffer, Format, Fourcc, Modifier};
 use smithay::delegate_dmabuf;
@@ -95,6 +108,17 @@ struct Window {
     screen: usize,
 }
 
+/// A program's layer-shell surface (Marea, a bar, a wallpaper): not the
+/// scene's to lay out, but put together by the monitor it asked for.
+struct Panel {
+    layer: LayerSurface,
+    id: u64,
+    monitor: usize,
+    /// The size it was last told.
+    configured: Option<(i32, i32)>,
+    sent: Vec<u64>,
+}
+
 /// Where the programs connect, and whether they can.
 #[derive(Default)]
 struct ClientState {
@@ -120,7 +144,21 @@ struct State {
     _seat: Seat<State>,
     keyboard: KeyboardHandle<State>,
     pointer: PointerHandle<State>,
-    output: Output,
+    /// One per monitor, with its name (`DP-3`); nested, a single one.
+    outputs: Vec<Output>,
+    _output_manager: OutputManagerState,
+    layer_shell: WlrLayerShellState,
+    panels: Vec<Panel>,
+    /// The program's surface the pointer is on, or the one with the keyboard.
+    panel_pointer: Option<u64>,
+    panel_keyboard: Option<u64>,
+    /// Who listens to what windows there are (wlr-foreign-toplevel: Marea's
+    /// «where the focus is», a taskbar), and each window's handle for each.
+    toplevel_managers: Vec<ZwlrForeignToplevelManagerV1>,
+    toplevel_handles: Vec<(usize, ZwlrForeignToplevelHandleV1)>,
+    /// What the session starts, once programs can hand over their frames on
+    /// the card: started before, they would be told to draw in software.
+    autostart: Vec<String>,
     /// One per slot of the scene. A window that finds them all taken waits in `waiting`.
     slots: Vec<Option<Window>>,
     waiting: Vec<ToplevelSurface>,
@@ -209,17 +247,47 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         })
         .map_err(|e| e.to_string())?;
 
+    dh.create_global::<State, ZwlrForeignToplevelManagerV1, _>(3, ());
     let mut seats = SeatState::new();
     let mut seat = seats.new_wl_seat(&dh, "pleamar");
     // The keyboard as the user has it: the layout pleamar's own window was
     // given. If there is none yet, the system's default until it arrives.
     let keyboard = seat.add_keyboard(XkbConfig::default(), 400, 33).map_err(|e| e.to_string())?;
     let pointer = seat.add_pointer();
-    let output = Output::new("pleamar".into(), PhysicalProperties { size: (0, 0).into(), subpixel: Subpixel::Unknown, make: "pleamar".into(), model: "windows".into() });
-    let _global = output.create_global::<State>(&dh);
-    let mode = OutputMode { size: (1280, 800).into(), refresh: 60_000 };
-    output.change_current_state(Some(mode), Some(Transform::Normal), Some(Scale::Integer(1)), Some((0, 0).into()));
-    output.set_preferred(mode);
+    // The monitors, as the session has them; nested, one that is the scene.
+    let monitors = layers::monitors();
+    let outputs: Vec<Output> = if monitors.is_empty() {
+        let output = Output::new("pleamar".into(), PhysicalProperties { size: (0, 0).into(), subpixel: Subpixel::Unknown, make: "pleamar".into(), model: "windows".into() });
+        let mode = OutputMode { size: (1280, 800).into(), refresh: 60_000 };
+        output.change_current_state(Some(mode), Some(Transform::Normal), Some(Scale::Integer(1)), Some((0, 0).into()));
+        output.set_preferred(mode);
+        vec![output]
+    } else {
+        monitors
+            .iter()
+            .map(|m| {
+                let output = Output::new(m.name.clone(), PhysicalProperties { size: (0, 0).into(), subpixel: Subpixel::Unknown, make: "pleamar".into(), model: m.name.clone() });
+                let mode = OutputMode { size: (m.size.0 as i32, m.size.1 as i32).into(), refresh: m.mhz };
+                output.change_current_state(Some(mode), Some(Transform::Normal), Some(Scale::Integer(1)), Some((m.x, 0).into()));
+                output.set_preferred(mode);
+                output
+            })
+            .collect()
+    };
+    for o in &outputs {
+        let _ = o.create_global::<State>(&dh);
+    }
+    // What the session and the monitors tell about the programs' surfaces.
+    let (layers_tx, layers_rx) = channel::channel::<ToLayers>();
+    layers::set_nest(layers_tx);
+    event_loop
+        .handle()
+        .insert_source(layers_rx, |event, _, state: &mut State| {
+            if let ChannelEvent::Msg(m) = event {
+                state.layer_input(m);
+            }
+        })
+        .map_err(|e| e.to_string())?;
 
     let mut state = State {
         compositor: CompositorState::new::<State>(&dh),
@@ -233,7 +301,15 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         _seat: seat,
         keyboard,
         pointer,
-        output,
+        _output_manager: OutputManagerState::new_with_xdg_output::<State>(&dh),
+        layer_shell: WlrLayerShellState::new::<State>(&dh),
+        outputs,
+        panels: Vec::new(),
+        panel_pointer: None,
+        panel_keyboard: None,
+        toplevel_managers: Vec::new(),
+        toplevel_handles: Vec::new(),
+        autostart: Vec::new(),
         slots: (0..max).map(|_| None).collect(),
         waiting: Vec::new(),
         order: Vec::new(),
@@ -266,6 +342,14 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
     println!("windows · programs connect at WAYLAND_DISPLAY={socket}");
     let _ = state.to_render.send(ToRender::Nest(NestEvent::Socket(socket)));
     let _ = ready.send(Some(()));
+    // A session of its own starts what the desktop has (the wallpaper, Marea):
+    // `PLEAMAR_WM_AUTOSTART`, or ~/.config/pleamar-wm/autostart, one command a line.
+    if !layers::monitors().is_empty() {
+        let file = std::env::var("PLEAMAR_WM_AUTOSTART").ok().or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.config/pleamar-wm/autostart")));
+        if let Some(text) = file.as_deref().and_then(|f| std::fs::read_to_string(f).ok()) {
+            state.autostart = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(str::to_owned).collect();
+        }
+    }
 
     // A frame callback nobody answers leaves a program stopped: if the render
     // is not painting —a window that is not on the scene—, they are answered
@@ -275,6 +359,12 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         event_loop.dispatch(Some(Duration::from_millis(100)), &mut state).map_err(|e| e.to_string())?;
         state.popups.cleanup();
         state.compose_dirty();
+        if !state.autostart.is_empty() && (state.dmabuf_global.is_some() || state.start.elapsed() > Duration::from_secs(3)) {
+            for line in std::mem::take(&mut state.autostart) {
+                println!("windows · starting: {line}");
+                state.launch(&line);
+            }
+        }
         if last_done.elapsed() > Duration::from_millis(250) && !state.callbacks.is_empty() {
             state.frame_done();
         }
@@ -309,9 +399,12 @@ impl State {
         let time = self.time();
         match m {
             ToNest::Size(w, h) => {
-                let mode = OutputMode { size: (w.max(1), h.max(1)).into(), refresh: 60_000 };
-                self.output.change_current_state(Some(mode), None, None, None);
-                self.output.set_preferred(mode);
+                // Nested, the output is the scene; with monitors of our own, they are.
+                if layers::monitors().is_empty() {
+                    let mode = OutputMode { size: (w.max(1), h.max(1)).into(), refresh: 60_000 };
+                    self.outputs[0].change_current_state(Some(mode), None, None, None);
+                    self.outputs[0].set_preferred(mode);
+                }
             }
             ToNest::Configure { slot, w, h } => {
                 if self.asked.get(slot) == Some(&Some((w, h))) {
@@ -334,6 +427,7 @@ impl State {
                 let root = win.toplevel.wl_surface().clone();
                 let under = self.surface_under(&root, g, at);
                 self.pointer_on = Some(slot);
+                self.panel_pointer = None;
                 let p = self.pointer.clone();
                 p.motion(self, under.map(|(s, o)| (s, o.to_f64())), &MotionEvent { location: at, serial, time });
                 p.frame(self);
@@ -350,7 +444,10 @@ impl State {
                 // the program is told its popup is done.
                 if down {
                     if let Some(slot) = self.pointer_on {
-                        self.dismiss_popups_not_under(slot);
+                        if let Some(Some(w)) = self.slots.get(slot) {
+                            let root = w.toplevel.wl_surface().clone();
+                            self.dismiss_popups_not_under(&root);
+                        }
                         if self.focus != Some(slot) {
                             self.set_focus(Some(slot));
                         }
@@ -374,6 +471,10 @@ impl State {
             ToNest::Key { code, down } => {
                 if self.focus.is_none() {
                     return;
+                }
+                // The keyboard was on a program's surface: back to the windows.
+                if self.panel_keyboard.take().is_some() {
+                    self.set_focus(self.focus);
                 }
                 // A key that arrives is pleamar's to give, whatever was said about its focus.
                 if !self.host_focus {
@@ -407,7 +508,23 @@ impl State {
             ToNest::Send(slot, screen) => {
                 if let Some(Some(w)) = self.slots.get_mut(slot) {
                     if w.screen != screen {
+                        let (from, to) = (self.outputs.get(w.screen).cloned(), self.outputs.get(screen).cloned());
                         w.screen = screen;
+                        let surface = w.toplevel.wl_surface().clone();
+                        if let (Some(from), Some(to)) = (from, to) {
+                            from.leave(&surface);
+                            to.enter(&surface);
+                            for (_, h) in self.toplevel_handles.iter().filter(|(s, _)| *s == slot) {
+                                let Some(client) = h.client() else { continue };
+                                for o in from.client_outputs(&client) {
+                                    h.output_leave(&o);
+                                }
+                                for o in to.client_outputs(&client) {
+                                    h.output_enter(&o);
+                                }
+                                h.done();
+                            }
+                        }
                         self.tell(NestEvent::Screen(slot, screen));
                     }
                 }
@@ -426,13 +543,7 @@ impl State {
                     Err(e) => eprintln!("windows · no frames on the card: {e}"),
                 }
             }
-            ToNest::Released(numbers) => {
-                for n in numbers {
-                    if let Some(b) = self.lent.remove(&n) {
-                        b.release();
-                    }
-                }
-            }
+            ToNest::Released(numbers) => self.release(numbers),
             ToNest::Quit => self.quit = true,
         }
     }
@@ -445,6 +556,8 @@ impl State {
         // Without X: with DISPLAY a program that prefers X11 would open on the
         // real desktop instead of here.
         c.env_remove("DISPLAY");
+        // Nor Hyprland's: a program that asks it things would get another desktop's answers.
+        c.env_remove("HYPRLAND_INSTANCE_SIGNATURE");
         c.env("GDK_BACKEND", "wayland").env("QT_QPA_PLATFORM", "wayland").env("MOZ_ENABLE_WAYLAND", "1").env("SDL_VIDEODRIVER", "wayland");
         // Programs that draw with the GPU hand over their frames on the card
         // (dmabuf). If the card the scene is painted on cannot read them, with
@@ -491,6 +604,12 @@ impl State {
         k.set_focus(self, target, SERIAL_COUNTER.next_serial());
         if before != self.focus {
             self.tell(NestEvent::Focused(self.focus));
+            for (slot, h) in &self.toplevel_handles {
+                if Some(*slot) == before || Some(*slot) == self.focus {
+                    h.state(activated(Some(*slot) == self.focus));
+                    h.done();
+                }
+            }
         }
     }
 
@@ -507,9 +626,155 @@ impl State {
         hit_tree(root, at, (0, 0))
     }
 
-    fn dismiss_popups_not_under(&mut self, slot: usize) {
-        let Some(Some(win)) = self.slots.get(slot) else { return };
-        let root = win.toplevel.wl_surface().clone();
+    /// A window, to one who listens: a handle of its own, and all it is.
+    fn announce(&mut self, manager: &ZwlrForeignToplevelManagerV1, slot: usize) {
+        let Some(Some(w)) = self.slots.get(slot) else { return };
+        let Some(client) = manager.client() else { return };
+        let Ok(h) = client.create_resource::<ZwlrForeignToplevelHandleV1, _, State>(&self.dh, manager.version(), slot) else { return };
+        manager.toplevel(&h);
+        h.title(w.title.clone());
+        h.app_id(w.app.clone());
+        if let Some(o) = self.outputs.get(w.screen) {
+            for o in o.client_outputs(&client) {
+                h.output_enter(&o);
+            }
+        }
+        h.state(activated(self.focus == Some(slot)));
+        h.done();
+        self.toplevel_handles.push((slot, h));
+    }
+
+    fn release(&mut self, numbers: Vec<u64>) {
+        for n in numbers {
+            if let Some(b) = self.lent.remove(&n) {
+                b.release();
+            }
+        }
+    }
+
+    /// What the session and the monitors say about the programs' surfaces.
+    fn layer_input(&mut self, m: ToLayers) {
+        if std::env::var_os("PLEAMAR_DEBUG_WINDOWS").is_some() && !matches!(m, ToLayers::FrameDone | ToLayers::Released(_)) {
+            eprintln!("windows · {m:?}");
+        }
+        let serial = SERIAL_COUNTER.next_serial();
+        let time = self.time();
+        match m {
+            ToLayers::Pointer { id, x, y } => {
+                let Some(root) = self.panels.iter().find(|p| p.id == id).map(|p| p.layer.wl_surface().clone()) else { return };
+                let at: Point<f64, Logical> = (x, y).into();
+                let under = self.surface_under(&root, [0, 0, 0, 0], at);
+                self.pointer_on = None;
+                self.panel_pointer = Some(id);
+                let p = self.pointer.clone();
+                p.motion(self, under.map(|(s, o)| (s, o.to_f64())), &MotionEvent { location: at, serial, time });
+                p.frame(self);
+            }
+            ToLayers::PointerOut => {
+                if self.panel_pointer.take().is_some() {
+                    let p = self.pointer.clone();
+                    p.motion(self, None, &MotionEvent { location: (0.0, 0.0).into(), serial, time });
+                    p.frame(self);
+                }
+            }
+            ToLayers::Button { code, down } => {
+                if down {
+                    if let Some(root) = self.panel_pointer.and_then(|id| self.panels.iter().find(|p| p.id == id)).map(|p| p.layer.wl_surface().clone()) {
+                        self.dismiss_popups_not_under(&root);
+                    }
+                }
+                let p = self.pointer.clone();
+                let state = if down { smithay::backend::input::ButtonState::Pressed } else { smithay::backend::input::ButtonState::Released };
+                p.button(self, &ButtonEvent { serial, time, button: code, state });
+                p.frame(self);
+            }
+            ToLayers::Wheel(dy) => self.handle(ToNest::Wheel(dy as f64)),
+            ToLayers::Key { id, code, down } => {
+                if self.panel_keyboard != Some(id) {
+                    let Some(surface) = self.panels.iter().find(|p| p.id == id).map(|p| p.layer.wl_surface().clone()) else { return };
+                    self.panel_keyboard = Some(id);
+                    let k = self.keyboard.clone();
+                    k.set_focus(self, Some(surface), serial);
+                }
+                let k = self.keyboard.clone();
+                let state = if down { smithay::backend::input::KeyState::Pressed } else { smithay::backend::input::KeyState::Released };
+                k.input::<(), _>(self, (code + 8).into(), state, serial, time, |_, _, _| FilterResult::Forward);
+            }
+            ToLayers::KeyboardBack => {
+                if self.panel_keyboard.take().is_some() {
+                    self.set_focus(self.focus);
+                }
+            }
+            ToLayers::FrameDone => self.frame_done(),
+            ToLayers::Released(numbers) => self.release(numbers),
+        }
+    }
+
+    fn monitor_size(&self, k: usize) -> (i32, i32) {
+        self.outputs.get(k).and_then(|o| o.current_mode()).map_or((1280, 800), |m| (m.size.w, m.size.h))
+    }
+
+    /// A program's surface is told its size whenever what it asks for changes:
+    /// what it asks, or, where it asks for 0, all the monitor between its edges.
+    fn configure_panel(&mut self, k: usize) {
+        let (mw, mh) = self.monitor_size(self.panels[k].monitor);
+        let p = &mut self.panels[k];
+        let c = with_states(p.layer.wl_surface(), |s| *s.cached_state.get::<LayerSurfaceCachedState>().current());
+        let m = c.margin;
+        let w = if c.size.w == 0 { mw - m.left - m.right } else { c.size.w };
+        let h = if c.size.h == 0 { mh - m.top - m.bottom } else { c.size.h };
+        let want = (w.max(1), h.max(1));
+        if p.configured != Some(want) {
+            p.configured = Some(want);
+            p.layer.with_pending_state(|s| s.size = Some(want.into()));
+            p.layer.send_configure();
+        }
+    }
+
+    /// What a program's surface shows, to its monitor: where, at what level,
+    /// and its pieces (it, its subsurfaces and its menus).
+    fn show_panel(&mut self, k: usize) {
+        let root = self.panels[k].layer.wl_surface().clone();
+        let (mw, mh) = self.monitor_size(self.panels[k].monitor);
+        let c = with_states(&root, |s| *s.cached_state.get::<LayerSurfaceCachedState>().current());
+        let size = content_of(&root, |c| c.size).unwrap_or((0, 0));
+        let sent = self.panels[k].sent.clone();
+        let mut pieces = Vec::new();
+        if size.0 > 0 && size.1 > 0 {
+            panel_pieces(&root, (0, 0), &sent, &mut pieces);
+            for (popup, offset) in PopupManager::popups_for_surface(&root) {
+                let origin = offset - popup.geometry().loc;
+                panel_pieces(popup.wl_surface(), (origin.x, origin.y), &sent, &mut pieces);
+            }
+        }
+        self.panels[k].sent = pieces.iter().map(|p| p.key).collect();
+        let (w, h) = (size.0 as i32, size.1 as i32);
+        let m = c.margin;
+        let (l, r, t, b) = (c.anchor.contains(Anchor::LEFT), c.anchor.contains(Anchor::RIGHT), c.anchor.contains(Anchor::TOP), c.anchor.contains(Anchor::BOTTOM));
+        let x = if l && !r { m.left } else if r && !l { mw - w - m.right } else if l && r { m.left + (mw - m.left - m.right - w) / 2 } else { (mw - w) / 2 };
+        let y = if t && !b { m.top } else if b && !t { mh - h - m.bottom } else if t && b { m.top + (mh - m.top - m.bottom - h) / 2 } else { (mh - h) / 2 };
+        let region = with_states(&root, |s| {
+            s.cached_state.get::<SurfaceAttributes>().current().input_region.as_ref().map(|r| {
+                r.rects.iter().map(|(kind, rect)| (matches!(kind, RectangleKind::Add), [rect.loc.x, rect.loc.y, rect.size.w, rect.size.h])).collect()
+            })
+        });
+        let level = match c.layer {
+            ShellLayer::Background => 0,
+            ShellLayer::Bottom => 1,
+            ShellLayer::Top => 2,
+            ShellLayer::Overlay => 3,
+        };
+        let keyboard = match c.keyboard_interactivity {
+            KeyboardInteractivity::None => 0,
+            KeyboardInteractivity::Exclusive => 1,
+            KeyboardInteractivity::OnDemand => 2,
+        };
+        let id = self.panels[k].id;
+        layers::show(self.panels[k].monitor, ClientLayer { id, level, rect: [x, y, w, h], pieces, region, keyboard });
+    }
+
+    fn dismiss_popups_not_under(&mut self, root: &WlSurface) {
+        let root = root.clone();
         let focused = self.pointer.current_focus();
         for (popup, _) in PopupManager::popups_for_surface(&root) {
             let inside = focused.as_ref().is_some_and(|f| {
@@ -561,11 +826,14 @@ impl State {
                 s.states.set(t);
             }
         });
-        self.output.enter(toplevel.wl_surface());
+        self.outputs[self.on_screen.min(self.outputs.len() - 1)].enter(toplevel.wl_surface());
         self.slots[slot] = Some(Window { toplevel, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen: self.on_screen });
         self.order.push(slot);
         self.tell(NestEvent::Opened { slot, title, app, screen: self.on_screen });
         self.tell(NestEvent::Order(self.order.clone()));
+        for m in self.toplevel_managers.clone() {
+            self.announce(&m, slot);
+        }
         self.set_focus(Some(slot));
     }
 
@@ -574,6 +842,10 @@ impl State {
         let Some(slot) = self.slots.iter().position(|w| w.as_ref().is_some_and(|w| &w.toplevel == toplevel)) else { return };
         self.slots[slot] = None;
         self.order.retain(|s| *s != slot);
+        for (_, h) in self.toplevel_handles.iter().filter(|(s, _)| *s == slot) {
+            h.closed();
+        }
+        self.toplevel_handles.retain(|(s, _)| *s != slot);
         if self.pointer_on == Some(slot) {
             self.pointer_on = None;
         }
@@ -601,6 +873,10 @@ impl State {
                 continue;
             }
             done.push(root.clone());
+            if let Some(k) = self.panels.iter().position(|p| p.layer.wl_surface() == &root) {
+                self.show_panel(k);
+                continue;
+            }
             let Some(slot) = self.window_of(&root) else { continue };
             let Some((w, h)) = content_of(&root, |c| c.size) else { continue };
             if w == 0 || h == 0 {
@@ -682,6 +958,37 @@ fn pieces_of(root: &WlSurface, at: (i32, i32), sent: &[u64], out: &mut Vec<Windo
                 PieceContent::Kept
             };
             out.push(WindowPiece { id: c.key, at: (x + dx, y + dy), size: (c.size.0 as u32, c.size.1 as u32), content });
+        },
+        |_, _, _| true,
+    );
+}
+
+/// A program's surface and its subsurfaces as pieces for its monitor, each at
+/// its place: what it shows if the monitor does not have it yet, and the
+/// buffer on the card it is, if it is one.
+fn panel_pieces(root: &WlSurface, at: (i32, i32), sent: &[u64], out: &mut Vec<ClientPiece>) {
+    with_surface_tree_downward(
+        root,
+        at,
+        |s, states, &(x, y)| {
+            let l = if s != root { states.cached_state.get::<SubsurfaceCachedState>().current().location } else { (0, 0).into() };
+            TraversalAction::DoChildren((x + l.x, y + l.y))
+        },
+        |s, states, &(x, y)| {
+            let l = if s != root { states.cached_state.get::<SubsurfaceCachedState>().current().location } else { (0, 0).into() };
+            let Some(c) = states.data_map.get::<Mutex<Content>>() else { return };
+            let mut c = c.lock().unwrap();
+            if c.size.0 == 0 || c.size.1 == 0 {
+                return;
+            }
+            let fresh = c.changed || !sent.contains(&c.key);
+            c.changed = false;
+            let content = fresh.then(|| match &c.dmabuf {
+                Some((number, d)) => dmabuf_piece(*number, d).map(PieceContent::Dmabuf),
+                None => Some(PieceContent::Pixels(c.data.clone())),
+            });
+            let opaque = c.dmabuf.as_ref().is_some_and(|(_, d)| d.format().code == Fourcc::Xrgb8888);
+            out.push(ClientPiece { key: c.key, at: (x + l.x, y + l.y), size: (c.size.0 as u32, c.size.1 as u32), content: content.flatten(), buffer: c.dmabuf.as_ref().map(|(n, _)| *n), opaque });
         },
         |_, _, _| true,
     );
@@ -808,6 +1115,7 @@ impl CompositorHandler for State {
             (attrs.buffer.take(), std::mem::take(&mut attrs.frame_callbacks))
         });
         self.callbacks.extend(callbacks);
+        let buffer_was_removed = matches!(buffer, Some(BufferAssignment::Removed));
         // Each surface has its number for the render the first time it shows something.
         if !with_states(surface, |s| s.data_map.get::<Mutex<Content>>().is_some()) {
             self.next_number += 1;
@@ -878,8 +1186,16 @@ impl CompositorHandler for State {
         while let Some(p) = get_parent(&root) {
             root = p;
         }
+        // A program's surface: told its size (again, if it asks for another or
+        // it was hidden), and shown.
+        if let Some(k) = self.panels.iter().position(|p| p.layer.wl_surface() == &root) {
+            if surface == &root && buffer_was_removed {
+                self.panels[k].configured = None;
+            }
+            self.configure_panel(k);
+            self.dirty.push(root);
         // A window says nothing until it is answered: the first configure goes on its first commit.
-        if let Some(slot) = self.window_of(&root) {
+        } else if let Some(slot) = self.window_of(&root) {
             let t = self.slots[slot].as_ref().unwrap().toplevel.clone();
             if !t.is_initial_configure_sent() {
                 t.send_configure();
@@ -907,6 +1223,7 @@ impl BufferHandler for State {
         if let Some(n) = self.buffers.remove(&buffer.id()) {
             self.lent.remove(&n);
             self.tell(NestEvent::Forget(vec![n]));
+            layers::forget(&[n]);
         }
     }
 }
@@ -951,6 +1268,10 @@ impl XdgShellHandler for State {
         if let Some(Some(w)) = self.slots.get_mut(slot) {
             w.title = title.clone();
         }
+        for (_, h) in self.toplevel_handles.iter().filter(|(s, _)| *s == slot) {
+            h.title(title.clone());
+            h.done();
+        }
         self.tell(NestEvent::Title(slot, title));
     }
 
@@ -959,6 +1280,10 @@ impl XdgShellHandler for State {
         let app = with_states(surface.wl_surface(), |s| s.data_map.get::<XdgToplevelSurfaceData>().and_then(|d| d.lock().unwrap().app_id.clone())).unwrap_or_default();
         if let Some(Some(w)) = self.slots.get_mut(slot) {
             w.app = app.clone();
+        }
+        for (_, h) in self.toplevel_handles.iter().filter(|(s, _)| *s == slot) {
+            h.app_id(app.clone());
+            h.done();
         }
         self.tell(NestEvent::App(slot, app));
     }
@@ -1044,7 +1369,90 @@ impl DataDeviceHandler for State {
 impl ClientDndGrabHandler for State {}
 impl ServerDndGrabHandler for State {}
 
-impl OutputHandler for State {}
+impl OutputHandler for State {
+    /// A program that lists the windows may bind a monitor after it was told
+    /// of them: the windows on that monitor are said to be there now.
+    fn output_bound(&mut self, output: Output, wl_output: WlOutput) {
+        let Some(k) = self.outputs.iter().position(|o| o == &output) else { return };
+        let Some(client) = wl_output.client() else { return };
+        for (slot, h) in &self.toplevel_handles {
+            let on = self.slots.get(*slot).and_then(Option::as_ref).is_some_and(|w| w.screen == k);
+            if on && h.client().as_ref() == Some(&client) {
+                h.output_enter(&wl_output);
+                h.done();
+            }
+        }
+    }
+}
+
+/// The states of a window as the protocol lists them: activated, or none.
+fn activated(yes: bool) -> Vec<u8> {
+    if yes { (toplevel_handle::State::Activated as u32).to_ne_bytes().to_vec() } else { Vec::new() }
+}
+
+impl GlobalDispatch<ZwlrForeignToplevelManagerV1, ()> for State {
+    fn bind(state: &mut Self, _: &DisplayHandle, _: &Client, resource: New<ZwlrForeignToplevelManagerV1>, _: &(), init: &mut DataInit<'_, Self>) {
+        let manager = init.init(resource, ());
+        let open: Vec<usize> = state.order.clone();
+        for slot in open {
+            state.announce(&manager, slot);
+        }
+        state.toplevel_managers.push(manager);
+    }
+}
+
+impl Dispatch<ZwlrForeignToplevelManagerV1, ()> for State {
+    fn request(state: &mut Self, _: &Client, manager: &ZwlrForeignToplevelManagerV1, request: toplevel_manager::Request, _: &(), _: &DisplayHandle, _: &mut DataInit<'_, Self>) {
+        if let toplevel_manager::Request::Stop = request {
+            state.toplevel_managers.retain(|m| m != manager);
+            manager.finished();
+        }
+    }
+}
+
+/// What one who lists the windows may ask of one: the keyboard, or to close it.
+impl Dispatch<ZwlrForeignToplevelHandleV1, usize> for State {
+    fn request(state: &mut Self, _: &Client, handle: &ZwlrForeignToplevelHandleV1, request: toplevel_handle::Request, slot: &usize, _: &DisplayHandle, _: &mut DataInit<'_, Self>) {
+        match request {
+            toplevel_handle::Request::Activate { .. } => state.set_focus(Some(*slot)),
+            toplevel_handle::Request::Close => {
+                if let Some(Some(w)) = state.slots.get(*slot) {
+                    w.toplevel.send_close();
+                }
+            }
+            toplevel_handle::Request::Destroy => state.toplevel_handles.retain(|(_, h)| h != handle),
+            _ => {}
+        }
+    }
+}
+
+impl WlrLayerShellHandler for State {
+    fn shell_state(&mut self) -> &mut WlrLayerShellState {
+        &mut self.layer_shell
+    }
+
+    /// On the monitor it asks for; if it asks for none, the one the pointer is on.
+    fn new_layer_surface(&mut self, surface: LayerSurface, output: Option<WlOutput>, _: ShellLayer, namespace: String) {
+        let monitor = output.as_ref().and_then(|o| self.outputs.iter().position(|x| x.owns(o))).unwrap_or(self.on_screen).min(self.outputs.len() - 1);
+        self.next_number += 1;
+        self.outputs[monitor].enter(surface.wl_surface());
+        println!("windows · '{namespace}' on {}", self.outputs[monitor].name());
+        self.panels.push(Panel { layer: surface, id: self.next_number, monitor, configured: None, sent: Vec::new() });
+    }
+
+    fn layer_destroyed(&mut self, surface: LayerSurface) {
+        let Some(k) = self.panels.iter().position(|p| p.layer.wl_surface() == surface.wl_surface()) else { return };
+        let p = self.panels.remove(k);
+        layers::hide(p.id);
+        if self.panel_pointer == Some(p.id) {
+            self.panel_pointer = None;
+        }
+        if self.panel_keyboard == Some(p.id) {
+            self.panel_keyboard = None;
+            self.set_focus(self.focus);
+        }
+    }
+}
 impl TabletSeatHandler for State {}
 
 delegate_compositor!(State);
@@ -1056,3 +1464,4 @@ delegate_data_device!(State);
 delegate_output!(State);
 delegate_cursor_shape!(State);
 delegate_dmabuf!(State);
+delegate_layer_shell!(State);

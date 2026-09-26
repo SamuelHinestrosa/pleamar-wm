@@ -2,7 +2,8 @@
 # pleamar-wm as a session of its own. From a TTY of its own (Ctrl+Alt+F3, log
 # in there), not from inside another desktop:
 #
-#   ./session.sh                        the demo window manager
+#   ./session.sh                        the demo window manager, with the
+#                                       wallpaper and Marea (see autostart)
 #   ./session.sh --seconds 45           ...and it leaves by itself after 45 s
 #   ./session.sh other.plm [options]    another scene
 #
@@ -23,6 +24,17 @@ order="$dir_state/monitors"
 if [ -z "$PLEAMAR_MONITORS" ] && [ -f "$order" ]; then
     PLEAMAR_MONITORS=$(cat "$order")
     export PLEAMAR_MONITORS
+fi
+# What starts with it: yours (~/.config/pleamar-wm/autostart) or the one here:
+# the wallpaper Marea has saved, and Marea.
+if [ -z "$PLEAMAR_WM_AUTOSTART" ]; then
+    PLEAMAR_WM_AUTOSTART="$HOME/.config/pleamar-wm/autostart"
+    [ -f "$PLEAMAR_WM_AUTOSTART" ] || PLEAMAR_WM_AUTOSTART="$here/autostart"
+    export PLEAMAR_WM_AUTOSTART
+fi
+if [ -z "$PLEAMAR_WALLPAPER" ]; then
+    w=$(grep -o '"wallpaper" *: *"[^"]*"' "$HOME/.local/share/pleamar/marea/settings.json" 2> /dev/null | sed 's/.*: *"\(.*\)"/\1/')
+    [ -n "$w" ] && PLEAMAR_WALLPAPER="$w" && export PLEAMAR_WALLPAPER
 fi
 echo "pleamar-wm · its log: $log"
 "$here/target/release/pleamar-wm" session "$scene" "$@" > "$log" 2>&1

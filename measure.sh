@@ -14,7 +14,8 @@ if [ -z "$PLEAMAR_MONITORS" ] && [ -f "$dir/monitors" ]; then
     export PLEAMAR_MONITORS
 fi
 echo "pleamar-wm · measuring for ~40 s; it leaves by itself"
-PLEAMAR_TIMING=1 "$here/target/release/pleamar-wm" session "$here/examples/measure.plm" --seconds 38 > "$log" 2>&1 &
+# Bare, without the wallpaper and Marea: the same thing measured every time.
+PLEAMAR_WM_AUTOSTART=/dev/null PLEAMAR_TIMING=1 "$here/target/release/pleamar-wm" session "$here/examples/measure.plm" --seconds 38 > "$log" 2>&1 &
 sleep 14
 ticks=$(getconf CLK_TCK)
 wm=$(pgrep -x pleamar-wm | head -1)

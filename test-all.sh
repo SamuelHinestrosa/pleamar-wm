@@ -6,11 +6,12 @@
 #
 # and wait about two minutes. Three rounds:
 #   1. the measurement: a terminal redrawing by itself, 40 s;
-#   2. the window manager on both monitors, 45 s — play with it if you like:
-#      the buttons above, Alt+Return, Alt+s (to the other monitor), Alt+o;
-#   3. Marea on her own, with no Hyprland: 35 s, her card opens by itself.
-# The Marea running on Hyprland is stopped for round 3 and started again on
-# Hyprland at the end. Everything is written to
+#   2. the whole desktop on both monitors —wallpaper, Marea, the window
+#      manager—, 45 s; play with it if you like: the buttons above,
+#      Alt+Return, Alt+s (to the other monitor), Super+Space, Marea;
+#   3. the same desktop by itself: 35 s, Marea's card opens alone.
+# The Marea running on Hyprland is stopped for rounds 2 and 3 (they start
+# their own) and started again on Hyprland at the end. Everything is written to
 # ~/.local/state/pleamar-wm/test-all.txt, which is shown when it ends.
 # Ctrl+Alt+Backspace ends a round early. `test-all.sh 3` runs only round 3;
 # `test-all.sh 1 3`, rounds 1 and 3.
@@ -50,31 +51,44 @@ countdown 3
 } >> "$report"
 fi
 
-# ── 2 · the window manager ──────────────────────────────────────
+# Rounds 2 and 3 start their own Marea inside the session (autostart): the
+# one running on Hyprland is stopped first and started again at the end.
+was_running=no
+if wants 2 || wants 3; then
+    if "$pleamar" --say marea "get open" > /dev/null 2>&1; then
+        was_running=yes
+        "$pleamar" --say marea quit > /dev/null 2>&1
+        sleep 1.5
+    fi
+fi
+desktop_report() {
+    grep -E "session · (monitor|monitors|the surface)|windows · (starting|'.*' on)" "$state/session.log"
+    echo "frames lost to a busy monitor: $(grep -c 'resource busy' "$state/session.log")"
+    echo "frames on the card that could not be read: $(grep -c 'could not be read' "$state/session.log")"
+    grep -iE "panicked|error|could not" "$state/session.log" | grep -viE "adwaita|libenchant|glfw|gdk" | head -8
+    marea_log="${XDG_STATE_HOME:-$HOME/.local/state}/marea-plm/marea.log"
+    if [ -f "$marea_log" ]; then
+        echo "Marea, inside:"
+        grep -E "^render · surface|panicked|error" "$marea_log" | head -12
+    fi
+}
+
+# ── 2 · the desktop ─────────────────────────────────────────────
 if wants 2; then
-say "2/3 · the window manager on both monitors (45 s): try the buttons above, Alt+Return, Alt+s, Alt+o"
+say "2/3 · the whole desktop (45 s): wallpaper, Marea and the window manager. Try Alt+Return, Alt+s, Super+Space, Marea's card"
 countdown 5
 "$here/session.sh" --seconds 45 > /dev/null 2>&1
 {
     echo
-    echo "── 2 · window manager"
-    grep -E "session · (monitor|monitors|the surface)" "$state/session.log"
-    echo "frames lost to a busy monitor: $(grep -c 'resource busy' "$state/session.log")"
-    echo "frames on the card that could not be read: $(grep -c 'could not be read' "$state/session.log")"
-    grep -iE "panicked|error" "$state/session.log" | grep -viE "adwaita|libenchant|glfw|gdk" | head -5
+    echo "── 2 · desktop"
+    desktop_report
 } >> "$report"
-cp -f "$state/session.log" "$state/test-all-windows.log"
+cp -f "$state/session.log" "$state/test-all-desktop.log"
 fi
 
-# ── 3 · Marea on her own ────────────────────────────────────────
+# ── 3 · the desktop by itself ───────────────────────────────────
 if wants 3; then
-say "3/3 · Marea with no Hyprland (35 s): her card opens by itself"
-was_running=no
-if "$pleamar" --say marea "get open" > /dev/null 2>&1; then
-    was_running=yes
-    "$pleamar" --say marea quit > /dev/null 2>&1
-    sleep 1.5
-fi
+say "3/3 · the desktop by itself (35 s): Marea's card and settings open alone"
 countdown 3
 (
     sleep 6
@@ -86,16 +100,16 @@ countdown 3
     "$pleamar" --say marea "fact open false" > /dev/null 2>&1
 ) &
 opener=$!
-"$here/session.sh" "$marea/marea.plm" --seconds 35 > /dev/null 2>&1
+"$here/session.sh" --seconds 35 > /dev/null 2>&1
 wait "$opener" 2> /dev/null
 {
     echo
-    echo "── 3 · Marea"
-    grep -E "session · (monitor|monitors|the surface)" "$state/session.log"
-    echo "frames lost to a busy monitor: $(grep -c 'resource busy' "$state/session.log")"
-    grep -iE "panicked|error|could not" "$state/session.log" | grep -viE "adwaita|libenchant|glfw|gdk" | head -8
+    echo "── 3 · Marea inside"
+    desktop_report
 } >> "$report"
 cp -f "$state/session.log" "$state/test-all-marea.log"
+[ -f "${XDG_STATE_HOME:-$HOME/.local/state}/marea-plm/marea.log" ] && cp -f "${XDG_STATE_HOME:-$HOME/.local/state}/marea-plm/marea.log" "$state/test-all-marea-inside.log"
+fi
 
 # Marea back on Hyprland, as she was.
 if [ "$was_running" = yes ]; then
@@ -106,7 +120,6 @@ if [ "$was_running" = yes ]; then
         (cd "$marea" && WAYLAND_DISPLAY="$display" HYPRLAND_INSTANCE_SIGNATURE="$signature" setsid nohup ./marea start > /dev/null 2>&1 &)
         echo "Marea started again on Hyprland ($display)" >> "$report"
     fi
-fi
 fi
 
 say "done: back to Hyprland with Ctrl+Alt+F1"

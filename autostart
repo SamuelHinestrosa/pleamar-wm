@@ -1,0 +1,8 @@
+# What pleamar-wm's own session starts with it, one command a line, run with
+# `sh -c` once programs can connect. session.sh uses ~/.config/pleamar-wm/autostart
+# if there is one, and this file otherwise.
+#
+# The wallpaper: the one Marea has saved (session.sh reads it), under everything.
+swaybg -i "${PLEAMAR_WALLPAPER:-/usr/share/wallpapers/cachyos-wallpapers/GreenFeathers.png}" -m fill
+# Marea, as a program of the session (layer-shell), as she is on Hyprland.
+$HOME/Proyectos/marea-plm/marea start

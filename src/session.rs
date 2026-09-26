@@ -10,7 +10,8 @@
 
 use pleamar::scene::{Cursor, Mods, Screens, Surface, ToRender};
 use pleamar::wgpu;
-use crate::screen::{self, LayerFrames, LayerWindow, Output, Screen};
+use crate::layers::{self, MonitorInfo, ToLayers};
+use crate::screen::{self, Hit, LayerFrames, LayerWindow, Output, Screen};
 use pleamar::{NewSheet, Target, View};
 use smithay::backend::drm::DrmDeviceFd;
 use smithay::backend::input::{
@@ -183,6 +184,12 @@ struct State {
     pointer: (f64, f64),
     cursor: Option<gbm::BufferObject<()>>,
     scroll: f64,
+    /// Who has the pointer: the scene, or a program's surface (layer-shell).
+    hit: Hit,
+    /// The program's surface a button was pressed on: it keeps the pointer until it is let go.
+    grab: Option<u64>,
+    /// The program's surface that took the keyboard when clicked.
+    key_client: Option<u64>,
     quit: bool,
 }
 
@@ -345,7 +352,8 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     .map_err(|e| e.to_string())?;
 
     let first = monitors.first().map_or((0.0, 0.0), |m| (m.size.0 as f64 / 2.0, m.size.1 as f64 / 2.0));
-    let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursor: None, scroll: 0.0, quit: false };
+    layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, mhz: m.mhz }, m.screen.clone())).collect());
+    let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursor: None, scroll: 0.0, hit: Hit::Scene(None), grab: None, key_client: None, quit: false };
     state.make_cursor(&gbm);
     state.move_pointer(0.0, 0.0);
     println!("session · running: Ctrl+Alt+Backspace leaves");
@@ -396,8 +404,46 @@ impl State {
             let _ = self.drm.move_cursor(m.crtc, (cx, cy));
         }
         let m = &self.monitors[on];
-        let at = screen::pointer_at(&m.screen.0.lock().unwrap(), (px - m.x as f64, py));
-        let _ = self.to_render.send(ToRender::Pointer(at));
+        let (mx, my) = (px - m.x as f64, py);
+        let hit = {
+            let st = m.screen.0.lock().unwrap();
+            match self.grab {
+                // Held: the one it was pressed on keeps it, wherever it goes.
+                Some(id) => match st.clients.iter().find(|c| c.id == id) {
+                    Some(c) => Hit::Client(id, (mx - c.rect[0] as f64, my - c.rect[1] as f64)),
+                    None => self.hit,
+                },
+                None => screen::pointer_at(&st, (mx, my)),
+            }
+        };
+        self.point(hit);
+    }
+
+    /// The pointer goes to whoever takes it now, and leaves whoever had it.
+    fn point(&mut self, hit: Hit) {
+        match hit {
+            Hit::Scene(at) => {
+                if matches!(self.hit, Hit::Client(..)) {
+                    layers::tell(ToLayers::PointerOut);
+                }
+                let _ = self.to_render.send(ToRender::Pointer(at));
+            }
+            Hit::Client(id, (x, y)) => {
+                if matches!(self.hit, Hit::Scene(Some(_))) {
+                    let _ = self.to_render.send(ToRender::Pointer(None));
+                }
+                layers::tell(ToLayers::Pointer { id, x, y });
+            }
+        }
+        self.hit = hit;
+    }
+
+    /// Where the keys go: a program's surface that takes all of it; else the
+    /// one clicked that takes it on demand; else the scene.
+    fn key_owner(&self) -> Option<u64> {
+        let all = self.monitors.iter().find_map(|m| screen::keyboard_taker(&m.screen.0.lock().unwrap()));
+        let alive = |id: u64| self.monitors.iter().any(|m| m.screen.0.lock().unwrap().clients.iter().any(|c| c.id == id && !c.pieces.is_empty()));
+        all.or(self.key_client.filter(|id| alive(*id)))
     }
 
     /// An arrow for the pointer, on the card's cursor plane: moving the mouse
@@ -503,6 +549,24 @@ impl State {
                 self.move_pointer(dx, dy);
             }
             InputEvent::PointerButton { event } => {
+                let down = event.state() == ButtonState::Pressed;
+                if let Hit::Client(id, _) = self.hit {
+                    if down {
+                        self.grab = Some(id);
+                        let takes = self.monitors.iter().any(|m| screen::takes_keyboard_on_click(&m.screen.0.lock().unwrap(), id));
+                        self.set_key_client(if takes { Some(id) } else { None });
+                    } else {
+                        self.grab = None;
+                    }
+                    layers::tell(ToLayers::Button { code: event.button_code(), down });
+                    if !down {
+                        self.move_pointer(0.0, 0.0);
+                    }
+                    return;
+                }
+                if down {
+                    self.set_key_client(None);
+                }
                 let b = match event.button_code() {
                     0x110 => 0,
                     0x111 => 1,
@@ -524,7 +588,11 @@ impl State {
                     _ => 0.0,
                 };
                 if notches != 0.0 {
-                    let _ = self.to_render.send(ToRender::Wheel(notches as f32));
+                    if matches!(self.hit, Hit::Client(..)) {
+                        layers::tell(ToLayers::Wheel(notches as f32));
+                    } else {
+                        let _ = self.to_render.send(ToRender::Wheel(notches as f32));
+                    }
                 }
             }
             InputEvent::Keyboard { event } => self.key(event.key_code(), event.state() == KeyState::Pressed),
@@ -553,9 +621,24 @@ impl State {
                 }
                 return;
             }
+            if let Some(id) = self.key_owner() {
+                layers::tell(ToLayers::Key { id, code: evdev, down: true });
+                return;
+            }
             let _ = self.to_render.send(ToRender::Key(name, typed, mods, evdev));
         } else {
+            // A key let go goes where it went down; to both, if that is not known.
+            if let Some(id) = self.key_owner() {
+                layers::tell(ToLayers::Key { id, code: evdev, down: false });
+            }
             let _ = self.to_render.send(ToRender::KeyReleased(name, evdev));
         }
+    }
+
+    fn set_key_client(&mut self, id: Option<u64>) {
+        if self.key_client.is_some() && id.is_none() {
+            layers::tell(ToLayers::KeyboardBack);
+        }
+        self.key_client = id;
     }
 }

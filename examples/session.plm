@@ -6,6 +6,7 @@
 //
 //   Ctrl+Alt+Backspace  leave        Ctrl+Alt+F1…F12  another TTY
 //   Alt+s  the window with the keyboard to the other monitor
+//   Super+Space  Marea's search (the wallpaper and Marea start with it: autostart)
 //
 //   Alt+Return  a terminal          Alt+q  close the one with the keyboard
 //   Alt+m       make it the leader  Alt+j / Alt+k  the keyboard to the next / previous
@@ -41,17 +42,15 @@ scene Session {
     follow ov = if(overview, 1, 0)
 
     // ── the desk ──
-    body {
-        gradient: 0, 0 to 0, 940, #12171b, #0a0c0e
-        box { from: 0, 0; size: W, H }
-    }
-    // A light that follows the keyboard: where you are typing is a little warmer.
+    // Nothing: the wallpaper is a program's (swaybg, below everything). Only
+    // a light that follows the keyboard: where you are typing is a little warmer.
     prop lx = 750 ~slow
     prop ly = 470 ~slow
-    body {
-        gradient: radial lx, ly radius 700, #1d2a26, #12171b
-        box { from: 0, 0; size: W, H }
-        opacity: 70%
+    group {
+        blur: 160
+        opacity: 12% * min(win.count, 1)
+        mode: screen
+        ellipse { at: lx, ly; radius: 420; color: #9ed6bd }
     }
 
     // Where the one with the keyboard is in the order of all of them, and how many there are.
@@ -169,13 +168,16 @@ scene Session {
     on press app.1 { launch "gnome-calculator" }
     on press app.2 { launch "gnome-text-editor" }
     on press glance { toggle overview }
-    text "{win.count} of 6 · Alt+s other monitor · Alt+Return terminal · Alt+o at a glance · Alt+j/k keyboard · Alt+m lead · Alt+h/l width · Alt+q close · Ctrl+Alt+Backspace leaves" {
-        at: W - 18, 23; anchor: right center; size: 11; color: ink; opacity: 45%
+    text "{win.count} of 6 · Alt+s other monitor · Alt+Return terminal · Alt+o at a glance · Alt+j/k keyboard · Alt+m lead · Alt+h/l width · Alt+q close · Super+Space search · Ctrl+Alt+Backspace leaves" {
+        // Down in the corner: the top middle is Marea's.
+        at: W - 18, H - 16; anchor: right center; size: 11; color: ink; opacity: 55%
     }
     text "Nothing open here yet: Alt+Return, or a button above." { at: W / 2, H / 2; anchor: center; size: 15; color: ink; opacity: if(pick(screen.index, win.on.0, win.on.1) < 0.5, 45%, 0) }
 
     // ── the keys ──
     on key Alt+Return { launch "kitty" }
+    // Marea's search, as on Hyprland (she runs in the session: see autostart).
+    on key Super+space { launch "$HOME/Proyectos/marea-plm/marea search" }
     on key Alt+q { close win(win.focus) }
     on key Alt+m { promote win(win.focus) }
     on key Alt+o { toggle overview }

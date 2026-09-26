@@ -38,7 +38,20 @@ Every surface of the scene is shown: its own —one copy per monitor with
 `screens: each`— and the named ones, a bar or a corner, each painted in frames
 of its own and put together on the monitor by level and anchor, as
 layer-shell would; the pointer goes to the highest one with a zone under it.
-Marea, whole, runs in it.
+
+Other programs' layer-shell surfaces are put together on the same monitors,
+by level, next to the scene's: `swaybg` paints the wallpaper under
+everything, and Marea runs as she does on Hyprland, as a program of her own —
+each of her surfaces on the monitor it asks for, the pointer where her input
+region says, the keyboard when she asks for it—. Their buffers on the card
+are read where they are, without copying them. The monitors have their real
+names (`DP-3`), and the windows are listed with `wlr-foreign-toplevel`: the
+title, the program, which one has the keyboard and on which monitor — what
+pleamar's `window` service reads, and with it Marea's «follow me».
+
+What starts with the session is in `autostart` (or
+`~/.config/pleamar-wm/autostart`, if you have one): one command a line; by
+default the wallpaper Marea has saved and Marea. Super+Space is her search.
 
 Ctrl+Alt+Backspace leaves; Ctrl+Alt+F1…F12 go to another TTY and back. Its
 log goes to `~/.local/state/pleamar-wm/session.log`, and the end of it is shown
@@ -74,6 +87,7 @@ In the last row the terminal draws 89 frames a second, and pleamar-wm spends
 about 1.2 ms of CPU on each (1.4 ms before): 0.6 of it painting, the rest
 composing the scene and copying the frame on the card.
 
-Not yet: painting only what changed, explicit sync, multi-plane buffers, menus
-beyond their window, XWayland, more than one scale, a session of its own on
-DRM/libinput, layer-shell, screencopy and the portals.
+Not yet: explicit sync, multi-plane buffers, menus beyond their window,
+XWayland, more than one scale, exclusive zones, session-lock, screencopy (and
+with it the frosted glass behind Marea's card), plugging monitors in while it
+runs, and the portals.
