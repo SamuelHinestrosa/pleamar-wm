@@ -45,6 +45,7 @@ scene Session {
     fact dragging = -1                   // the window being carried by its title bar
     fact grab.x = 0                      // where it was taken from, from its corner
     fact grab.y = 0
+    fact over = -1                       // the window under the one carried
     fact landing = -1                    // let go on the other monitor, and which
     fact landing.to = 0
     // The mouse on the whole desktop: which monitor, and where on it. Each
@@ -78,28 +79,75 @@ scene Session {
     let focus_at = (win.order.1 == win.focus) + 2 * (win.order.2 == win.focus) + 3 * (win.order.3 == win.focus) + 4 * (win.order.4 == win.focus) + 5 * (win.order.5 == win.focus)
     let all = max(win.count, 1)
 
+    // ── carrying a window: how the others would be if it were let go here ──
+    // Its monitor and place; each window's turn in the order of all of them.
+    let dsc = pick(max(dragging, 0), win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen)
+    let dplace = max(pick(max(dragging, 0), win.0.place, win.1.place, win.2.place, win.3.place, win.4.place, win.5.place), 0)
+    let ord.0 = 1 * (win.order.1 == 0) + 2 * (win.order.2 == 0) + 3 * (win.order.3 == 0) + 4 * (win.order.4 == 0) + 5 * (win.order.5 == 0)
+    let ord.1 = 1 * (win.order.1 == 1) + 2 * (win.order.2 == 1) + 3 * (win.order.3 == 1) + 4 * (win.order.4 == 1) + 5 * (win.order.5 == 1)
+    let ord.2 = 1 * (win.order.1 == 2) + 2 * (win.order.2 == 2) + 3 * (win.order.3 == 2) + 4 * (win.order.4 == 2) + 5 * (win.order.5 == 2)
+    let ord.3 = 1 * (win.order.1 == 3) + 2 * (win.order.2 == 3) + 3 * (win.order.3 == 3) + 4 * (win.order.4 == 3) + 5 * (win.order.5 == 3)
+    let ord.4 = 1 * (win.order.1 == 4) + 2 * (win.order.2 == 4) + 3 * (win.order.3 == 4) + 4 * (win.order.4 == 4) + 5 * (win.order.5 == 4)
+    let ord.5 = 1 * (win.order.1 == 5) + 2 * (win.order.2 == 5) + 3 * (win.order.3 == 5) + 4 * (win.order.4 == 5) + 5 * (win.order.5 == 5)
+    let ordD = pick(max(dragging, 0), ord.0, ord.1, ord.2, ord.3, ord.4, ord.5)
+    // Over the other monitor it would go there: there they make room for it,
+    // and on its own the rest close up. Its turn there is its turn in the order.
+    let crossing = dragging >= 0 and mon != dsc
+    let landing.place = (win.0.open and win.0.screen == mon and ord.0 < ordD) + (win.1.open and win.1.screen == mon and ord.1 < ordD) + (win.2.open and win.2.screen == mon and ord.2 < ordD) + (win.3.open and win.3.screen == mon and ord.3 < ordD) + (win.4.open and win.4.screen == mon and ord.4 < ordD) + (win.5.open and win.5.screen == mon and ord.5 < ordD)
+    let landing.n = pick(mon, win.on.0, win.on.1) + 1
+
     repeat i in 0..6 {
         // A window is laid out on its own monitor: how big that one is and how
         // many windows share it. Each copy of the scene draws only its own.
         let sc = win.$i.screen
         let here = win.$i.open and sc == screen.index
+        let n = max(pick(sc, win.on.0, win.on.1), 1)
+        // ── where it goes: the leader on the left, the rest stacked on the right ──
+        let p = max(win.$i.place, 0)
         let Ws = pick(sc, screen.0.width, screen.1.width)
         let Hs = pick(sc, screen.0.height, screen.1.height)
-        let n = max(pick(sc, win.on.0, win.on.1), 1)
         let areah = Hs - bar - gap
         let lead.w = if(n < 1.5, Ws - 2 * gap, (Ws - 3 * gap) * ratio)
         let stack.h = (areah - (n - 2) * gap) / max(n - 1, 1)
+        let tx = if(p < 0.5, gap, 2 * gap + lead.w)
+        let ty = if(p < 0.5, bar, bar + (p - 1) * (stack.h + gap))
+        let tw = if(p < 0.5, lead.w, Ws - 3 * gap - lead.w)
+        let th = if(p < 0.5, areah, stack.h)
+        // Under the mouse while another is carried —measured on where it is,
+        // not where it is shown moving aside—: it would change places with it.
+        let under = dragging >= 0 and dragging != i and win.$i.open and sc == mon and mouse.x >= tx and mouse.x < tx + tw and mouse.y >= ty and mouse.y < ty + th
+        on change under {
+            over = if(under, i, if(over == i, -1, over))
+        }
+        // ── where it is shown going, while one is carried ──
+        let ord.me = pick(i, ord.0, ord.1, ord.2, ord.3, ord.4, ord.5)
+        let swaps = over == i and not crossing and sc == dsc
+        let n.shown = max(if(crossing and sc == mon, n + 1, if(crossing and sc == dsc, n - 1, n)), 1)
+        let p.shown = if(swaps, dplace, if(crossing and sc == mon, p + (ordD < ord.me), if(crossing and sc == dsc, p - (ord.me > ordD), p)))
+        let Wsv = pick(sc, screen.0.width, screen.1.width)
+        let Hsv = pick(sc, screen.0.height, screen.1.height)
+        let areahv = Hsv - bar - gap
+        let lead.wv = if(n.shown < 1.5, Wsv - 2 * gap, (Wsv - 3 * gap) * ratio)
+        let stack.hv = (areahv - (n.shown - 2) * gap) / max(n.shown - 1, 1)
+        let txv = if(p.shown < 0.5, gap, 2 * gap + lead.wv)
+        let tyv = if(p.shown < 0.5, bar, bar + (p.shown - 1) * (stack.hv + gap))
+        let twv = if(p.shown < 0.5, lead.wv, Wsv - 3 * gap - lead.wv)
+        let thv = if(p.shown < 0.5, areahv, stack.hv)
+        // Where the carried one would land on the other monitor.
+        let Wsg = pick(mon, screen.0.width, screen.1.width)
+        let Hsg = pick(mon, screen.0.height, screen.1.height)
+        let areahg = Hsg - bar - gap
+        let lead.wg = if(landing.n < 1.5, Wsg - 2 * gap, (Wsg - 3 * gap) * ratio)
+        let stack.hg = (areahg - (landing.n - 2) * gap) / max(landing.n - 1, 1)
+        let txg = if(landing.place < 0.5, gap, 2 * gap + lead.wg)
+        let tyg = if(landing.place < 0.5, bar, bar + (landing.place - 1) * (stack.hg + gap))
+        let twg = if(landing.place < 0.5, lead.wg, Wsg - 3 * gap - lead.wg)
+        let thg = if(landing.place < 0.5, areahg, stack.hg)
+        // (the grid at a glance)
         let cols = ceil(sqrt(n))
         let rows = ceil(n / cols)
         let cell.w = (Ws - 80 - (cols - 1) * 30) / cols
         let cell.h = (areah - 40 - (rows - 1) * 30) / rows
-        // ── where it goes: the leader on the left, the rest stacked on the right ──
-        let p = max(win.$i.place, 0)
-        let leads = p < 0.5
-        let tx = if(leads, gap, 2 * gap + lead.w)
-        let ty = if(leads, bar, bar + (p - 1) * (stack.h + gap))
-        let tw = if(leads, lead.w, Ws - 3 * gap - lead.w)
-        let th = if(leads, areah, stack.h)
         // ── and at a glance: in a grid, each one keeping its shape ──
         let s = min(cell.w / tw, cell.h / th)
         let ox = 40 + mod(p, cols) * (cell.w + 30) + (cell.w - tw * s) / 2
@@ -109,10 +157,10 @@ scene Session {
         prop y.$i = 12 ~glide
         prop w.$i = 60 ~glide
         prop h.$i = 34 ~glide
-        follow x.$i = if(win.$i.open, if(overview, ox, tx), home.x)
-        follow y.$i = if(win.$i.open, if(overview, oy, ty), home.y)
-        follow w.$i = if(win.$i.open, if(overview, tw * s, tw), 60)
-        follow h.$i = if(win.$i.open, if(overview, th * s, th), 34)
+        follow x.$i = if(win.$i.open, if(overview, ox, txv), home.x)
+        follow y.$i = if(win.$i.open, if(overview, oy, tyv), home.y)
+        follow w.$i = if(win.$i.open, if(overview, tw * s, twv), 60)
+        follow h.$i = if(win.$i.open, if(overview, th * s, thv), 34)
         // Carried with the mouse: how far from its place.
         prop dx.$i = 0 ~glide
         prop dy.$i = 0 ~glide
@@ -125,6 +173,24 @@ scene Session {
         let y = y.$i + dy.$i
         let w = w.$i
         let h = h.$i
+        // A hollow where the carried one would land: where this one is, if it
+        // is under it; its own place, if it is under nothing; its place on the
+        // other monitor, if it is over that one.
+        // (A prop is one for every monitor's copy: what it follows cannot
+        // depend on which copy it is. Which monitor shows it goes in `show`.)
+        let hollow.there = dragging == i and crossing
+        prop hollow.$i = 0 ~140ms
+        follow hollow.$i = if(swaps or (dragging == i and over < 0 and not crossing) or hollow.there, 1, 0)
+        let hx = if(hollow.there, txg, tx)
+        let hy = if(hollow.there, tyg, ty)
+        let hw = if(hollow.there, twg, tw)
+        let hh = if(hollow.there, thg, th)
+        group {
+            show: hollow.$i > 0.01 and if(hollow.there, mon, sc) == screen.index
+            opacity: hollow.$i
+            box { from: hx + 4, hy + 4; size: hw - 8, hh - 8; corner: 12; color: mint; opacity: 7% }
+            box { from: hx + 4, hy + 4; size: hw - 8, hh - 8; corner: 12; stroke: 1.5; color: mint; opacity: 55% }
+        }
         group {
             // Carried, it is drawn over the others, further down.
             show: seen.$i > 0.01 and sc == screen.index and dragging != i and not (landing == i and sc != landing.to)
@@ -166,7 +232,9 @@ scene Session {
         // places; at the edge towards the other monitor, it goes there.
         // (While carried it is drawn at the mouse, further down; its place
         // here waits.)
-        on drag title.$i {
+        // Only the one that started it: another shown moving aside may come
+        // to hold the point pressed.
+        on drag title.$i while dragging < 0 or dragging == i {
             dragging = i
         }
         // Let go, it starts from where it was left —on the monitor it was left
@@ -178,9 +246,8 @@ scene Session {
             dx.$i: 0 after 30ms
             dy.$i: 0 after 30ms
         }
-        repeat j in 0..6 {
-            on release title.$i while j != i and win.$j.open and win.$j.screen == sc and pointer.x >= x.$j and pointer.x < x.$j + w.$j and pointer.y >= y.$j and pointer.y < y.$j + h.$j { swap win.$i with win.$j }
-        }
+        // Let go on another one (the one under it, as the others showed).
+        on release title.$i while over >= 0 and not crossing { swap win.$i with win(over) }
         // Let go on the other monitor (the mouse is off this one), or at the
         // edge that leads to it.
         // Until the compositor says it is there, it stays with the mouse
@@ -199,6 +266,9 @@ scene Session {
             send win.$i to 0
             landing = i
             landing.to = 0
+        }
+        on release title.$i {
+            over = -1
         }
         on press lead_zone.$i { promote win.$i }
         on press close_zone.$i { close win.$i }
