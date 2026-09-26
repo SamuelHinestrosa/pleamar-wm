@@ -1,0 +1,177 @@
+// A window manager written as a scene. Programs open inside it —a terminal, a
+// calculator, a browser— and where they go, how they arrive and how they leave
+// is this file: springs, rules and zones. Save it while they are open and the
+// new layout takes them where it says, without closing anything.
+//
+//   pleamar --scene examples/windows.plm
+//
+//   Alt+Return  a terminal          Alt+q  close the one with the keyboard
+//   Alt+m       make it the leader  Alt+j / Alt+k  the keyboard to the next / previous
+//   Alt+h / l   the leader narrower / wider          Alt+o  everything at a glance
+//
+// What Hyprland does not do: its animations are curves of a fixed length that
+// start again when interrupted, and its layout is code of its own. Here every
+// window rides a spring —change your mind halfway and it turns without a jolt—,
+// the layout is twelve lines anyone can rewrite, and the ones without the
+// keyboard fade to grey instead of just dimming.
+language 0.1
+scene Windows {
+    surface { size: 1500, 940; kind: window; title: "pleamar · windows" }
+    windows win max 6
+
+    let ink = #f5f7f5
+    let mint = #9ed6bd
+    let coral = #ef7a66
+    let bar = 52
+    let gap = 12
+    let tb = 30                          // each window's title bar
+    let W = screen.width
+    let H = screen.height
+    // Where a window comes from and goes back to: the launcher on the left of the bar.
+    let home.x = 24
+    let home.y = 12
+    spring glide = 210, 23
+
+    fact ratio = 0.56                    // the leader's share of the width
+    fact overview = false
+    prop ov = 0 ~calm
+    follow ov = if(overview, 1, 0)
+
+    // ── the desk ──
+    body {
+        gradient: 0, 0 to 0, 940, #12171b, #0a0c0e
+        box { from: 0, 0; size: W, H }
+    }
+    // A light that follows the keyboard: where you are typing is a little warmer.
+    prop lx = 750 ~slow
+    prop ly = 470 ~slow
+    body {
+        gradient: radial lx, ly radius 700, #1d2a26, #12171b
+        box { from: 0, 0; size: W, H }
+        opacity: 70%
+    }
+
+    // What is shared by every slot: how many there are and which one has the keyboard.
+    let n = max(win.count, 1)
+    let focus_place = pick(win.focus, win.0.place, win.1.place, win.2.place, win.3.place, win.4.place, win.5.place)
+    let areah = H - bar - gap
+    let lead.w = if(n < 1.5, W - 2 * gap, (W - 3 * gap) * ratio)
+    let stack.h = (areah - (n - 2) * gap) / max(n - 1, 1)
+    let cols = ceil(sqrt(n))
+    let rows = ceil(n / cols)
+    let cell.w = (W - 80 - (cols - 1) * 30) / cols
+    let cell.h = (areah - 40 - (rows - 1) * 30) / rows
+
+    repeat i in 0..6 {
+        // ── where it goes: the leader on the left, the rest stacked on the right ──
+        let p = max(win.$i.place, 0)
+        let leads = p < 0.5
+        let tx = if(leads, gap, 2 * gap + lead.w)
+        let ty = if(leads, bar, bar + (p - 1) * (stack.h + gap))
+        let tw = if(leads, lead.w, W - 3 * gap - lead.w)
+        let th = if(leads, areah, stack.h)
+        // ── and at a glance: in a grid, each one keeping its shape ──
+        let s = min(cell.w / tw, cell.h / th)
+        let ox = 40 + mod(p, cols) * (cell.w + 30) + (cell.w - tw * s) / 2
+        let oy = bar + 20 + floor(p / cols) * (cell.h + 30) + (cell.h - th * s) / 2
+
+        prop x.$i = 24 ~glide
+        prop y.$i = 12 ~glide
+        prop w.$i = 60 ~glide
+        prop h.$i = 34 ~glide
+        follow x.$i = if(win.$i.open, if(overview, ox, tx), home.x)
+        follow y.$i = if(win.$i.open, if(overview, oy, ty), home.y)
+        follow w.$i = if(win.$i.open, if(overview, tw * s, tw), 60)
+        follow h.$i = if(win.$i.open, if(overview, th * s, th), 34)
+        prop seen.$i = 0 ~300ms
+        follow seen.$i = if(win.$i.open, 1, 0)
+        prop lit.$i = 0 ~220ms
+        follow lit.$i = if(win.$i.focused and not overview, 1, if(overview, 1, 0))
+
+        let x = x.$i
+        let y = y.$i
+        let w = w.$i
+        let h = h.$i
+        group {
+            show: seen.$i > 0.01
+            opacity: seen.$i
+            pivot: x + w / 2, y + h / 2
+            scale: 0.92 + 0.08 * seen.$i + 0.025 * pick.$i.hover * ov
+            body {
+                color: #0c0e10
+                shadow: 0, 14 + 8 * lit.$i, 34, 45% + 20% * lit.$i
+                box { from: x, y; size: w, h; corner: 12 }
+            }
+            // Without the keyboard, grey and a step back.
+            group {
+                saturation: 0.3 + 0.7 * lit.$i
+                brightness: 0.72 + 0.28 * lit.$i
+                clip box { from: x, y; size: w, h; corner: 12 }
+                box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
+                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: tw, th - tb; show: win.$i.open }
+            }
+            // Its two buttons: to the front, and away.
+            ellipse { at: x + w - 40, y + tb / 2; radius: 5.5 + lead_zone.$i.hover; color: mint; opacity: 35% + 50% * lead_zone.$i.hover }
+            ellipse { at: x + w - 20, y + tb / 2; radius: 5.5 + close_zone.$i.hover; color: coral; opacity: 45% + 50% * close_zone.$i.hover }
+            box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: lit.$i * 70% * (1 - ov) }
+        }
+        zone box title.$i { from: x, y; size: w - 56, tb; cursor: pointer; active: win.$i.open and not overview }
+        zone ellipse lead_zone.$i { at: x + w - 40, y + tb / 2; radius: 10; cursor: pointer; active: win.$i.open and not overview }
+        zone ellipse close_zone.$i { at: x + w - 20, y + tb / 2; radius: 10; cursor: pointer; active: win.$i.open and not overview }
+        // At a glance, the whole window is a button: pressing it chooses it.
+        zone box pick.$i { from: x, y; size: w, h; cursor: pointer; active: win.$i.open and overview }
+        on press title.$i { focus win.$i }
+        on press lead_zone.$i { promote win.$i }
+        on press close_zone.$i { close win.$i }
+        on press pick.$i {
+            focus win.$i
+            overview = false
+        }
+        // The light goes where the keyboard is.
+        on change win.$i.focused while win.$i.focused {
+            lx: tx + tw / 2
+            ly: ty + th / 2
+        }
+    }
+
+    // ── the bar ──
+    box { from: 0, 0; size: W, bar - 6; color: #0d1013; opacity: 80% }
+    row {
+        at: 16, 8
+        gap: 8
+        repeat a in 0..3 {
+            group {
+                size: 124, 30
+                box { from: 0, 0; size: 124, 30; corner: 15; color: mix(#1b2024, #22302b, app.$a.hover) }
+                text pick(a, "+  Terminal", "+  Calculator", "+  Text") { at: 62, 15; anchor: center; size: 12; weight: 500; color: ink; opacity: 70% + 30% * app.$a.hover }
+                zone box app.$a { from: 0, 0; size: 124, 30; corner: 15; cursor: pointer }
+            }
+        }
+        group {
+            size: 124, 30
+            box { from: 0, 0; size: 124, 30; corner: 15; color: mix(mix(#1b2024, #22302b, glance.hover), #2b4a40, ov) }
+            text "At a glance" { at: 62, 15; anchor: center; size: 12; weight: 500; color: ink; opacity: 70% + 30% * glance.hover }
+            zone box glance { from: 0, 0; size: 124, 30; corner: 15; cursor: pointer }
+        }
+    }
+    on press app.0 { launch "kitty" }
+    on press app.1 { launch "gnome-calculator" }
+    on press app.2 { launch "gnome-text-editor" }
+    on press glance { toggle overview }
+    text "{win.count} of 6 · Alt+Return terminal · Alt+o at a glance · Alt+j/k keyboard · Alt+m lead · Alt+h/l width · Alt+q close" {
+        at: W - 18, 23; anchor: right center; size: 11; color: ink; opacity: 45%
+    }
+    text "Nothing open yet: Alt+Return, or a button above." { at: W / 2, H / 2; anchor: center; size: 15; color: ink; opacity: if(win.count < 0.5, 45%, 0) }
+
+    // ── the keys ──
+    on key Alt+Return { launch "kitty" }
+    on key Alt+q { close win(win.focus) }
+    on key Alt+m { promote win(win.focus) }
+    on key Alt+o { toggle overview }
+    on key Escape while overview { overview = false }
+    on key Alt+j { focus win(pick(mod(focus_place + 1, n), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)) }
+    on key Alt+k { focus win(pick(mod(focus_place + n - 1, n), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)) }
+    on key Alt+h { ratio = clamp(ratio - 0.05, 0.25, 0.8) }
+    on key Alt+l { ratio = clamp(ratio + 0.05, 0.25, 0.8) }
+}

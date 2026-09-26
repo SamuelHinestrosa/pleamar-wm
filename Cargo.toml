@@ -1,0 +1,12 @@
+[package]
+name = "pleamar-wm"
+version = "0.1.0"
+edition = "2024"
+description = "A window manager written as a pleamar scene: a Wayland compositor that fills a scene's `windows`"
+repository = "https://github.com/k4ditano/pleamar-wm"
+
+[dependencies]
+pleamar = { path = "../pleamar" }
+# Only the protocol side: the painting is pleamar's own, so no backend and no
+# renderer of smithay's.
+smithay = { version = "0.7", default-features = false, features = ["wayland_frontend", "desktop"] }
