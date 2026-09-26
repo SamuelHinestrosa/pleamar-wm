@@ -783,6 +783,9 @@ impl State {
             KeyboardInteractivity::OnDemand => 2,
         };
         let id = self.panels[k].id;
+        if std::env::var_os("PLEAMAR_DEBUG_WINDOWS").is_some() {
+            eprintln!("windows · surface {id}: level {level}, keyboard {keyboard}, {}×{} at {x},{y}", w, h);
+        }
         layers::show(self.panels[k].monitor, ClientLayer { id, level, rect: [x, y, w, h], pieces, region, keyboard });
     }
 

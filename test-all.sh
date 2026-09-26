@@ -113,8 +113,13 @@ cp -f "$state/session.log" "$state/test-all-marea.log"
 [ -f "${XDG_STATE_HOME:-$HOME/.local/state}/marea-plm/marea.log" ] && cp -f "${XDG_STATE_HOME:-$HOME/.local/state}/marea-plm/marea.log" "$state/test-all-marea-inside.log"
 fi
 
-# Marea back on Hyprland, as she was.
+# Marea back on Hyprland, as she was. First the one that ran inside the
+# session has to be gone: while she lives she holds the notifications, and the
+# new one would find them taken and show her made-up examples instead.
 if [ "$was_running" = yes ]; then
+    n=0
+    while pgrep -f "pleamar --scene marea.plm" > /dev/null && [ "$n" -lt 50 ]; do sleep 0.1; n=$((n + 1)); done
+    pkill -f "pleamar --scene marea.plm" 2> /dev/null && sleep 1
     runtime="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
     display=$(ls "$runtime" 2> /dev/null | grep -E '^wayland-[0-9]+$' | head -1)
     signature=$(ls -t "$runtime/hypr" 2> /dev/null | head -1)

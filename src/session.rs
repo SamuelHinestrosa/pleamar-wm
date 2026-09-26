@@ -442,7 +442,8 @@ impl State {
     /// one clicked that takes it on demand; else the scene.
     fn key_owner(&self) -> Option<u64> {
         let all = self.monitors.iter().find_map(|m| screen::keyboard_taker(&m.screen.0.lock().unwrap()));
-        let alive = |id: u64| self.monitors.iter().any(|m| m.screen.0.lock().unwrap().clients.iter().any(|c| c.id == id && !c.pieces.is_empty()));
+        // Only while it still asks for it: a card that closes gives it back.
+        let alive = |id: u64| self.monitors.iter().any(|m| m.screen.0.lock().unwrap().clients.iter().any(|c| c.id == id && c.keyboard != 0 && !c.pieces.is_empty()));
         all.or(self.key_client.filter(|id| alive(*id)))
     }
 
@@ -621,7 +622,12 @@ impl State {
                 }
                 return;
             }
-            if let Some(id) = self.key_owner() {
+            let owner = self.key_owner();
+            // Shortcuts (never what is typed): where each went, to find out why one does nothing.
+            if mods.ctrl || mods.alt || mods.logo {
+                println!("session · key {}{}{}{name} → {}", if mods.ctrl { "Ctrl+" } else { "" }, if mods.alt { "Alt+" } else { "" }, if mods.logo { "Super+" } else { "" }, owner.map_or("the scene".to_owned(), |id| format!("the program's surface {id}")));
+            }
+            if let Some(id) = owner {
                 layers::tell(ToLayers::Key { id, code: evdev, down: true });
                 return;
             }
@@ -642,3 +648,4 @@ impl State {
         self.key_client = id;
     }
 }
+
