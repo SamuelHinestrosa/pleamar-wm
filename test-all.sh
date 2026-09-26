@@ -77,7 +77,7 @@ desktop_report() {
 
 # ── 2 · the desktop ─────────────────────────────────────────────
 if wants 2; then
-say "2/3 · the whole desktop (45 s): wallpaper, Marea and the window manager. Try Super+T, dragging a title bar, Super+Shift+arrows, Super+Space, Marea's card"
+say "2/3 · the whole desktop (45 s): wallpaper, Marea and the window manager. Try Super+T, dragging a title bar, Super+Shift+arrows, Super+Space, Marea's card, Super+L"
 countdown 5
 "$here/session.sh" --seconds 45 > /dev/null 2>&1
 {

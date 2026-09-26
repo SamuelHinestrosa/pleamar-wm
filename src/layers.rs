@@ -47,7 +47,7 @@ pub enum ToLayers {
 /// A program's surface on a monitor: where, at what level, and what it shows.
 pub struct ClientLayer {
     pub id: u64,
-    /// 0 background, 1 bottom, 2 top, 3 overlay.
+    /// 0 background, 1 bottom, 2 top, 3 overlay, 4 the lock screen.
     pub level: u8,
     /// Where it is on the monitor.
     pub rect: [i32; 4],
@@ -58,6 +58,8 @@ pub struct ClientLayer {
     pub region: Option<Vec<(bool, [i32; 4])>>,
     /// 0 never takes the keyboard, 1 takes all of it, 2 takes it when clicked.
     pub keyboard: u8,
+    /// Where what is behind it is shown blurred (ext-background-effect), from its corner.
+    pub blur: Vec<[i32; 4]>,
 }
 
 pub struct ClientPiece {
@@ -111,6 +113,22 @@ pub fn wait_monitors(most: std::time::Duration) -> Vec<MonitorInfo> {
     monitors()
 }
 static NEST: Mutex<Option<channel::Sender<ToLayers>>> = Mutex::new(None);
+/// Whether a lock screen holds the session (ext-session-lock).
+static LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn locked() -> bool {
+    LOCKED.load(std::sync::atomic::Ordering::Relaxed)
+}
+
+/// Locked, the monitors show only the lock screen's surfaces; they are all
+/// put together again at once.
+pub fn set_locked(yes: bool) {
+    LOCKED.store(yes, std::sync::atomic::Ordering::Relaxed);
+    for (_, sc) in MONITORS.lock().unwrap().iter() {
+        sc.0.lock().unwrap().dirty = true;
+        sc.1.notify_all();
+    }
+}
 
 /// The monitors of the session, left to right.
 pub fn register(monitors: Vec<(MonitorInfo, Screen)>) {

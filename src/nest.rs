@@ -21,11 +21,17 @@
 use crate::layers::{self, ClientLayer, ClientPiece, ToLayers};
 use pleamar::scene::{DmabufPiece, NestEvent, PieceContent, ToNest, ToRender, WindowPiece};
 use smithay::delegate_layer_shell;
+use smithay::delegate_session_lock;
+use smithay::wayland::session_lock::{LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker};
 use smithay::reexports::wayland_protocols_wlr::foreign_toplevel::v1::server::{
     zwlr_foreign_toplevel_handle_v1::{self as toplevel_handle, ZwlrForeignToplevelHandleV1},
     zwlr_foreign_toplevel_manager_v1::{self as toplevel_manager, ZwlrForeignToplevelManagerV1},
 };
 use smithay::reexports::wayland_server::{DataInit, Dispatch, GlobalDispatch, New};
+use smithay::reexports::wayland_protocols::ext::background_effect::v1::server::{
+    ext_background_effect_manager_v1::{self as effect_manager, ExtBackgroundEffectManagerV1},
+    ext_background_effect_surface_v1::{self as effect_surface, ExtBackgroundEffectSurfaceV1},
+};
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::wayland::compositor::RectangleKind;
 use smithay::wayland::output::OutputManagerState;
@@ -111,12 +117,28 @@ struct Window {
 /// A program's layer-shell surface (Marea, a bar, a wallpaper): not the
 /// scene's to lay out, but put together by the monitor it asked for.
 struct Panel {
-    layer: LayerSurface,
+    shell: Shell,
     id: u64,
     monitor: usize,
     /// The size it was last told.
     configured: Option<(i32, i32)>,
     sent: Vec<u64>,
+}
+
+/// What a program's surface of its own is: a layer (layer-shell), or the
+/// lock screen of one monitor (ext-session-lock).
+enum Shell {
+    Layer(LayerSurface),
+    Lock(LockSurface),
+}
+
+impl Shell {
+    fn wl_surface(&self) -> &WlSurface {
+        match self {
+            Shell::Layer(l) => l.wl_surface(),
+            Shell::Lock(l) => l.wl_surface(),
+        }
+    }
 }
 
 /// Where the programs connect, and whether they can.
@@ -152,6 +174,7 @@ struct State {
     /// The program's surface the pointer is on, or the one with the keyboard.
     panel_pointer: Option<u64>,
     panel_keyboard: Option<u64>,
+    _session_lock: SessionLockManagerState,
     /// Who listens to what windows there are (wlr-foreign-toplevel: Marea's
     /// «where the focus is», a taskbar), and each window's handle for each.
     toplevel_managers: Vec<ZwlrForeignToplevelManagerV1>,
@@ -248,6 +271,8 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         .map_err(|e| e.to_string())?;
 
     dh.create_global::<State, ZwlrForeignToplevelManagerV1, _>(3, ());
+    // What is behind a program's surface, blurred where it asks (Marea's glass).
+    dh.create_global::<State, ExtBackgroundEffectManagerV1, _>(1, ());
     let mut seats = SeatState::new();
     let mut seat = seats.new_wl_seat(&dh, "pleamar");
     // The keyboard as the user has it: the layout pleamar's own window was
@@ -307,6 +332,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         panels: Vec::new(),
         panel_pointer: None,
         panel_keyboard: None,
+        _session_lock: SessionLockManagerState::new::<State, _>(&dh, |_| true),
         toplevel_managers: Vec::new(),
         toplevel_handles: Vec::new(),
         autostart: Vec::new(),
@@ -674,7 +700,7 @@ impl State {
         let time = self.time();
         match m {
             ToLayers::Pointer { id, x, y } => {
-                let Some(root) = self.panels.iter().find(|p| p.id == id).map(|p| p.layer.wl_surface().clone()) else { return };
+                let Some(root) = self.panels.iter().find(|p| p.id == id).map(|p| p.shell.wl_surface().clone()) else { return };
                 let at: Point<f64, Logical> = (x, y).into();
                 let under = self.surface_under(&root, [0, 0, 0, 0], at);
                 self.pointer_on = None;
@@ -692,7 +718,7 @@ impl State {
             }
             ToLayers::Button { code, down } => {
                 if down {
-                    if let Some(root) = self.panel_pointer.and_then(|id| self.panels.iter().find(|p| p.id == id)).map(|p| p.layer.wl_surface().clone()) {
+                    if let Some(root) = self.panel_pointer.and_then(|id| self.panels.iter().find(|p| p.id == id)).map(|p| p.shell.wl_surface().clone()) {
                         self.dismiss_popups_not_under(&root);
                     }
                 }
@@ -704,7 +730,7 @@ impl State {
             ToLayers::Wheel(dy) => self.handle(ToNest::Wheel(dy as f64)),
             ToLayers::Key { id, code, down } => {
                 if self.panel_keyboard != Some(id) {
-                    let Some(surface) = self.panels.iter().find(|p| p.id == id).map(|p| p.layer.wl_surface().clone()) else { return };
+                    let Some(surface) = self.panels.iter().find(|p| p.id == id).map(|p| p.shell.wl_surface().clone()) else { return };
                     self.panel_keyboard = Some(id);
                     let k = self.keyboard.clone();
                     k.set_focus(self, Some(surface), serial);
@@ -732,22 +758,23 @@ impl State {
     fn configure_panel(&mut self, k: usize) {
         let (mw, mh) = self.monitor_size(self.panels[k].monitor);
         let p = &mut self.panels[k];
-        let c = with_states(p.layer.wl_surface(), |s| *s.cached_state.get::<LayerSurfaceCachedState>().current());
+        let Shell::Layer(layer) = &p.shell else { return };
+        let c = with_states(layer.wl_surface(), |s| *s.cached_state.get::<LayerSurfaceCachedState>().current());
         let m = c.margin;
         let w = if c.size.w == 0 { mw - m.left - m.right } else { c.size.w };
         let h = if c.size.h == 0 { mh - m.top - m.bottom } else { c.size.h };
         let want = (w.max(1), h.max(1));
         if p.configured != Some(want) {
             p.configured = Some(want);
-            p.layer.with_pending_state(|s| s.size = Some(want.into()));
-            p.layer.send_configure();
+            layer.with_pending_state(|s| s.size = Some(want.into()));
+            layer.send_configure();
         }
     }
 
     /// What a program's surface shows, to its monitor: where, at what level,
     /// and its pieces (it, its subsurfaces and its menus).
     fn show_panel(&mut self, k: usize) {
-        let root = self.panels[k].layer.wl_surface().clone();
+        let root = self.panels[k].shell.wl_surface().clone();
         let (mw, mh) = self.monitor_size(self.panels[k].monitor);
         let c = with_states(&root, |s| *s.cached_state.get::<LayerSurfaceCachedState>().current());
         let size = content_of(&root, |c| c.size).unwrap_or((0, 0));
@@ -762,6 +789,12 @@ impl State {
         }
         self.panels[k].sent = pieces.iter().map(|p| p.key).collect();
         let (w, h) = (size.0 as i32, size.1 as i32);
+        let id = self.panels[k].id;
+        // A lock screen: all of its monitor, over everything, with the keyboard.
+        if matches!(self.panels[k].shell, Shell::Lock(_)) {
+            layers::show(self.panels[k].monitor, ClientLayer { id, level: 4, rect: [0, 0, w, h], pieces, region: None, keyboard: 1, blur: Vec::new() });
+            return;
+        }
         let m = c.margin;
         let (l, r, t, b) = (c.anchor.contains(Anchor::LEFT), c.anchor.contains(Anchor::RIGHT), c.anchor.contains(Anchor::TOP), c.anchor.contains(Anchor::BOTTOM));
         let x = if l && !r { m.left } else if r && !l { mw - w - m.right } else if l && r { m.left + (mw - m.left - m.right - w) / 2 } else { (mw - w) / 2 };
@@ -782,11 +815,11 @@ impl State {
             KeyboardInteractivity::Exclusive => 1,
             KeyboardInteractivity::OnDemand => 2,
         };
-        let id = self.panels[k].id;
+        let blur = with_states(&root, |s| s.data_map.get::<Blur>().map(|b| b.0.lock().unwrap().clone())).unwrap_or_default();
         if std::env::var_os("PLEAMAR_DEBUG_WINDOWS").is_some() {
             eprintln!("windows · surface {id}: level {level}, keyboard {keyboard}, {}×{} at {x},{y}", w, h);
         }
-        layers::show(self.panels[k].monitor, ClientLayer { id, level, rect: [x, y, w, h], pieces, region, keyboard });
+        layers::show(self.panels[k].monitor, ClientLayer { id, level, rect: [x, y, w, h], pieces, region, keyboard, blur });
     }
 
     fn dismiss_popups_not_under(&mut self, root: &WlSurface) {
@@ -889,7 +922,7 @@ impl State {
                 continue;
             }
             done.push(root.clone());
-            if let Some(k) = self.panels.iter().position(|p| p.layer.wl_surface() == &root) {
+            if let Some(k) = self.panels.iter().position(|p| p.shell.wl_surface() == &root) {
                 self.show_panel(k);
                 continue;
             }
@@ -1204,7 +1237,7 @@ impl CompositorHandler for State {
         }
         // A program's surface: told its size (again, if it asks for another or
         // it was hidden), and shown.
-        if let Some(k) = self.panels.iter().position(|p| p.layer.wl_surface() == &root) {
+        if let Some(k) = self.panels.iter().position(|p| p.shell.wl_surface() == &root) {
             if surface == &root && buffer_was_removed {
                 self.panels[k].configured = None;
             }
@@ -1401,6 +1434,90 @@ impl OutputHandler for State {
     }
 }
 
+/// The lock screen (Marea's): while it holds, the monitors show only its
+/// surfaces, and the keyboard and the pointer go only to them.
+impl SessionLockHandler for State {
+    fn lock_state(&mut self) -> &mut SessionLockManagerState {
+        &mut self._session_lock
+    }
+
+    /// Nothing else is shown from now on, so it is locked at once.
+    fn lock(&mut self, confirmation: SessionLocker) {
+        println!("windows · the session is locked");
+        layers::set_locked(true);
+        confirmation.lock();
+    }
+
+    fn unlock(&mut self) {
+        println!("windows · the session is unlocked");
+        layers::set_locked(false);
+        let (locks, rest): (Vec<Panel>, Vec<Panel>) = std::mem::take(&mut self.panels).into_iter().partition(|p| matches!(p.shell, Shell::Lock(_)));
+        self.panels = rest;
+        for p in locks {
+            layers::hide(p.id);
+            if self.panel_keyboard == Some(p.id) {
+                self.panel_keyboard = None;
+            }
+            if self.panel_pointer == Some(p.id) {
+                self.panel_pointer = None;
+            }
+        }
+        self.set_focus(self.focus);
+    }
+
+    /// One per monitor, the size of it.
+    fn new_surface(&mut self, surface: LockSurface, output: WlOutput) {
+        let monitor = self.outputs.iter().position(|x| x.owns(&output)).unwrap_or(0);
+        let (w, h) = self.monitor_size(monitor);
+        surface.with_pending_state(|s| s.size = Some((w.max(1) as u32, h.max(1) as u32).into()));
+        surface.send_configure();
+        self.next_number += 1;
+        self.outputs[monitor].enter(surface.wl_surface());
+        self.panels.push(Panel { shell: Shell::Lock(surface), id: self.next_number, monitor, configured: Some((w, h)), sent: Vec::new() });
+    }
+}
+
+/// Where a surface asked for what is behind it to be blurred, from its corner.
+#[derive(Default)]
+struct Blur(Mutex<Vec<[i32; 4]>>);
+
+impl GlobalDispatch<ExtBackgroundEffectManagerV1, ()> for State {
+    fn bind(_: &mut Self, _: &DisplayHandle, _: &Client, resource: New<ExtBackgroundEffectManagerV1>, _: &(), init: &mut DataInit<'_, Self>) {
+        let manager = init.init(resource, ());
+        manager.capabilities(effect_manager::Capability::Blur);
+    }
+}
+
+impl Dispatch<ExtBackgroundEffectManagerV1, ()> for State {
+    fn request(_: &mut Self, _: &Client, _: &ExtBackgroundEffectManagerV1, request: effect_manager::Request, _: &(), _: &DisplayHandle, init: &mut DataInit<'_, Self>) {
+        if let effect_manager::Request::GetBackgroundEffect { id, surface } = request {
+            with_states(&surface, |s| {
+                s.data_map.insert_if_missing_threadsafe(Blur::default);
+            });
+            init.init(id, surface);
+        }
+    }
+}
+
+/// Its blur region: taken as it is said, and shown with the surface's next frame.
+impl Dispatch<ExtBackgroundEffectSurfaceV1, WlSurface> for State {
+    fn request(_: &mut Self, _: &Client, _: &ExtBackgroundEffectSurfaceV1, request: effect_surface::Request, surface: &WlSurface, _: &DisplayHandle, _: &mut DataInit<'_, Self>) {
+        let rects: Vec<[i32; 4]> = match request {
+            effect_surface::Request::SetBlurRegion { region } => region
+                .map(|r| smithay::wayland::compositor::get_region_attributes(&r).rects.iter().filter(|(k, _)| matches!(k, RectangleKind::Add)).map(|(_, r)| [r.loc.x, r.loc.y, r.size.w, r.size.h]).collect())
+                .unwrap_or_default(),
+            _ => Vec::new(),
+        };
+        if surface.alive() {
+            with_states(surface, |s| {
+                if let Some(b) = s.data_map.get::<Blur>() {
+                    *b.0.lock().unwrap() = rects;
+                }
+            });
+        }
+    }
+}
+
 /// The states of a window as the protocol lists them: activated, or none.
 fn activated(yes: bool) -> Vec<u8> {
     if yes { (toplevel_handle::State::Activated as u32).to_ne_bytes().to_vec() } else { Vec::new() }
@@ -1453,11 +1570,11 @@ impl WlrLayerShellHandler for State {
         self.next_number += 1;
         self.outputs[monitor].enter(surface.wl_surface());
         println!("windows · '{namespace}' on {}", self.outputs[monitor].name());
-        self.panels.push(Panel { layer: surface, id: self.next_number, monitor, configured: None, sent: Vec::new() });
+        self.panels.push(Panel { shell: Shell::Layer(surface), id: self.next_number, monitor, configured: None, sent: Vec::new() });
     }
 
     fn layer_destroyed(&mut self, surface: LayerSurface) {
-        let Some(k) = self.panels.iter().position(|p| p.layer.wl_surface() == surface.wl_surface()) else { return };
+        let Some(k) = self.panels.iter().position(|p| p.shell.wl_surface() == surface.wl_surface()) else { return };
         let p = self.panels.remove(k);
         layers::hide(p.id);
         if self.panel_pointer == Some(p.id) {
@@ -1481,3 +1598,4 @@ delegate_output!(State);
 delegate_cursor_shape!(State);
 delegate_dmabuf!(State);
 delegate_layer_shell!(State);
+delegate_session_lock!(State);

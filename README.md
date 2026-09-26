@@ -87,7 +87,11 @@ In the last row the terminal draws 89 frames a second, and pleamar-wm spends
 about 1.2 ms of CPU on each (1.4 ms before): 0.6 of it painting, the rest
 composing the scene and copying the frame on the card.
 
+Glass: what is behind a program's surface is blurred where it asks
+(`ext-background-effect`), which is Marea's card. A lock screen
+(`ext-session-lock`, Super+L for Marea's) leaves nothing else seen or touched
+on any monitor until it lets go.
+
 Not yet: explicit sync, multi-plane buffers, menus beyond their window,
-XWayland, more than one scale, exclusive zones, session-lock, screencopy (and
-with it the frosted glass behind Marea's card), plugging monitors in while it
-runs, and the portals.
+XWayland, more than one scale, exclusive zones, screencopy (Marea's lens skin
+and her screenshots), plugging monitors in while it runs, and the portals.

@@ -623,6 +623,11 @@ impl State {
                 return;
             }
             let owner = self.key_owner();
+            // Locked, a key goes to the lock screen or nowhere: never to the
+            // scene or its windows behind it.
+            if owner.is_none() && layers::locked() {
+                return;
+            }
             // Shortcuts (never what is typed): where each went, to find out why one does nothing.
             if mods.ctrl || mods.alt || mods.logo {
                 println!("session · key {}{}{}{name} → {}", if mods.ctrl { "Ctrl+" } else { "" }, if mods.alt { "Alt+" } else { "" }, if mods.logo { "Super+" } else { "" }, owner.map_or("the scene".to_owned(), |id| format!("the program's surface {id}")));
@@ -636,6 +641,9 @@ impl State {
             // A key let go goes where it went down; to both, if that is not known.
             if let Some(id) = self.key_owner() {
                 layers::tell(ToLayers::Key { id, code: evdev, down: false });
+            }
+            if layers::locked() {
+                return;
             }
             let _ = self.to_render.send(ToRender::KeyReleased(name, evdev));
         }

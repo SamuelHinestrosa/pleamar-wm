@@ -310,7 +310,7 @@ scene Session {
     on press app.1 { launch "gnome-calculator" }
     on press app.2 { launch "gnome-text-editor" }
     on press glance { toggle overview }
-    text "{win.count} of 6 · drag a title bar to move it · Super+T terminal · Super+Q close · Super+arrows keyboard · Super+Shift+arrows move · Super+Tab at a glance · Super+Space search · Ctrl+Alt+Backspace leaves" {
+    text "{win.count} of 6 · drag a title bar to move it · Super+T terminal · Super+Q close · Super+arrows keyboard · Super+Shift+arrows move · Super+Tab at a glance · Super+Space search · Super+L lock · Ctrl+Alt+Backspace leaves" {
         // Down in the corner: the top middle is Marea's.
         at: W - 18, H - 16; anchor: right center; size: 11; color: ink; opacity: 55%
     }
@@ -355,6 +355,8 @@ scene Session {
     on key Super+q { close win(win.focus) }
     // Marea's search (she runs in the session: see autostart).
     on key Super+space { launch "$HOME/Proyectos/marea-plm/marea search" }
+    // Her lock screen (ext-session-lock).
+    on key Super+l { launch "$HOME/Proyectos/marea-plm/marea lock" }
     on key Super+Tab { toggle overview }
     on key Escape while overview { overview = false }
     // The keyboard to the next one, or the one before.
