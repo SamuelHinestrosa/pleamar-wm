@@ -51,9 +51,11 @@ scene Session {
     // a light that follows the keyboard: where you are typing is a little warmer.
     prop lx = 750 ~slow
     prop ly = 470 ~slow
+    // The monitor of the one with the keyboard: only there the light shows.
+    let fscreen = pick(win.focus, win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen)
     group {
         blur: 160
-        opacity: 12% * min(win.count, 1)
+        opacity: 12% * min(win.count, 1) * (fscreen == screen.index) * (win.focus >= 0)
         mode: screen
         ellipse { at: lx, ly; radius: 420; color: #9ed6bd }
     }
@@ -157,8 +159,11 @@ scene Session {
         repeat j in 0..6 {
             on release title.$i while j != i and win.$j.open and win.$j.screen == sc and pointer.x >= x.$j and pointer.x < x.$j + w.$j and pointer.y >= y.$j and pointer.y < y.$j + h.$j { swap win.$i with win.$j }
         }
-        on release title.$i while screen.index == 0 and pointer.x > W - 40 { send win.$i to 1 }
-        on release title.$i while screen.index == 1 and pointer.x < 40 { send win.$i to 0 }
+        // Let go on the other monitor (the mouse is off this one), or at the
+        // edge that leads to it.
+        on release title.$i while pointer.y < 0 or pointer.y > H { send win.$i to 1 - screen.index }
+        on release title.$i while screen.index == 0 and pointer.x > W - 40 and pointer.y >= 0 and pointer.y <= H { send win.$i to 1 }
+        on release title.$i while screen.index == 1 and pointer.x < 40 and pointer.y >= 0 and pointer.y <= H { send win.$i to 0 }
         on press lead_zone.$i { promote win.$i }
         on press close_zone.$i { close win.$i }
         on press pick.$i {
@@ -231,7 +236,6 @@ scene Session {
 
     // ── the keys: Super, as on Hyprland ──
     let fplace = pick(win.focus, win.0.place, win.1.place, win.2.place, win.3.place, win.4.place, win.5.place)
-    let fscreen = pick(win.focus, win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen)
     let next = pick(mod(focus_at + 1, all), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)
     let previous = pick(mod(focus_at + all - 1, all), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)
     on key Super+t { launch "kitty" }
