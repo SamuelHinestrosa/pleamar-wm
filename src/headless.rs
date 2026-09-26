@@ -24,6 +24,7 @@ struct Offscreen {
     started: Instant,
     at: f32,
     written: bool,
+    taken: usize,
     path: String,
     /// Its monitor, once made: what it tells when a flip "lands".
     screen: Arc<std::sync::OnceLock<Screen>>,
@@ -56,10 +57,14 @@ impl Output for Offscreen {
         if std::env::var_os("PLEAMAR_DEBUG_SCREEN").is_some() {
             eprintln!("headless · shown {which} at {:.2} s", self.started.elapsed().as_secs_f32());
         }
-        if !self.written && self.started.elapsed().as_secs_f32() >= self.at {
+        // `PLEAMAR_HEADLESS_FRAMES=n`: n frames in a row from then on, -f0, -f1…
+        let frames = std::env::var("PLEAMAR_HEADLESS_FRAMES").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(1);
+        if self.taken < frames && self.started.elapsed().as_secs_f32() >= self.at {
+            let path = if frames > 1 { self.path.replace(".png", &format!("-f{}.png", self.taken)) } else { self.path.clone() };
+            self.taken += 1;
             self.written = true;
-            match write_png(device, queue, &self.textures[which], self.size, &self.path) {
-                Ok(()) => println!("headless · the frame shown went to {}", self.path),
+            match write_png(device, queue, &self.textures[which], self.size, &path) {
+                Ok(()) => println!("headless · the frame shown went to {path}"),
                 Err(e) => eprintln!("headless · {e}"),
             }
         }
@@ -108,7 +113,7 @@ impl pleamar::Platform for Headless {
             .map(|m| {
                 let path = if m == 0 { png.clone() } else { png.replace(".png", &format!("-{m}.png")) };
                 let own = Arc::new(std::sync::OnceLock::new());
-                let output = Offscreen { size, textures: Vec::new(), shown: None, started: Instant::now(), at, written: false, path, screen: own.clone(), to_render: to_render.clone() };
+                let output = Offscreen { size, textures: Vec::new(), shown: None, started: Instant::now(), at, written: false, taken: 0, path, screen: own.clone(), to_render: to_render.clone() };
                 let sc = screen::screen(format!("HEADLESS-{}", m + 1), size, Box::new(output));
                 let _ = own.set(sc.clone());
                 sc
