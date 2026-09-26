@@ -29,13 +29,23 @@ is the compositor that fills it: the protocol side of
 
 ## Where it is
 
-It runs nested, as a window of your current compositor. It takes windows in
-shared memory (programs that draw with the GPU are started with Mesa's
-software GL), flattens subsurfaces and menus into one image per window, keeps
-menus inside their window, draws the frames itself (server-side decorations),
-passes on cursor shapes and shares a clipboard between its windows.
+It runs nested, as a window of your current compositor. Programs hand over
+their frames on the card (linux-dmabuf, single plane, ARGB/XRGB with the
+card's own modifiers) or in shared memory; each surface —the window, its
+subsurfaces, its menus— is a piece of its own that pleamar draws in place. A
+frame on the card is only taken once the program has finished drawing it, and
+handed back once copied. Menus stay inside their window; the frames are the
+scene's (server-side decorations); cursor shapes and a clipboard between its
+windows.
 
-Not yet: dmabuf, damage-only uploads, XWayland, more than one scale, a session
-of its own on DRM/libinput, layer-shell, screencopy and the portals. Measured
-today, a terminal redrawing 50 times a second costs about 2 cores inside it
-against 0.2 on Hyprland, almost all of it the software GL: dmabuf is next.
+Measured, a terminal redrawing 50 times a second:
+
+| | terminal | pleamar(-wm) | Hyprland |
+| --- | --- | --- | --- |
+| straight on Hyprland | 3.5 % | — | 14.6 % |
+| inside, with software GL | 192 % | 15.6 % | 10.9 % |
+| inside, frames on the card | 5.4 % | 13.1 % | 16.8 % |
+
+Not yet: damage-only repaints, explicit sync, multi-plane buffers, menus
+beyond their window, XWayland, more than one scale, a session of its own on
+DRM/libinput, layer-shell, screencopy and the portals.

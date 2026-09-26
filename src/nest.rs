@@ -16,7 +16,15 @@
 //! started with Mesa's software GL, which hands over shared memory), XWayland,
 //! and more than one scale.
 
-use pleamar::scene::{NestEvent, ToNest, ToRender};
+use pleamar::scene::{DmabufPiece, NestEvent, PieceContent, ToNest, ToRender, WindowPiece};
+use smithay::backend::allocator::dmabuf::Dmabuf;
+use smithay::backend::allocator::{Buffer, Format, Fourcc, Modifier};
+use smithay::delegate_dmabuf;
+use smithay::reexports::calloop::LoopHandle;
+use smithay::reexports::wayland_server::backend::ObjectId;
+use smithay::wayland::compositor::{add_blocker, add_pre_commit_hook};
+use smithay::wayland::dmabuf::{get_dmabuf, DmabufFeedbackBuilder, DmabufGlobal, DmabufHandler, DmabufState, ImportNotifier};
+use std::collections::HashMap;
 use smithay::delegate_compositor;
 use smithay::delegate_cursor_shape;
 use smithay::delegate_data_device;
@@ -61,11 +69,16 @@ use std::sync::mpsc::Sender;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
-/// What a surface last showed: its pixels in BGRA, premultiplied, and their size.
+/// What a surface last showed: its size, and either its pixels (BGRA,
+/// premultiplied) or its buffer on the card. `changed`: the render does not
+/// have it yet. `key` names the surface for the render, frame after frame.
 #[derive(Default)]
-struct Pixels {
+struct Content {
+    key: u64,
     size: (usize, usize),
     data: Vec<u8>,
+    dmabuf: Option<(u64, Dmabuf)>,
+    changed: bool,
 }
 
 struct Window {
@@ -75,6 +88,9 @@ struct Window {
     /// Where the window itself is inside its buffer: a program that draws
     /// its own shadow says where the shadow ends.
     geometry: [i32; 4],
+    /// The surfaces the render was last told about: one that appears again
+    /// is sent whole, even if it has not drawn anything new.
+    sent: Vec<u64>,
 }
 
 /// Where the programs connect, and whether they can.
@@ -121,6 +137,14 @@ struct State {
     dirty: Vec<WlSurface>,
     callbacks: Vec<WlCallback>,
     to_render: Sender<ToRender>,
+    handle: LoopHandle<'static, State>,
+    /// Frames on the card (linux-dmabuf), once the render has said what it can read.
+    dmabuf: DmabufState,
+    dmabuf_global: Option<DmabufGlobal>,
+    /// Each program buffer by number, and the ones lent to the render until it has copied them.
+    buffers: HashMap<ObjectId, u64>,
+    lent: HashMap<u64, WlBuffer>,
+    next_number: u64,
     socket: String,
     start: Instant,
     quit: bool,
@@ -217,6 +241,12 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         dirty: Vec::new(),
         callbacks: Vec::new(),
         to_render,
+        handle: event_loop.handle(),
+        dmabuf: DmabufState::new(),
+        dmabuf_global: None,
+        buffers: HashMap::new(),
+        lent: HashMap::new(),
+        next_number: 0,
         socket: socket.clone(),
         start: Instant::now(),
         quit: false,
@@ -369,6 +399,26 @@ impl State {
             }
             ToNest::Launch(command) => self.launch(&command),
             ToNest::FrameDone => self.frame_done(),
+            ToNest::Gpu { device, formats } => {
+                if self.dmabuf_global.is_some() {
+                    return;
+                }
+                let formats: Vec<Format> = formats.iter().filter_map(|(c, m)| Some(Format { code: Fourcc::try_from(*c).ok()?, modifier: Modifier::from(*m) })).collect();
+                match DmabufFeedbackBuilder::new(device as libc::dev_t, formats).build() {
+                    Ok(feedback) => {
+                        self.dmabuf_global = Some(self.dmabuf.create_global_with_default_feedback::<State>(&self.dh, &feedback));
+                        println!("windows · programs hand over their frames on the card");
+                    }
+                    Err(e) => eprintln!("windows · no frames on the card: {e}"),
+                }
+            }
+            ToNest::Released(numbers) => {
+                for n in numbers {
+                    if let Some(b) = self.lent.remove(&n) {
+                        b.release();
+                    }
+                }
+            }
             ToNest::Quit => self.quit = true,
         }
     }
@@ -382,12 +432,14 @@ impl State {
         // real desktop instead of here.
         c.env_remove("DISPLAY");
         c.env("GDK_BACKEND", "wayland").env("QT_QPA_PLATFORM", "wayland").env("MOZ_ENABLE_WAYLAND", "1").env("SDL_VIDEODRIVER", "wayland");
-        // Programs that draw with the GPU hand over their frames as dmabuf,
-        // which this compositor does not take yet. With Mesa's software GL they
-        // hand over shared memory, which it does.
-        c.env("LIBGL_ALWAYS_SOFTWARE", "1");
-        if std::path::Path::new("/usr/share/glvnd/egl_vendor.d/50_mesa.json").exists() {
-            c.env("__EGL_VENDOR_LIBRARY_FILENAMES", "/usr/share/glvnd/egl_vendor.d/50_mesa.json");
+        // Programs that draw with the GPU hand over their frames on the card
+        // (dmabuf). If the card the scene is painted on cannot read them, with
+        // Mesa's software GL they hand over shared memory instead.
+        if self.dmabuf_global.is_none() {
+            c.env("LIBGL_ALWAYS_SOFTWARE", "1");
+            if std::path::Path::new("/usr/share/glvnd/egl_vendor.d/50_mesa.json").exists() {
+                c.env("__EGL_VENDOR_LIBRARY_FILENAMES", "/usr/share/glvnd/egl_vendor.d/50_mesa.json");
+            }
         }
         c.stdin(std::process::Stdio::null());
         match c.spawn() {
@@ -496,7 +548,7 @@ impl State {
             }
         });
         self.output.enter(toplevel.wl_surface());
-        self.slots[slot] = Some(Window { toplevel, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0] });
+        self.slots[slot] = Some(Window { toplevel, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new() });
         self.order.push(slot);
         self.tell(NestEvent::Opened { slot, title, app });
         self.tell(NestEvent::Order(self.order.clone()));
@@ -525,8 +577,8 @@ impl State {
         }
     }
 
-    /// The image of every window touched in this round: its surface, its
-    /// subsurfaces and its menus, flattened into one.
+    /// What every window touched in this round shows: its surface, its
+    /// subsurfaces and its menus, each one a piece of its own, in order.
     fn compose_dirty(&mut self) {
         let dirty = std::mem::take(&mut self.dirty);
         let mut done: Vec<WlSurface> = Vec::new();
@@ -536,22 +588,24 @@ impl State {
             }
             done.push(root.clone());
             let Some(slot) = self.window_of(&root) else { continue };
-            let Some((w, h)) = pixels_of(&root, |p| p.size) else { continue };
+            let Some((w, h)) = content_of(&root, |c| c.size) else { continue };
             if w == 0 || h == 0 {
                 continue;
             }
-            let mut canvas = vec![0u8; w * h * 4];
-            draw_tree(&root, (0, 0), &mut canvas, (w, h));
             let g = with_states(&root, |s| s.cached_state.get::<SurfaceCachedState>().current().geometry);
             let g = g.map_or([0, 0, w as i32, h as i32], |r| [r.loc.x, r.loc.y, r.size.w, r.size.h]);
+            let sent = self.slots[slot].as_ref().map(|w| w.sent.clone()).unwrap_or_default();
+            let mut pieces = Vec::new();
+            pieces_of(&root, (0, 0), &sent, &mut pieces);
             for (popup, offset) in PopupManager::popups_for_surface(&root) {
                 let origin = Point::<i32, Logical>::from((g[0], g[1])) + offset - popup.geometry().loc;
-                draw_tree(popup.wl_surface(), (origin.x, origin.y), &mut canvas, (w, h));
+                pieces_of(popup.wl_surface(), (origin.x, origin.y), &sent, &mut pieces);
             }
             if let Some(Some(win)) = self.slots.get_mut(slot) {
                 win.geometry = g;
+                win.sent = pieces.iter().map(|p| p.id).collect();
             }
-            self.tell(NestEvent::Image { slot, size: (w as u32, h as u32), geometry: g, pixels: canvas });
+            self.tell(NestEvent::Frame { slot, geometry: g, pieces });
         }
     }
 }
@@ -570,8 +624,67 @@ fn unconstrained(popup: &PopupSurface, positioner: PositionerState) -> smithay::
 }
 
 /// What a surface keeps of its last buffer.
-fn pixels_of<T>(s: &WlSurface, f: impl FnOnce(&Pixels) -> T) -> Option<T> {
-    with_states(s, |st| st.data_map.get::<Mutex<Pixels>>().map(|p| f(&p.lock().unwrap())))
+fn content_of<T>(s: &WlSurface, f: impl FnOnce(&Content) -> T) -> Option<T> {
+    with_states(s, |st| st.data_map.get::<Mutex<Content>>().map(|p| f(&p.lock().unwrap())))
+}
+
+/// A surface and its subsurfaces as pieces, each at its place: with what it
+/// shows if the render does not have it yet, or `Kept`.
+fn pieces_of(root: &WlSurface, at: (i32, i32), sent: &[u64], out: &mut Vec<WindowPiece>) {
+    with_surface_tree_downward(
+        root,
+        at,
+        |s, states, &(x, y)| {
+            let (dx, dy) = if s != root {
+                let l = states.cached_state.get::<SubsurfaceCachedState>().current().location;
+                (l.x, l.y)
+            } else {
+                (0, 0)
+            };
+            TraversalAction::DoChildren((x + dx, y + dy))
+        },
+        |s, states, &(x, y)| {
+            let (dx, dy) = if s != root {
+                let l = states.cached_state.get::<SubsurfaceCachedState>().current().location;
+                (l.x, l.y)
+            } else {
+                (0, 0)
+            };
+            let Some(c) = states.data_map.get::<Mutex<Content>>() else { return };
+            let mut c = c.lock().unwrap();
+            if c.size.0 == 0 || c.size.1 == 0 {
+                return;
+            }
+            let content = if c.changed || !sent.contains(&c.key) {
+                c.changed = false;
+                match &c.dmabuf {
+                    Some((number, d)) => match dmabuf_piece(*number, d) {
+                        Some(p) => PieceContent::Dmabuf(p),
+                        None => PieceContent::Kept,
+                    },
+                    None => PieceContent::Pixels(c.data.clone()),
+                }
+            } else {
+                PieceContent::Kept
+            };
+            out.push(WindowPiece { id: c.key, at: (x + dx, y + dy), size: (c.size.0 as u32, c.size.1 as u32), content });
+        },
+        |_, _, _| true,
+    );
+}
+
+/// What the render needs to read a program's buffer on the card: its own copy
+/// of the handle, and the layout.
+fn dmabuf_piece(number: u64, d: &Dmabuf) -> Option<DmabufPiece> {
+    let fd = d.handles().next()?.try_clone_to_owned().ok()?;
+    Some(DmabufPiece {
+        buffer: number,
+        fd,
+        fourcc: d.format().code as u32,
+        modifier: d.format().modifier.into(),
+        stride: d.strides().next()?,
+        offset: d.offsets().next()?,
+    })
 }
 
 /// The topmost surface of a tree under a point, and where that surface is:
@@ -598,7 +711,7 @@ fn hit_tree(root: &WlSurface, at: Point<f64, Logical>, origin: (i32, i32)) -> Op
                 (0, 0)
             };
             let (x, y) = (x + dx, y + dy);
-            let Some(p) = states.data_map.get::<Mutex<Pixels>>() else { return };
+            let Some(p) = states.data_map.get::<Mutex<Content>>() else { return };
             let (w, h) = p.lock().unwrap().size;
             if at.x >= x as f64 && at.y >= y as f64 && at.x < (x + w as i32) as f64 && at.y < (y + h as i32) as f64 {
                 found = Some((s.clone(), Point::from((x, y))));
@@ -609,65 +722,8 @@ fn hit_tree(root: &WlSurface, at: Point<f64, Logical>, origin: (i32, i32)) -> Op
     found
 }
 
-/// A surface and its subsurfaces, each at its place, over the canvas.
-fn draw_tree(root: &WlSurface, at: (i32, i32), canvas: &mut [u8], size: (usize, usize)) {
-    with_surface_tree_downward(
-        root,
-        at,
-        |s, states, &(x, y)| {
-            let (dx, dy) = if s != root {
-                let l = states.cached_state.get::<SubsurfaceCachedState>().current().location;
-                (l.x, l.y)
-            } else {
-                (0, 0)
-            };
-            TraversalAction::DoChildren((x + dx, y + dy))
-        },
-        |s, states, &(x, y)| {
-            let (dx, dy) = if s != root {
-                let l = states.cached_state.get::<SubsurfaceCachedState>().current().location;
-                (l.x, l.y)
-            } else {
-                (0, 0)
-            };
-            if let Some(p) = states.data_map.get::<Mutex<Pixels>>() {
-                blend(canvas, size, &p.lock().unwrap(), (x + dx, y + dy));
-            }
-        },
-        |_, _, _| true,
-    );
-}
-
-/// Premultiplied «over», clipped to the canvas.
-fn blend(canvas: &mut [u8], (cw, ch): (usize, usize), p: &Pixels, (x, y): (i32, i32)) {
-    let (w, h) = p.size;
-    for row in 0..h as i32 {
-        let cy = y + row;
-        if cy < 0 || cy >= ch as i32 {
-            continue;
-        }
-        let x0 = x.max(0);
-        let x1 = (x + w as i32).min(cw as i32);
-        if x1 <= x0 {
-            continue;
-        }
-        let src = &p.data[(row as usize * w + (x0 - x) as usize) * 4..(row as usize * w + (x1 - x) as usize) * 4];
-        let dst = &mut canvas[(cy as usize * cw + x0 as usize) * 4..(cy as usize * cw + x1 as usize) * 4];
-        for (d, s) in dst.chunks_exact_mut(4).zip(src.chunks_exact(4)) {
-            let a = s[3] as u32;
-            if a == 255 {
-                d.copy_from_slice(s);
-            } else if a > 0 || s[..3] != [0, 0, 0] {
-                for k in 0..4 {
-                    d[k] = (s[k] as u32 + d[k] as u32 * (255 - a) / 255).min(255) as u8;
-                }
-            }
-        }
-    }
-}
-
 /// A buffer's pixels, copied out of the program's memory so it can draw the next one.
-fn read_buffer(buffer: &WlBuffer) -> Option<Pixels> {
+fn read_buffer(buffer: &WlBuffer) -> Option<((usize, usize), Vec<u8>)> {
     with_buffer_contents(buffer, |ptr, len, d| {
         let (w, h, stride) = (d.width.max(0) as usize, d.height.max(0) as usize, d.stride.max(0) as usize);
         let opaque = match d.format {
@@ -690,7 +746,7 @@ fn read_buffer(buffer: &WlBuffer) -> Option<Pixels> {
                 px[3] = 255;
             }
         }
-        Some(Pixels { size: (w, h), data })
+        Some(((w, h), data))
     })
     .ok()
     .flatten()
@@ -707,6 +763,30 @@ impl CompositorHandler for State {
         &client.get_data::<ClientState>().unwrap().compositor
     }
 
+    /// A frame on the card is not taken until the program has finished
+    /// drawing it: the commit waits for the buffer to be ready to read.
+    fn new_surface(&mut self, surface: &WlSurface) {
+        add_pre_commit_hook::<Self, _>(surface, |state, _, surface| {
+            let pending = with_states(surface, |s| {
+                s.cached_state.get::<SurfaceAttributes>().pending().buffer.as_ref().and_then(|a| match a {
+                    BufferAssignment::NewBuffer(b) => get_dmabuf(b).cloned().ok(),
+                    _ => None,
+                })
+            });
+            let Some(d) = pending else { return };
+            let Ok((blocker, source)) = d.generate_blocker(Interest::READ) else { return };
+            let Some(client) = surface.client() else { return };
+            let waiting = state.handle.insert_source(source, move |_, _, state: &mut State| {
+                let dh = state.dh.clone();
+                state.client_compositor_state(&client).blocker_cleared(state, &dh);
+                Ok(())
+            });
+            if waiting.is_ok() {
+                add_blocker(surface, blocker);
+            }
+        });
+    }
+
     fn commit(&mut self, surface: &WlSurface) {
         let (buffer, callbacks) = with_states(surface, |states| {
             let mut guard = states.cached_state.get::<SurfaceAttributes>();
@@ -714,19 +794,67 @@ impl CompositorHandler for State {
             (attrs.buffer.take(), std::mem::take(&mut attrs.frame_callbacks))
         });
         self.callbacks.extend(callbacks);
+        // Each surface has its number for the render the first time it shows something.
+        if !with_states(surface, |s| s.data_map.get::<Mutex<Content>>().is_some()) {
+            self.next_number += 1;
+            let key = self.next_number;
+            with_states(surface, |s| {
+                s.data_map.insert_if_missing_threadsafe(|| Mutex::new(Content { key, ..Content::default() }));
+            });
+        }
         match buffer {
             Some(BufferAssignment::NewBuffer(b)) => {
-                let p = read_buffer(&b);
-                b.release();
-                with_states(surface, |s| {
-                    s.data_map.insert_if_missing_threadsafe(|| Mutex::new(Pixels::default()));
-                    *s.data_map.get::<Mutex<Pixels>>().unwrap().lock().unwrap() = p.unwrap_or_default();
+                let on_card = get_dmabuf(&b).ok().filter(|d| d.num_planes() == 1).cloned();
+                let fresh = match on_card {
+                    // On the card: lent to the render, and handed back once copied.
+                    Some(d) => {
+                        let number = match self.buffers.get(&b.id()) {
+                            Some(n) => *n,
+                            None => {
+                                self.next_number += 1;
+                                self.buffers.insert(b.id(), self.next_number);
+                                self.next_number
+                            }
+                        };
+                        let size = (d.width() as usize, d.height() as usize);
+                        self.lent.insert(number, b);
+                        Some((size, Vec::new(), Some((number, d))))
+                    }
+                    None => {
+                        let p = read_buffer(&b);
+                        b.release();
+                        p.map(|(size, data)| (size, data, None))
+                    }
+                };
+                let before = with_states(surface, |s| {
+                    let mut c = s.data_map.get::<Mutex<Content>>().unwrap().lock().unwrap();
+                    // One that never reached the render goes back now: a newer one takes its place.
+                    let unsent = c.changed.then(|| c.dmabuf.as_ref().map(|(n, _)| *n)).flatten();
+                    match fresh {
+                        Some((size, data, dmabuf)) => {
+                            c.size = size;
+                            c.data = data;
+                            c.dmabuf = dmabuf;
+                        }
+                        None => {
+                            c.size = (0, 0);
+                            c.data = Vec::new();
+                            c.dmabuf = None;
+                        }
+                    }
+                    c.changed = true;
+                    unsent.filter(|n| c.dmabuf.as_ref().is_none_or(|(now, _)| now != n))
                 });
+                if let Some(b) = before.and_then(|n| self.lent.remove(&n)) {
+                    b.release();
+                }
             }
             Some(BufferAssignment::Removed) => with_states(surface, |s| {
-                if let Some(p) = s.data_map.get::<Mutex<Pixels>>() {
-                    *p.lock().unwrap() = Pixels::default();
-                }
+                let mut c = s.data_map.get::<Mutex<Content>>().unwrap().lock().unwrap();
+                c.size = (0, 0);
+                c.data = Vec::new();
+                c.dmabuf = None;
+                c.changed = true;
             }),
             None => {}
         }
@@ -760,7 +888,28 @@ impl CompositorHandler for State {
 }
 
 impl BufferHandler for State {
-    fn buffer_destroyed(&mut self, _: &WlBuffer) {}
+    /// A program's buffer is gone: what the render kept of it goes too.
+    fn buffer_destroyed(&mut self, buffer: &WlBuffer) {
+        if let Some(n) = self.buffers.remove(&buffer.id()) {
+            self.lent.remove(&n);
+            self.tell(NestEvent::Forget(vec![n]));
+        }
+    }
+}
+
+impl DmabufHandler for State {
+    fn dmabuf_state(&mut self) -> &mut DmabufState {
+        &mut self.dmabuf
+    }
+
+    /// Accepted as it is: the render reads it when it is shown. One plane only, for now.
+    fn dmabuf_imported(&mut self, _: &DmabufGlobal, dmabuf: Dmabuf, notifier: ImportNotifier) {
+        if dmabuf.num_planes() == 1 {
+            let _ = notifier.successful::<State>();
+        } else {
+            notifier.failed();
+        }
+    }
 }
 
 impl ShmHandler for State {
@@ -892,3 +1041,4 @@ delegate_seat!(State);
 delegate_data_device!(State);
 delegate_output!(State);
 delegate_cursor_shape!(State);
+delegate_dmabuf!(State);
