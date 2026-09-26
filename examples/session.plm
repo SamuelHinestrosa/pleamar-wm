@@ -45,6 +45,16 @@ scene Session {
     fact dragging = -1                   // the window being carried by its title bar
     fact grab.x = 0                      // where it was taken from, from its corner
     fact grab.y = 0
+    // The mouse on the whole desktop: which monitor, and where on it. Each
+    // copy only knows its own; the one the mouse is over says it.
+    fact mon = 0
+    fact mouse.x = 0
+    fact mouse.y = 0
+    on change pointer.x + pointer.y * 8192 while pointer.x >= 0 and pointer.x < W and pointer.y >= 0 and pointer.y < H {
+        mon = screen.index
+        mouse.x = pointer.x
+        mouse.y = pointer.y
+    }
     prop ov = 0 ~calm
     follow ov = if(overview, 1, 0)
 
@@ -219,17 +229,19 @@ scene Session {
 
     // The window being carried, over all the others: lifted, a little smaller
     // and see-through, so that where it will land shows below it. It goes with
-    // the mouse, on whichever monitor the mouse is: from one to the other too.
+    // the mouse on the whole desktop: each monitor draws its part of it, so
+    // crossing from one to the other it is seen half on each.
     repeat i in 0..6 {
-        let x = pointer.x - grab.x
-        let y = pointer.y - grab.y
+        // Monitor 1 starts where monitor 0 ends.
+        let x = mouse.x + screen.0.width * ((mon > 0.5) - (screen.index > 0.5)) - grab.x
+        let y = mouse.y - grab.y
         let w = w.$i
         let h = h.$i
         group {
-            show: dragging == i and pointer.x >= 0 and pointer.x < W and pointer.y >= 0 and pointer.y < H
+            show: dragging == i
             opacity: 88%
             pivot: x + w / 2, y + h / 2
-            scale: 0.96
+            scale: 1
             body {
                 color: #0c0e10
                 shadow: 0, 26, 50, 60%

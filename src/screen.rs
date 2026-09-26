@@ -25,7 +25,7 @@ pub trait Output: Send {
     fn buffer(&mut self, device: &wgpu::Device, modifiers: &[u64]) -> Option<(usize, wgpu::Texture)>;
     /// Show that one once `done` has been done. Whether a flip is now on its
     /// way —its landing will be told— or it is already shown.
-    fn show(&mut self, which: usize, done: wgpu::SubmissionIndex, device: &wgpu::Device, queue: &wgpu::Queue, anew: bool) -> bool;
+    fn show(&mut self, which: usize, done: pleamar::Sent, device: &wgpu::Device, queue: &wgpu::Queue, anew: bool) -> bool;
 }
 
 /// One surface of the scene on a monitor.
@@ -494,7 +494,8 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
         // What has not been shown for a while is not kept (a surface's frames
         // take turns, so one that was not used this time may be the next).
         bound.retain(|b| round - b.used < 8);
-        let done = queue.submit(Some(encoder.finish()));
+        queue.submit(Some(encoder.finish()));
+        let done = pleamar::Sent::after(&queue);
         let flying = output.show(which, done, &device, &queue, anew);
         // The buffers read before and no longer shown go back to their programs
         // (`show` waited for the card to finish with them).

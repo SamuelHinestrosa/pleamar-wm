@@ -141,9 +141,9 @@ impl Output for DrmOutput {
         (0..self.buffers.len()).find(|k| f.on_screen != Some(*k) && f.pending != Some(*k)).map(|k| (k, self.buffers[k].texture.clone()))
     }
 
-    fn show(&mut self, which: usize, done: wgpu::SubmissionIndex, device: &wgpu::Device, _: &wgpu::Queue, anew: bool) -> bool {
+    fn show(&mut self, which: usize, done: pleamar::Sent, device: &wgpu::Device, _: &wgpu::Queue, anew: bool) -> bool {
         // The monitor shows what is in the buffer when it flips: it has to be put together by then.
-        let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(done), timeout: Some(Duration::from_millis(100)) });
+        done.wait(device, Duration::from_millis(100));
         let mut f = self.flips.lock().unwrap();
         if anew {
             *f = Flips::default();

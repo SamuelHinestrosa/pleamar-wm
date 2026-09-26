@@ -51,8 +51,8 @@ impl Output for Offscreen {
         Some((k, self.textures[k].clone()))
     }
 
-    fn show(&mut self, which: usize, done: wgpu::SubmissionIndex, device: &wgpu::Device, queue: &wgpu::Queue, _: bool) -> bool {
-        let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(done), timeout: Some(Duration::from_millis(200)) });
+    fn show(&mut self, which: usize, done: pleamar::Sent, device: &wgpu::Device, queue: &wgpu::Queue, _: bool) -> bool {
+        done.wait(device, Duration::from_millis(200));
         self.shown = Some(which);
         if std::env::var_os("PLEAMAR_DEBUG_SCREEN").is_some() {
             eprintln!("headless · shown {which} at {:.2} s", self.started.elapsed().as_secs_f32());
@@ -90,9 +90,17 @@ fn write_png(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture
         wgpu::TexelCopyBufferInfo { buffer: &out, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: None } },
         wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
     );
-    let index = queue.submit(Some(encoder.finish()));
-    out.slice(..).map_async(wgpu::MapMode::Read, |_| {});
-    let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(index), timeout: Some(Duration::from_secs(2)) });
+    queue.submit(Some(encoder.finish()));
+    let sent = pleamar::Sent::after(queue);
+    let mapped = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = mapped.clone();
+    out.slice(..).map_async(wgpu::MapMode::Read, move |_| flag.store(true, std::sync::atomic::Ordering::Release));
+    sent.wait(device, Duration::from_secs(2));
+    let start = std::time::Instant::now();
+    while !mapped.load(std::sync::atomic::Ordering::Acquire) && start.elapsed() < Duration::from_secs(2) {
+        let _ = device.poll(wgpu::PollType::Poll);
+        std::thread::sleep(Duration::from_micros(200));
+    }
     let data = out.slice(..).get_mapped_range().map_err(|e| format!("{e:?}"))?;
     let mut rgba = Vec::with_capacity((w * h * 4) as usize);
     for y in 0..h {
