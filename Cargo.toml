@@ -10,4 +10,5 @@ pleamar = { path = "../pleamar" }
 libc = "0.2"
 # Only the protocol side: the painting is pleamar's own, so no backend and no
 # renderer of smithay's.
-smithay = { version = "0.7", default-features = false, features = ["wayland_frontend", "desktop"] }
+smithay = { version = "0.7", default-features = false, features = ["wayland_frontend", "desktop", "backend_drm", "backend_gbm", "backend_libinput", "backend_session_libseat", "backend_udev"] }
+xkbcommon = "0.8"

@@ -22,6 +22,23 @@ cargo build --release
 | Alt+h / Alt+l | the leader narrower / wider |
 | Alt+o | everything at a glance |
 
+## A session of its own
+
+Without a compositor underneath: pleamar-wm takes the monitors and the input
+through the seat (libseat, via logind; no root) and paints each monitor
+straight into buffers of the card that go to the screen with page flips. From
+a TTY of its own —Ctrl+Alt+F3 and log in there, not from inside a desktop—:
+
+```sh
+./session.sh --seconds 45   # the first time: it leaves by itself after 45 s
+./session.sh                # the demo window manager, until Ctrl+Alt+Backspace
+```
+
+Ctrl+Alt+Backspace leaves; Ctrl+Alt+F1…F12 go to another TTY and back. Its
+log goes to `~/.local/state/pleamar-wm/session.log`, and the end of it is shown
+when it leaves. `pleamar-wm probe` tries what the card needs for it —buffers
+for the screen, painted by wgpu and read back— without taking the screen.
+
 The language side —`windows`, `window`, `launch`, `focus`, `close`,
 `promote`— is pleamar's and is documented in its reference (§10.3). This repo
 is the compositor that fills it: the protocol side of

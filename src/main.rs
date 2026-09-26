@@ -4,6 +4,8 @@
 //! pleamar's own.
 
 mod nest;
+mod probe;
+mod session;
 
 fn main() {
     pleamar::provide_windows(|max, to_render| {
@@ -12,5 +14,24 @@ fn main() {
             let _ = tx.send(m);
         }))
     });
-    pleamar::run();
+    // `pleamar-wm session scene.plm [options]`: a session of its own, from a
+    // TTY, without a compositor underneath. Otherwise, pleamar as ever.
+    let mut args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("probe") {
+        if let Err(e) = probe::run() {
+            eprintln!("probe · {e}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if args.first().map(String::as_str) == Some("session") {
+        args.remove(0);
+        let scene = if args.first().is_some_and(|a| !a.starts_with("--")) { args.remove(0) } else { "examples/session.plm".into() };
+        pleamar::provide_platform(Box::new(session::Session));
+        let mut options = vec!["--scene".to_owned(), scene, "--no-hud".to_owned()];
+        options.extend(args);
+        pleamar::run_with(options);
+    } else {
+        pleamar::run();
+    }
 }
