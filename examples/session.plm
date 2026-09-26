@@ -45,6 +45,8 @@ scene Session {
     fact dragging = -1                   // the window being carried by its title bar
     fact grab.x = 0                      // where it was taken from, from its corner
     fact grab.y = 0
+    fact landing = -1                    // let go on the other monitor, and which
+    fact landing.to = 0
     // The mouse on the whole desktop: which monitor, and where on it. Each
     // copy only knows its own; the one the mouse is over says it.
     fact mon = 0
@@ -125,7 +127,7 @@ scene Session {
         let h = h.$i
         group {
             // Carried, it is drawn over the others, further down.
-            show: seen.$i > 0.01 and sc == screen.index and dragging != i
+            show: seen.$i > 0.01 and sc == screen.index and dragging != i and not (landing == i and sc != landing.to)
             opacity: seen.$i
             pivot: x + w / 2, y + h / 2
             scale: 0.92 + 0.08 * seen.$i + 0.025 * pick.$i.hover * ov
@@ -162,28 +164,42 @@ scene Session {
         }
         // Carried by its title bar. Let go on another window, they change
         // places; at the edge towards the other monitor, it goes there.
+        // (While carried it is drawn at the mouse, further down; its place
+        // here waits.)
         on drag title.$i {
             dragging = i
-            dx.$i: drag.dx ~16ms
-            dy.$i: drag.dy ~16ms
         }
+        // Let go, it starts from where it was left —on the monitor it was left
+        // on— and glides to its place from there.
         on release title.$i {
             dragging = -1
-            dx.$i: 0
-            dy.$i: 0
+            dx.$i: mouse.x - grab.x - x.$i ~0ms
+            dy.$i: mouse.y - grab.y - y.$i ~0ms
+            dx.$i: 0 after 30ms
+            dy.$i: 0 after 30ms
         }
         repeat j in 0..6 {
             on release title.$i while j != i and win.$j.open and win.$j.screen == sc and pointer.x >= x.$j and pointer.x < x.$j + w.$j and pointer.y >= y.$j and pointer.y < y.$j + h.$j { swap win.$i with win.$j }
         }
         // Let go on the other monitor (the mouse is off this one), or at the
         // edge that leads to it.
+        // Until the compositor says it is there, it stays with the mouse
+        // (`landing`): not a frame back on the monitor it left.
         on release title.$i while pointer.y < 0 or pointer.y > H {
             send win.$i to 1 - screen.index
-            dx.$i: 0 ~16ms
-            dy.$i: 0 ~16ms
+            landing = i
+            landing.to = 1 - screen.index
         }
-        on release title.$i while screen.index == 0 and pointer.x > W - 40 and pointer.y >= 0 and pointer.y <= H { send win.$i to 1 }
-        on release title.$i while screen.index == 1 and pointer.x < 40 and pointer.y >= 0 and pointer.y <= H { send win.$i to 0 }
+        on release title.$i while screen.index == 0 and pointer.x > W - 40 and pointer.y >= 0 and pointer.y <= H {
+            send win.$i to 1
+            landing = i
+            landing.to = 1
+        }
+        on release title.$i while screen.index == 1 and pointer.x < 40 and pointer.y >= 0 and pointer.y <= H {
+            send win.$i to 0
+            landing = i
+            landing.to = 0
+        }
         on press lead_zone.$i { promote win.$i }
         on press close_zone.$i { close win.$i }
         on press pick.$i {
@@ -238,7 +254,7 @@ scene Session {
         let w = w.$i
         let h = h.$i
         group {
-            show: dragging == i
+            show: dragging == i or (landing == i and win.$i.screen != landing.to)
             opacity: 88%
             pivot: x + w / 2, y + h / 2
             scale: 1
@@ -251,7 +267,7 @@ scene Session {
                 clip box { from: x, y; size: w, h; corner: 12 }
                 box { from: x, y; size: w, tb; color: #1d2b27 }
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); show: dragging == i }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); show: dragging == i or (landing == i and win.$i.screen != landing.to) }
             }
             box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: 80% }
         }
