@@ -94,6 +94,22 @@ impl ClientLayer {
 }
 
 static MONITORS: Mutex<Vec<(MonitorInfo, Screen)>> = Mutex::new(Vec::new());
+/// Whether monitors of our own are coming (a session, or headless): the
+/// compositor inside may start before they are known, and has to wait for them.
+static EXPECTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn expect_monitors() {
+    EXPECTED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// The monitors, waiting a moment for them if they are coming and not here yet.
+pub fn wait_monitors(most: std::time::Duration) -> Vec<MonitorInfo> {
+    let start = std::time::Instant::now();
+    while EXPECTED.load(std::sync::atomic::Ordering::Relaxed) && MONITORS.lock().unwrap().is_empty() && start.elapsed() < most {
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    monitors()
+}
 static NEST: Mutex<Option<channel::Sender<ToLayers>>> = Mutex::new(None);
 
 /// The monitors of the session, left to right.

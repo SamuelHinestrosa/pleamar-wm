@@ -67,7 +67,9 @@ desktop_report() {
     echo "frames on the card that could not be read: $(grep -c 'could not be read' "$state/session.log")"
     grep -iE "panicked|error|could not" "$state/session.log" | grep -viE "adwaita|libenchant|glfw|gdk" | head -8
     marea_log="${XDG_STATE_HOME:-$HOME/.local/state}/marea-plm/marea.log"
-    if [ -f "$marea_log" ]; then
+    if ! grep -q "windows · starting: .*marea" "$state/session.log"; then
+        echo "Marea was NOT started inside the session"
+    elif [ -f "$marea_log" ] && [ "$marea_log" -nt "$state/session.log.1" ]; then
         echo "Marea, inside:"
         grep -E "^render · surface|panicked|error" "$marea_log" | head -12
     fi

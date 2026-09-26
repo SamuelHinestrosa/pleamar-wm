@@ -31,6 +31,7 @@ fn main() {
     if args.first().map(String::as_str) == Some("headless") {
         args.remove(0);
         let scene = if args.first().is_some_and(|a| !a.starts_with("--")) { args.remove(0) } else { "examples/session.plm".into() };
+        layers::expect_monitors();
         pleamar::provide_platform(Box::new(headless::Headless));
         let mut options = vec!["--scene".to_owned(), scene, "--no-hud".to_owned()];
         options.extend(args);
@@ -40,6 +41,7 @@ fn main() {
     if args.first().map(String::as_str) == Some("session") {
         args.remove(0);
         let scene = if args.first().is_some_and(|a| !a.starts_with("--")) { args.remove(0) } else { "examples/session.plm".into() };
+        layers::expect_monitors();
         pleamar::provide_platform(Box::new(session::Session));
         let mut options = vec!["--scene".to_owned(), scene, "--no-hud".to_owned()];
         options.extend(args);

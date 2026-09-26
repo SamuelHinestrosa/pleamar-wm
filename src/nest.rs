@@ -205,7 +205,7 @@ pub fn start(max: usize, to_render: Sender<ToRender>) -> Option<channel::Sender<
             }
         })
         .ok()?;
-    ready_rx.recv_timeout(Duration::from_secs(3)).ok().flatten().map(|()| tx)
+    ready_rx.recv_timeout(Duration::from_secs(6)).ok().flatten().map(|()| tx)
 }
 
 fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std::sync::mpsc::Sender<Option<()>>) -> Result<(), String> {
@@ -255,7 +255,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
     let keyboard = seat.add_keyboard(XkbConfig::default(), 400, 33).map_err(|e| e.to_string())?;
     let pointer = seat.add_pointer();
     // The monitors, as the session has them; nested, one that is the scene.
-    let monitors = layers::monitors();
+    let monitors = layers::wait_monitors(Duration::from_millis(2500));
     let outputs: Vec<Output> = if monitors.is_empty() {
         let output = Output::new("pleamar".into(), PhysicalProperties { size: (0, 0).into(), subpixel: Subpixel::Unknown, make: "pleamar".into(), model: "windows".into() });
         let mode = OutputMode { size: (1280, 800).into(), refresh: 60_000 };
@@ -344,7 +344,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
     let _ = ready.send(Some(()));
     // A session of its own starts what the desktop has (the wallpaper, Marea):
     // `PLEAMAR_WM_AUTOSTART`, or ~/.config/pleamar-wm/autostart, one command a line.
-    if !layers::monitors().is_empty() {
+    if !monitors.is_empty() {
         let file = std::env::var("PLEAMAR_WM_AUTOSTART").ok().or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.config/pleamar-wm/autostart")));
         if let Some(text) = file.as_deref().and_then(|f| std::fs::read_to_string(f).ok()) {
             state.autostart = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(str::to_owned).collect();
