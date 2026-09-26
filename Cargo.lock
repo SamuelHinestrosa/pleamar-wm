@@ -1690,6 +1690,7 @@ dependencies = [
 name = "pleamar-wm"
 version = "0.1.0"
 dependencies = [
+ "image",
  "libc",
  "pleamar",
  "smithay",

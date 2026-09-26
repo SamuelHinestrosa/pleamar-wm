@@ -53,6 +53,8 @@ impl pleamar::Platform for Session {
 struct Flips {
     on_screen: Option<usize>,
     pending: Option<usize>,
+    /// Painted and handed over, waiting for the card to finish it.
+    queued: Option<usize>,
     /// Whether the monitor has been given its mode with a first frame.
     set: bool,
     /// Another TTY has the screen: nothing is shown until it comes back.
@@ -74,6 +76,9 @@ struct Monitor {
 
 /// A monitor's frames: three buffers of the card, lent in turn to the render.
 struct MonitorFrames {
+    /// The thread that waits for the card and flips: the render hands a frame
+    /// over and goes on.
+    flipper: Option<std::sync::mpsc::Sender<(usize, framebuffer::Handle, wgpu::SubmissionIndex)>>,
     drm: DrmDeviceFd,
     gbm: Arc<Mutex<gbm::Device<DrmDeviceFd>>>,
     connector: connector::Handle,
@@ -140,31 +145,55 @@ impl Frames for MonitorFrames {
             }
         }
         let f = self.flips.lock().unwrap();
-        (0..self.buffers.len()).find(|k| f.on_screen != Some(*k) && f.pending != Some(*k)).map(|k| (k, self.buffers[k].texture.clone()))
+        (0..self.buffers.len()).find(|k| f.on_screen != Some(*k) && f.pending != Some(*k) && f.queued != Some(*k)).map(|k| (k, self.buffers[k].texture.clone()))
     }
 
-    fn present(&mut self, which: usize, done: wgpu::SubmissionIndex, device: &wgpu::Device) {
-        // The monitor shows what is in the buffer when it flips: it has to be painted by then.
-        let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(done), timeout: Some(Duration::from_millis(100)) });
-        let mut f = self.flips.lock().unwrap();
-        if f.paused {
-            return;
-        }
-        let fb = self.buffers[which].fb;
-        if !f.set {
-            match self.drm.set_crtc(self.crtc, Some(fb), (0, 0), &[self.connector], Some(self.mode)) {
-                Ok(()) => {
-                    f.set = true;
-                    f.on_screen = Some(which);
-                    let _ = self.to_render.send(ToRender::Frame(self.id));
+    fn present(&mut self, which: usize, done: wgpu::SubmissionIndex, device: &wgpu::Device, _: &wgpu::Queue) {
+        if self.flipper.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel::<(usize, framebuffer::Handle, wgpu::SubmissionIndex)>();
+            let (device, drm, flips, to_render) = (device.clone(), self.drm.clone(), self.flips.clone(), self.to_render.clone());
+            let (crtc, connector, mode, name, id) = (self.crtc, self.connector, self.mode, self.name.clone(), self.id);
+            let spawned = std::thread::Builder::new().name(format!("flips {name}")).spawn(move || {
+                for (which, fb, done) in rx {
+                    // The monitor shows what is in the buffer when it flips: it has to be painted by then.
+                    let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(done), timeout: Some(Duration::from_millis(100)) });
+                    let mut f = flips.lock().unwrap();
+                    f.queued = None;
+                    if f.paused {
+                        continue;
+                    }
+                    if !f.set {
+                        match drm.set_crtc(crtc, Some(fb), (0, 0), &[connector], Some(mode)) {
+                            Ok(()) => {
+                                f.set = true;
+                                f.on_screen = Some(which);
+                                let _ = to_render.send(ToRender::Frame(id));
+                            }
+                            Err(e) => eprintln!("session · {name}: the monitor did not take its first frame: {e}"),
+                        }
+                    } else {
+                        match drm.page_flip(crtc, fb, PageFlipFlags::EVENT, None) {
+                            Ok(()) => f.pending = Some(which),
+                            Err(e) => {
+                                eprintln!("session · {name}: a frame did not go to the screen: {e}");
+                                // Without a flip there is no notice: the render is told all the same.
+                                let _ = to_render.send(ToRender::Frame(id));
+                            }
+                        }
+                    }
                 }
-                Err(e) => eprintln!("session · {}: the monitor did not take its first frame: {e}", self.name),
+            });
+            match spawned {
+                Ok(_) => self.flipper = Some(tx),
+                Err(e) => {
+                    eprintln!("session · {}: no thread for the flips: {e}", self.name);
+                    return;
+                }
             }
-        } else {
-            match self.drm.page_flip(self.crtc, fb, PageFlipFlags::EVENT, None) {
-                Ok(()) => f.pending = Some(which),
-                Err(e) => eprintln!("session · {}: a frame did not go to the screen: {e}", self.name),
-            }
+        }
+        self.flips.lock().unwrap().queued = Some(which);
+        if let Some(tx) = &self.flipper {
+            let _ = tx.send((which, self.buffers[which].fb, done));
         }
     }
 }
@@ -263,6 +292,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
         id += 1;
         m.sheet = Some((id, s.origin));
         let frames = MonitorFrames {
+            flipper: None,
             drm: drm.clone(),
             gbm: gbm.clone(),
             connector: m.connector,

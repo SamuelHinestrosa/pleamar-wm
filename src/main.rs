@@ -4,6 +4,7 @@
 //! pleamar's own.
 
 mod nest;
+mod headless;
 mod probe;
 mod session;
 
@@ -22,6 +23,16 @@ fn main() {
             eprintln!("probe · {e}");
             std::process::exit(1);
         }
+        return;
+    }
+    // `pleamar-wm headless scene.plm [options]`: the session's painting with no screen, to check it.
+    if args.first().map(String::as_str) == Some("headless") {
+        args.remove(0);
+        let scene = if args.first().is_some_and(|a| !a.starts_with("--")) { args.remove(0) } else { "examples/session.plm".into() };
+        pleamar::provide_platform(Box::new(headless::Headless));
+        let mut options = vec!["--scene".to_owned(), scene, "--no-hud".to_owned()];
+        options.extend(args);
+        pleamar::run_with(options);
         return;
     }
     if args.first().map(String::as_str) == Some("session") {
