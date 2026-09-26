@@ -9,6 +9,10 @@ dir="${XDG_STATE_HOME:-$HOME/.local/state}/pleamar-wm"
 mkdir -p "$dir"
 out="$dir/measure.txt"
 log="$dir/measure.log"
+if [ -z "$PLEAMAR_MONITORS" ] && [ -f "$dir/monitors" ]; then
+    PLEAMAR_MONITORS=$(cat "$dir/monitors")
+    export PLEAMAR_MONITORS
+fi
 echo "pleamar-wm · measuring for ~40 s; it leaves by itself"
 PLEAMAR_TIMING=1 "$here/target/release/pleamar-wm" session "$here/examples/measure.plm" --seconds 38 > "$log" 2>&1 &
 sleep 14

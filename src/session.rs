@@ -270,6 +270,18 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     if monitors.is_empty() {
         return Err("no monitor is connected".into());
     }
+    // Left to right as `PLEAMAR_MONITORS` says («DP-3,HDMI-A-1»); the ones it
+    // does not name, after, in the card's order.
+    if let Ok(order) = std::env::var("PLEAMAR_MONITORS") {
+        let names: Vec<&str> = order.split(',').map(str::trim).collect();
+        monitors.sort_by_key(|m| names.iter().position(|n| *n == m.name).unwrap_or(names.len()));
+        let mut x = 0;
+        for m in &mut monitors {
+            m.x = x;
+            x += m.size.0 as i32;
+        }
+        println!("session · monitors, left to right: {}", monitors.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", "));
+    }
 
     // The scene's surface on the monitors: its copies (`screens: each`) one
     // per monitor, in order; without copies, on the first. The ones with a
