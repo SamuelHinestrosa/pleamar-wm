@@ -12,7 +12,8 @@
 # The Marea running on Hyprland is stopped for round 3 and started again on
 # Hyprland at the end. Everything is written to
 # ~/.local/state/pleamar-wm/test-all.txt, which is shown when it ends.
-# Ctrl+Alt+Backspace ends a round early.
+# Ctrl+Alt+Backspace ends a round early. `test-all.sh 3` runs only round 3;
+# `test-all.sh 1 3`, rounds 1 and 3.
 
 here=$(dirname "$(readlink -f "$0")")
 state="${XDG_STATE_HOME:-$HOME/.local/state}/pleamar-wm"
@@ -22,6 +23,8 @@ pleamar="$HOME/Proyectos/pleamar/target/release/pleamar"
 marea="$HOME/Proyectos/marea-plm"
 [ -z "$PLEAMAR_MONITORS" ] && [ -f "$state/monitors" ] && PLEAMAR_MONITORS=$(cat "$state/monitors") && export PLEAMAR_MONITORS
 
+rounds="${*:-1 2 3}"
+wants() { case " $rounds " in *" $1 "*) return 0 ;; *) return 1 ;; esac; }
 say() { printf '\n\033[1;36m== %s\033[0m\n' "$*"; }
 countdown() {
     n=$1
@@ -35,6 +38,7 @@ countdown() {
 } > "$report"
 
 # ── 1 · the measurement ─────────────────────────────────────────
+if wants 1; then
 say "1/3 · measuring: a terminal opens by itself; do not touch anything (40 s)"
 countdown 3
 "$here/measure.sh" > /dev/null 2>&1
@@ -44,8 +48,10 @@ countdown 3
     cat "$state/measure.txt"
     echo "frames lost to a busy monitor: $(grep -c 'resource busy' "$state/measure.log")"
 } >> "$report"
+fi
 
 # ── 2 · the window manager ──────────────────────────────────────
+if wants 2; then
 say "2/3 · the window manager on both monitors (45 s): try the buttons above, Alt+Return, Alt+s, Alt+o"
 countdown 5
 "$here/session.sh" --seconds 45 > /dev/null 2>&1
@@ -58,8 +64,10 @@ countdown 5
     grep -iE "panicked|error" "$state/session.log" | grep -viE "adwaita|libenchant|glfw|gdk" | head -5
 } >> "$report"
 cp -f "$state/session.log" "$state/test-all-windows.log"
+fi
 
 # ── 3 · Marea on her own ────────────────────────────────────────
+if wants 3; then
 say "3/3 · Marea with no Hyprland (35 s): her card opens by itself"
 was_running=no
 if "$pleamar" --say marea "get open" > /dev/null 2>&1; then
@@ -98,6 +106,7 @@ if [ "$was_running" = yes ]; then
         (cd "$marea" && WAYLAND_DISPLAY="$display" HYPRLAND_INSTANCE_SIGNATURE="$signature" setsid nohup ./marea start > /dev/null 2>&1 &)
         echo "Marea started again on Hyprland ($display)" >> "$report"
     fi
+fi
 fi
 
 say "done: back to Hyprland with Ctrl+Alt+F1"
