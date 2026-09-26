@@ -45,7 +45,12 @@ Measured, a terminal redrawing 50 times a second:
 | straight on Hyprland | 3.5 % | — | 14.6 % |
 | inside, with software GL | 192 % | 15.6 % | 10.9 % |
 | inside, frames on the card | 5.4 % | 13.1 % | 16.8 % |
+| inside, one round per frame | 5.4 % | 10.9 % | 16.5 % |
 
-Not yet: damage-only repaints, explicit sync, multi-plane buffers, menus
+In the last row the terminal draws 89 frames a second, and pleamar-wm spends
+about 1.2 ms of CPU on each (1.4 ms before): 0.6 of it painting, the rest
+composing the scene and copying the frame on the card.
+
+Not yet: painting only what changed, explicit sync, multi-plane buffers, menus
 beyond their window, XWayland, more than one scale, a session of its own on
 DRM/libinput, layer-shell, screencopy and the portals.
