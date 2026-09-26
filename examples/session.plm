@@ -43,6 +43,8 @@ scene Session {
     fact ratio = 0.56                    // the leader's share of the width
     fact overview = false
     fact dragging = -1                   // the window being carried by its title bar
+    fact grab.x = 0                      // where it was taken from, from its corner
+    fact grab.y = 0
     prop ov = 0 ~calm
     follow ov = if(overview, 1, 0)
 
@@ -143,7 +145,11 @@ scene Session {
         zone ellipse close_zone.$i { at: x + w - 20, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview }
         // At a glance, the whole window is a button: pressing it chooses it.
         zone box pick.$i { from: x, y; size: w, h; cursor: pointer; active: here and overview }
-        on press title.$i { focus win.$i }
+        on press title.$i {
+            focus win.$i
+            grab.x = pointer.x - x.$i
+            grab.y = pointer.y - y.$i
+        }
         // Carried by its title bar. Let go on another window, they change
         // places; at the edge towards the other monitor, it goes there.
         on drag title.$i {
@@ -161,7 +167,11 @@ scene Session {
         }
         // Let go on the other monitor (the mouse is off this one), or at the
         // edge that leads to it.
-        on release title.$i while pointer.y < 0 or pointer.y > H { send win.$i to 1 - screen.index }
+        on release title.$i while pointer.y < 0 or pointer.y > H {
+            send win.$i to 1 - screen.index
+            dx.$i: 0 ~16ms
+            dy.$i: 0 ~16ms
+        }
         on release title.$i while screen.index == 0 and pointer.x > W - 40 and pointer.y >= 0 and pointer.y <= H { send win.$i to 1 }
         on release title.$i while screen.index == 1 and pointer.x < 40 and pointer.y >= 0 and pointer.y <= H { send win.$i to 0 }
         on press lead_zone.$i { promote win.$i }
@@ -174,33 +184,6 @@ scene Session {
         on change win.$i.focused while win.$i.focused {
             lx: tx + tw / 2
             ly: ty + th / 2
-        }
-    }
-
-    // The window being carried, over all the others: lifted, a little smaller
-    // and see-through, so that where it will land shows below it.
-    repeat i in 0..6 {
-        let x = x.$i + dx.$i
-        let y = y.$i + dy.$i
-        let w = w.$i
-        let h = h.$i
-        group {
-            show: dragging == i and win.$i.screen == screen.index
-            opacity: 88%
-            pivot: x + w / 2, y + h / 2
-            scale: 0.96
-            body {
-                color: #0c0e10
-                shadow: 0, 26, 50, 60%
-                box { from: x, y; size: w, h; corner: 12 }
-            }
-            group {
-                clip box { from: x, y; size: w, h; corner: 12 }
-                box { from: x, y; size: w, tb; color: #1d2b27 }
-                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); show: dragging == i }
-            }
-            box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: 80% }
         }
     }
 
@@ -233,6 +216,34 @@ scene Session {
         at: W - 18, H - 16; anchor: right center; size: 11; color: ink; opacity: 55%
     }
     text "Nothing open here yet: Super+T, or a button above." { at: W / 2, H / 2; anchor: center; size: 15; color: ink; opacity: if(pick(screen.index, win.on.0, win.on.1) < 0.5, 45%, 0) }
+
+    // The window being carried, over all the others: lifted, a little smaller
+    // and see-through, so that where it will land shows below it. It goes with
+    // the mouse, on whichever monitor the mouse is: from one to the other too.
+    repeat i in 0..6 {
+        let x = pointer.x - grab.x
+        let y = pointer.y - grab.y
+        let w = w.$i
+        let h = h.$i
+        group {
+            show: dragging == i and pointer.x >= 0 and pointer.x < W and pointer.y >= 0 and pointer.y < H
+            opacity: 88%
+            pivot: x + w / 2, y + h / 2
+            scale: 0.96
+            body {
+                color: #0c0e10
+                shadow: 0, 26, 50, 60%
+                box { from: x, y; size: w, h; corner: 12 }
+            }
+            group {
+                clip box { from: x, y; size: w, h; corner: 12 }
+                box { from: x, y; size: w, tb; color: #1d2b27 }
+                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); show: dragging == i }
+            }
+            box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: 80% }
+        }
+    }
 
     // ── the keys: Super, as on Hyprland ──
     let fplace = pick(win.focus, win.0.place, win.1.place, win.2.place, win.3.place, win.4.place, win.5.place)
