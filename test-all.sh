@@ -8,7 +8,7 @@
 #   1. the measurement: a terminal redrawing by itself, 40 s;
 #   2. the whole desktop on both monitors —wallpaper, Marea, the window
 #      manager—, 45 s; play with it if you like: the buttons above,
-#      Alt+Return, Alt+s (to the other monitor), Super+Space, Marea;
+#      Super+T, Super+Shift+arrows, dragging a title bar, Super+Space, Marea;
 #   3. the same desktop by itself: 35 s, Marea's card opens alone.
 # The Marea running on Hyprland is stopped for rounds 2 and 3 (they start
 # their own) and started again on Hyprland at the end. Everything is written to
@@ -77,7 +77,7 @@ desktop_report() {
 
 # ── 2 · the desktop ─────────────────────────────────────────────
 if wants 2; then
-say "2/3 · the whole desktop (45 s): wallpaper, Marea and the window manager. Try Alt+Return, Alt+s, Super+Space, Marea's card"
+say "2/3 · the whole desktop (45 s): wallpaper, Marea and the window manager. Try Super+T, dragging a title bar, Super+Shift+arrows, Super+Space, Marea's card"
 countdown 5
 "$here/session.sh" --seconds 45 > /dev/null 2>&1
 {

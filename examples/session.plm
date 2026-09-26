@@ -5,12 +5,16 @@
 //   ./session.sh              ./session.sh --seconds 45   (leaves by itself)
 //
 //   Ctrl+Alt+Backspace  leave        Ctrl+Alt+F1…F12  another TTY
-//   Alt+s  the window with the keyboard to the other monitor
-//   Super+Space  Marea's search (the wallpaper and Marea start with it: autostart)
 //
-//   Alt+Return  a terminal          Alt+q  close the one with the keyboard
-//   Alt+m       make it the leader  Alt+j / Alt+k  the keyboard to the next / previous
-//   Alt+h / l   the leader narrower / wider          Alt+o  everything at a glance
+//   Super+T / Super+Return  a terminal     Super+Q  close the one with the keyboard
+//   Super+arrows        the keyboard to the next / previous window
+//   Super+Shift+Left    make it lead (if it already leads, to the left monitor)
+//   Super+Shift+Right   to the right monitor
+//   Super+Shift+Up/Down change places with the one before / after it
+//   Super+Tab  everything at a glance       Super+-/+  the leader narrower / wider
+//   Super+Space  Marea's search (the wallpaper and Marea start with it: autostart)
+//   With the mouse: carry a window by its title bar; let it go on another one
+//   and they change places, or at the edge and it goes to the other monitor.
 //
 // What Hyprland does not do: its animations are curves of a fixed length that
 // start again when interrupted, and its layout is code of its own. Here every
@@ -38,6 +42,7 @@ scene Session {
 
     fact ratio = 0.56                    // the leader's share of the width
     fact overview = false
+    fact dragging = -1                   // the window being carried by its title bar
     prop ov = 0 ~calm
     follow ov = if(overview, 1, 0)
 
@@ -92,17 +97,21 @@ scene Session {
         follow y.$i = if(win.$i.open, if(overview, oy, ty), home.y)
         follow w.$i = if(win.$i.open, if(overview, tw * s, tw), 60)
         follow h.$i = if(win.$i.open, if(overview, th * s, th), 34)
+        // Carried with the mouse: how far from its place.
+        prop dx.$i = 0 ~glide
+        prop dy.$i = 0 ~glide
         prop seen.$i = 0 ~300ms
         follow seen.$i = if(win.$i.open, 1, 0)
         prop lit.$i = 0 ~220ms
         follow lit.$i = if(win.$i.focused and not overview, 1, if(overview, 1, 0))
 
-        let x = x.$i
-        let y = y.$i
+        let x = x.$i + dx.$i
+        let y = y.$i + dy.$i
         let w = w.$i
         let h = h.$i
         group {
-            show: seen.$i > 0.01 and sc == screen.index
+            // Carried, it is drawn over the others, further down.
+            show: seen.$i > 0.01 and sc == screen.index and dragging != i
             opacity: seen.$i
             pivot: x + w / 2, y + h / 2
             scale: 0.92 + 0.08 * seen.$i + 0.025 * pick.$i.hover * ov
@@ -125,12 +134,31 @@ scene Session {
             ellipse { at: x + w - 20, y + tb / 2; radius: 5.5 + close_zone.$i.hover; color: coral; opacity: 45% + 50% * close_zone.$i.hover }
             box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: lit.$i * 70% * (1 - ov) }
         }
-        zone box title.$i { from: x, y; size: w - 56, tb; cursor: pointer; active: here and not overview }
+        // Where it is laid out, not where it is carried: a drag goes on while
+        // its zone still holds the point it was pressed on.
+        zone box title.$i { from: x.$i, y.$i; size: w - 56, tb; cursor: pointer; active: here and not overview }
         zone ellipse lead_zone.$i { at: x + w - 40, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview }
         zone ellipse close_zone.$i { at: x + w - 20, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview }
         // At a glance, the whole window is a button: pressing it chooses it.
         zone box pick.$i { from: x, y; size: w, h; cursor: pointer; active: here and overview }
         on press title.$i { focus win.$i }
+        // Carried by its title bar. Let go on another window, they change
+        // places; at the edge towards the other monitor, it goes there.
+        on drag title.$i {
+            dragging = i
+            dx.$i: drag.dx ~16ms
+            dy.$i: drag.dy ~16ms
+        }
+        on release title.$i {
+            dragging = -1
+            dx.$i: 0
+            dy.$i: 0
+        }
+        repeat j in 0..6 {
+            on release title.$i while j != i and win.$j.open and win.$j.screen == sc and pointer.x >= x.$j and pointer.x < x.$j + w.$j and pointer.y >= y.$j and pointer.y < y.$j + h.$j { swap win.$i with win.$j }
+        }
+        on release title.$i while screen.index == 0 and pointer.x > W - 40 { send win.$i to 1 }
+        on release title.$i while screen.index == 1 and pointer.x < 40 { send win.$i to 0 }
         on press lead_zone.$i { promote win.$i }
         on press close_zone.$i { close win.$i }
         on press pick.$i {
@@ -141,6 +169,33 @@ scene Session {
         on change win.$i.focused while win.$i.focused {
             lx: tx + tw / 2
             ly: ty + th / 2
+        }
+    }
+
+    // The window being carried, over all the others: lifted, a little smaller
+    // and see-through, so that where it will land shows below it.
+    repeat i in 0..6 {
+        let x = x.$i + dx.$i
+        let y = y.$i + dy.$i
+        let w = w.$i
+        let h = h.$i
+        group {
+            show: dragging == i and win.$i.screen == screen.index
+            opacity: 88%
+            pivot: x + w / 2, y + h / 2
+            scale: 0.96
+            body {
+                color: #0c0e10
+                shadow: 0, 26, 50, 60%
+                box { from: x, y; size: w, h; corner: 12 }
+            }
+            group {
+                clip box { from: x, y; size: w, h; corner: 12 }
+                box { from: x, y; size: w, tb; color: #1d2b27 }
+                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); show: dragging == i }
+            }
+            box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: 80% }
         }
     }
 
@@ -168,24 +223,37 @@ scene Session {
     on press app.1 { launch "gnome-calculator" }
     on press app.2 { launch "gnome-text-editor" }
     on press glance { toggle overview }
-    text "{win.count} of 6 · Alt+s other monitor · Alt+Return terminal · Alt+o at a glance · Alt+j/k keyboard · Alt+m lead · Alt+h/l width · Alt+q close · Super+Space search · Ctrl+Alt+Backspace leaves" {
+    text "{win.count} of 6 · drag a title bar to move it · Super+T terminal · Super+Q close · Super+arrows keyboard · Super+Shift+arrows move · Super+Tab at a glance · Super+Space search · Ctrl+Alt+Backspace leaves" {
         // Down in the corner: the top middle is Marea's.
         at: W - 18, H - 16; anchor: right center; size: 11; color: ink; opacity: 55%
     }
-    text "Nothing open here yet: Alt+Return, or a button above." { at: W / 2, H / 2; anchor: center; size: 15; color: ink; opacity: if(pick(screen.index, win.on.0, win.on.1) < 0.5, 45%, 0) }
+    text "Nothing open here yet: Super+T, or a button above." { at: W / 2, H / 2; anchor: center; size: 15; color: ink; opacity: if(pick(screen.index, win.on.0, win.on.1) < 0.5, 45%, 0) }
 
-    // ── the keys ──
-    on key Alt+Return { launch "kitty" }
-    // Marea's search, as on Hyprland (she runs in the session: see autostart).
+    // ── the keys: Super, as on Hyprland ──
+    let fplace = pick(win.focus, win.0.place, win.1.place, win.2.place, win.3.place, win.4.place, win.5.place)
+    let fscreen = pick(win.focus, win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen)
+    let next = pick(mod(focus_at + 1, all), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)
+    let previous = pick(mod(focus_at + all - 1, all), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)
+    on key Super+t { launch "kitty" }
+    on key Super+Return { launch "kitty" }
+    on key Super+q { close win(win.focus) }
+    // Marea's search (she runs in the session: see autostart).
     on key Super+space { launch "$HOME/Proyectos/marea-plm/marea search" }
-    on key Alt+q { close win(win.focus) }
-    on key Alt+m { promote win(win.focus) }
-    on key Alt+o { toggle overview }
+    on key Super+Tab { toggle overview }
     on key Escape while overview { overview = false }
-    on key Alt+j { focus win(pick(mod(focus_at + 1, all), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)) }
-    on key Alt+k { focus win(pick(mod(focus_at + all - 1, all), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)) }
-    on key Alt+h { ratio = clamp(ratio - 0.05, 0.25, 0.8) }
-    // The window with the keyboard, to the other monitor.
-    on key Alt+s { send win(win.focus) to 1 - pick(win.focus, win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen) }
-    on key Alt+l { ratio = clamp(ratio + 0.05, 0.25, 0.8) }
+    // The keyboard to the next one, or the one before.
+    on key Super+Right { focus win(next) }
+    on key Super+Down { focus win(next) }
+    on key Super+Left { focus win(previous) }
+    on key Super+Up { focus win(previous) }
+    // Moving it: left, to lead (and if it already leads, to the monitor on the
+    // left); right, to the monitor on the right; up and down, in the order.
+    on key Super+Shift+Left while fplace > 0.5 { promote win(win.focus) }
+    on key Super+Shift+Left while fplace < 0.5 and fscreen > 0.5 { send win(win.focus) to 0 }
+    on key Super+Shift+Right while fscreen < 0.5 { send win(win.focus) to 1 }
+    on key Super+Shift+Up { swap win(win.focus) with win(previous) }
+    on key Super+Shift+Down { swap win(win.focus) with win(next) }
+    // The leader narrower or wider.
+    on key Super+minus { ratio = clamp(ratio - 0.05, 0.25, 0.8) }
+    on key Super+plus { ratio = clamp(ratio + 0.05, 0.25, 0.8) }
 }

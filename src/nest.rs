@@ -529,6 +529,19 @@ impl State {
                     }
                 }
             }
+            ToNest::Swap(a, b) => {
+                let (Some(ia), Some(ib)) = (self.order.iter().position(|s| *s == a), self.order.iter().position(|s| *s == b)) else { return };
+                self.order.swap(ia, ib);
+                self.tell(NestEvent::Order(self.order.clone()));
+                // Each takes the other's monitor too, if they were on different ones.
+                let screens = (self.slots.get(a).and_then(Option::as_ref).map(|w| w.screen), self.slots.get(b).and_then(Option::as_ref).map(|w| w.screen));
+                if let (Some(sa), Some(sb)) = screens {
+                    if sa != sb {
+                        self.handle(ToNest::Send(a, sb));
+                        self.handle(ToNest::Send(b, sa));
+                    }
+                }
+            }
             ToNest::FrameDone => self.frame_done(),
             ToNest::Gpu { device, formats } => {
                 if self.dmabuf_global.is_some() {
