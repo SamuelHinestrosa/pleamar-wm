@@ -72,6 +72,8 @@ struct Monitor {
     /// The sheet that paints it, and where that sheet looks in the scene's plane.
     sheet: Option<(u32, (f32, f32))>,
     flips: Arc<Mutex<Flips>>,
+    /// Rung when a flip lands, for the one waiting to send the next.
+    flipped: Arc<std::sync::Condvar>,
 }
 
 /// A monitor's frames: three buffers of the card, lent in turn to the render.
@@ -89,6 +91,7 @@ struct MonitorFrames {
     buffers: Vec<Buffer>,
     failed: bool,
     flips: Arc<Mutex<Flips>>,
+    flipped: Arc<std::sync::Condvar>,
     to_render: Sender<ToRender>,
     id: u32,
 }
@@ -151,13 +154,25 @@ impl Frames for MonitorFrames {
     fn present(&mut self, which: usize, done: wgpu::SubmissionIndex, device: &wgpu::Device, _: &wgpu::Queue) {
         if self.flipper.is_none() {
             let (tx, rx) = std::sync::mpsc::channel::<(usize, framebuffer::Handle, wgpu::SubmissionIndex)>();
-            let (device, drm, flips, to_render) = (device.clone(), self.drm.clone(), self.flips.clone(), self.to_render.clone());
+            let (device, drm, flips, flipped, to_render) = (device.clone(), self.drm.clone(), self.flips.clone(), self.flipped.clone(), self.to_render.clone());
             let (crtc, connector, mode, name, id) = (self.crtc, self.connector, self.mode, self.name.clone(), self.id);
             let spawned = std::thread::Builder::new().name(format!("flips {name}")).spawn(move || {
                 for (which, fb, done) in rx {
                     // The monitor shows what is in the buffer when it flips: it has to be painted by then.
                     let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(done), timeout: Some(Duration::from_millis(100)) });
                     let mut f = flips.lock().unwrap();
+                    // One flip at a time: while the last one has not landed the card
+                    // says busy, and the frame was lost. It waits for it —a refresh
+                    // at most; after that it is taken as lost—.
+                    let limit = std::time::Instant::now() + Duration::from_millis(50);
+                    while f.pending.is_some() && !f.paused {
+                        let left = limit.saturating_duration_since(std::time::Instant::now());
+                        if left.is_zero() {
+                            f.pending = None;
+                            break;
+                        }
+                        f = flipped.wait_timeout(f, left).unwrap().0;
+                    }
                     f.queued = None;
                     if f.paused {
                         continue;
@@ -264,7 +279,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
         let name = format!("{}-{}", info.interface().as_str(), info.interface_id());
         let (w, h) = mode.size();
         println!("session · monitor {name}: {w}×{h} at {} Hz", mode.vrefresh());
-        monitors.push(Monitor { name, connector: conn, crtc, mode, size: (w as u32, h as u32), x, sheet: None, flips: Default::default() });
+        monitors.push(Monitor { name, connector: conn, crtc, mode, size: (w as u32, h as u32), x, sheet: None, flips: Default::default(), flipped: Default::default() });
         x += w as i32;
     }
     if monitors.is_empty() {
@@ -315,6 +330,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
             buffers: Vec::new(),
             failed: false,
             flips: m.flips.clone(),
+            flipped: m.flipped.clone(),
             to_render: to_render.clone(),
             id,
         };
@@ -452,6 +468,7 @@ impl State {
                     if let Some(p) = f.pending.take() {
                         f.on_screen = Some(p);
                     }
+                    m.flipped.notify_all();
                     if let Some((id, _)) = m.sheet {
                         let _ = self.to_render.send(ToRender::Frame(id));
                     }
@@ -469,6 +486,7 @@ impl State {
                     let mut f = m.flips.lock().unwrap();
                     f.paused = true;
                     f.pending = None;
+                    m.flipped.notify_all();
                 }
             }
             SessionEvent::ActivateSession => {
