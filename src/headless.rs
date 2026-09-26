@@ -15,11 +15,13 @@ use std::time::{Duration, Instant};
 pub struct Headless;
 
 struct HeadlessFrames {
+    flipper: Option<std::sync::mpsc::Sender<wgpu::SubmissionIndex>>,
     size: (u32, u32),
     textures: Vec<wgpu::Texture>,
     shown: Option<usize>,
     started: Instant,
     written: bool,
+    path: String,
     to_render: Sender<ToRender>,
     id: u32,
 }
@@ -46,23 +48,36 @@ impl Frames for HeadlessFrames {
     }
 
     fn present(&mut self, which: usize, done: wgpu::SubmissionIndex, device: &wgpu::Device, queue: &wgpu::Queue) {
-        let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(done), timeout: Some(Duration::from_millis(200)) });
+        // As the session: a thread of its own waits for the card and "flips".
+        if self.flipper.is_none() {
+            let (tx, rx) = std::sync::mpsc::channel::<wgpu::SubmissionIndex>();
+            let (device, to_render, id) = (device.clone(), self.to_render.clone(), self.id);
+            let _ = std::thread::Builder::new().name("flips HEADLESS-1".into()).spawn(move || {
+                let mut next = Instant::now();
+                for done in rx {
+                    let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(done), timeout: Some(Duration::from_millis(200)) });
+                    // A monitor at 60 Hz: the flip lands on the next refresh.
+                    next = (next + Duration::from_micros(16_667)).max(Instant::now());
+                    std::thread::sleep(next.saturating_duration_since(Instant::now()));
+                    let _ = to_render.send(ToRender::Frame(id));
+                }
+            });
+            self.flipper = Some(tx);
+        }
         self.shown = Some(which);
         let at = std::env::var("PLEAMAR_HEADLESS_AT").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(8.0);
         if !self.written && self.started.elapsed().as_secs_f32() >= at {
             self.written = true;
-            let path = std::env::var("PLEAMAR_HEADLESS_PNG").unwrap_or_else(|_| "/tmp/pleamar-headless.png".into());
+            let path = self.path.clone();
+            let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(done.clone()), timeout: Some(Duration::from_millis(200)) });
             match write_png(device, queue, &self.textures[which], self.size, &path) {
                 Ok(()) => println!("headless · the frame shown went to {path}"),
                 Err(e) => eprintln!("headless · {e}"),
             }
         }
-        // A monitor at 60 Hz, more or less.
-        let (tx, id) = (self.to_render.clone(), self.id);
-        std::thread::spawn(move || {
-            std::thread::sleep(Duration::from_millis(16));
-            let _ = tx.send(ToRender::Frame(id));
-        });
+        if let Some(tx) = &self.flipper {
+            let _ = tx.send(done);
+        }
     }
 }
 
@@ -99,18 +114,34 @@ impl PlatformWindow for Nothing {
 impl pleamar::Platform for Headless {
     fn run(self: Box<Self>, surfaces: Vec<Surface>, _: u32, _: wgpu::Instance, to_render: Sender<ToRender>) {
         let size = (1920u32, 1080u32);
-        let Some((k, s)) = surfaces.iter().enumerate().find(|(_, s)| s.name.is_empty()) else { return };
-        let frames = HeadlessFrames { size, textures: Vec::new(), shown: None, started: Instant::now(), written: false, to_render: to_render.clone(), id: 7000 };
-        let _ = to_render.send(ToRender::Sheet(Box::new(NewSheet {
-            id: 7000,
-            target: Target::Frames(Box::new(frames)),
-            window: Box::new(Nothing),
-            scale: 1.0,
-            size,
-            mhz: 60_000,
-            name: "HEADLESS-1".into(),
-            view: View { surface: k, popup: None, origin: s.origin, size: (size.0 as f32, size.1 as f32) },
-        })));
+        // `PLEAMAR_HEADLESS_SCREENS=2`: two monitors, each copy of the scene on its own.
+        let screens = std::env::var("PLEAMAR_HEADLESS_SCREENS").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(1);
+        let png = std::env::var("PLEAMAR_HEADLESS_PNG").unwrap_or_else(|_| "/tmp/pleamar-headless.png".into());
+        for m in 0..screens {
+            let Some((k, s)) = surfaces.iter().enumerate().find(|(_, s)| s.name.is_empty() && matches!(s.screens, pleamar::scene::Screens::Number(n) if n == m)).or_else(|| (m == 0).then(|| surfaces.iter().enumerate().find(|(_, s)| s.name.is_empty())).flatten()) else { continue };
+            let id = 7000 + m as u32;
+            let path = if m == 0 { png.clone() } else { png.replace(".png", &format!("-{m}.png")) };
+            println!("headless · monitor {m}: the scene's surface {k}, from {:?} in its plane", s.origin);
+            let frames = HeadlessFrames { flipper: None, size, textures: Vec::new(), shown: None, started: Instant::now(), written: false, to_render: to_render.clone(), id, path };
+            let _ = to_render.send(ToRender::Sheet(Box::new(NewSheet {
+                id,
+                target: Target::Frames(Box::new(frames)),
+                window: Box::new(Nothing),
+                scale: 1.0,
+                size,
+                mhz: 60_000,
+                name: format!("HEADLESS-{}", m + 1),
+                view: View { surface: k, popup: None, origin: s.origin, size: (size.0 as f32, size.1 as f32) },
+            })));
+        }
+        // At the hour of the picture everything is painted, so that a monitor
+        // where nothing moves shows its frame all the same.
+        let at = std::env::var("PLEAMAR_HEADLESS_AT").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(8.0);
+        let tx = to_render.clone();
+        std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_secs_f32(at + 0.05));
+            let _ = tx.send(ToRender::Repaint);
+        });
         let _ = to_render.send(ToRender::KeyboardFocus(true));
         loop {
             std::thread::sleep(Duration::from_secs(3600));

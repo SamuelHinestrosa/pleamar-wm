@@ -5,6 +5,7 @@
 //   ./session.sh              ./session.sh --seconds 45   (leaves by itself)
 //
 //   Ctrl+Alt+Backspace  leave        Ctrl+Alt+F1…F12  another TTY
+//   Alt+s  the window with the keyboard to the other monitor
 //
 //   Alt+Return  a terminal          Alt+q  close the one with the keyboard
 //   Alt+m       make it the leader  Alt+j / Alt+k  the keyboard to the next / previous
@@ -17,7 +18,8 @@
 // keyboard fade to grey instead of just dimming.
 language 0.1
 scene Session {
-    surface { size: full, full }
+    // One copy per monitor: each lays out its own windows (`win.$i.screen`).
+    surface { size: full, full; screens: each max 2 }
     windows win max 6
 
     let ink = #f5f7f5
@@ -52,24 +54,31 @@ scene Session {
         opacity: 70%
     }
 
-    // What is shared by every slot: how many there are and which one has the keyboard.
-    let n = max(win.count, 1)
-    let focus_place = pick(win.focus, win.0.place, win.1.place, win.2.place, win.3.place, win.4.place, win.5.place)
-    let areah = H - bar - gap
-    let lead.w = if(n < 1.5, W - 2 * gap, (W - 3 * gap) * ratio)
-    let stack.h = (areah - (n - 2) * gap) / max(n - 1, 1)
-    let cols = ceil(sqrt(n))
-    let rows = ceil(n / cols)
-    let cell.w = (W - 80 - (cols - 1) * 30) / cols
-    let cell.h = (areah - 40 - (rows - 1) * 30) / rows
+    // Where the one with the keyboard is in the order of all of them, and how many there are.
+    let focus_at = (win.order.1 == win.focus) + 2 * (win.order.2 == win.focus) + 3 * (win.order.3 == win.focus) + 4 * (win.order.4 == win.focus) + 5 * (win.order.5 == win.focus)
+    let all = max(win.count, 1)
 
     repeat i in 0..6 {
+        // A window is laid out on its own monitor: how big that one is and how
+        // many windows share it. Each copy of the scene draws only its own.
+        let sc = win.$i.screen
+        let here = win.$i.open and sc == screen.index
+        let Ws = pick(sc, screen.0.width, screen.1.width)
+        let Hs = pick(sc, screen.0.height, screen.1.height)
+        let n = max(pick(sc, win.on.0, win.on.1), 1)
+        let areah = Hs - bar - gap
+        let lead.w = if(n < 1.5, Ws - 2 * gap, (Ws - 3 * gap) * ratio)
+        let stack.h = (areah - (n - 2) * gap) / max(n - 1, 1)
+        let cols = ceil(sqrt(n))
+        let rows = ceil(n / cols)
+        let cell.w = (Ws - 80 - (cols - 1) * 30) / cols
+        let cell.h = (areah - 40 - (rows - 1) * 30) / rows
         // ── where it goes: the leader on the left, the rest stacked on the right ──
         let p = max(win.$i.place, 0)
         let leads = p < 0.5
         let tx = if(leads, gap, 2 * gap + lead.w)
         let ty = if(leads, bar, bar + (p - 1) * (stack.h + gap))
-        let tw = if(leads, lead.w, W - 3 * gap - lead.w)
+        let tw = if(leads, lead.w, Ws - 3 * gap - lead.w)
         let th = if(leads, areah, stack.h)
         // ── and at a glance: in a grid, each one keeping its shape ──
         let s = min(cell.w / tw, cell.h / th)
@@ -94,7 +103,7 @@ scene Session {
         let w = w.$i
         let h = h.$i
         group {
-            show: seen.$i > 0.01
+            show: seen.$i > 0.01 and sc == screen.index
             opacity: seen.$i
             pivot: x + w / 2, y + h / 2
             scale: 0.92 + 0.08 * seen.$i + 0.025 * pick.$i.hover * ov
@@ -110,18 +119,18 @@ scene Session {
                 clip box { from: x, y; size: w, h; corner: 12 }
                 box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: tw, th - tb; show: win.$i.open }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: tw, th - tb; show: here }
             }
             // Its two buttons: to the front, and away.
             ellipse { at: x + w - 40, y + tb / 2; radius: 5.5 + lead_zone.$i.hover; color: mint; opacity: 35% + 50% * lead_zone.$i.hover }
             ellipse { at: x + w - 20, y + tb / 2; radius: 5.5 + close_zone.$i.hover; color: coral; opacity: 45% + 50% * close_zone.$i.hover }
             box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: lit.$i * 70% * (1 - ov) }
         }
-        zone box title.$i { from: x, y; size: w - 56, tb; cursor: pointer; active: win.$i.open and not overview }
-        zone ellipse lead_zone.$i { at: x + w - 40, y + tb / 2; radius: 10; cursor: pointer; active: win.$i.open and not overview }
-        zone ellipse close_zone.$i { at: x + w - 20, y + tb / 2; radius: 10; cursor: pointer; active: win.$i.open and not overview }
+        zone box title.$i { from: x, y; size: w - 56, tb; cursor: pointer; active: here and not overview }
+        zone ellipse lead_zone.$i { at: x + w - 40, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview }
+        zone ellipse close_zone.$i { at: x + w - 20, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview }
         // At a glance, the whole window is a button: pressing it chooses it.
-        zone box pick.$i { from: x, y; size: w, h; cursor: pointer; active: win.$i.open and overview }
+        zone box pick.$i { from: x, y; size: w, h; cursor: pointer; active: here and overview }
         on press title.$i { focus win.$i }
         on press lead_zone.$i { promote win.$i }
         on press close_zone.$i { close win.$i }
@@ -160,10 +169,10 @@ scene Session {
     on press app.1 { launch "gnome-calculator" }
     on press app.2 { launch "gnome-text-editor" }
     on press glance { toggle overview }
-    text "{win.count} of 6 · Alt+Return terminal · Alt+o at a glance · Alt+j/k keyboard · Alt+m lead · Alt+h/l width · Alt+q close · Ctrl+Alt+Backspace leaves" {
+    text "{win.count} of 6 · Alt+s other monitor · Alt+Return terminal · Alt+o at a glance · Alt+j/k keyboard · Alt+m lead · Alt+h/l width · Alt+q close · Ctrl+Alt+Backspace leaves" {
         at: W - 18, 23; anchor: right center; size: 11; color: ink; opacity: 45%
     }
-    text "Nothing open yet: Alt+Return, or a button above." { at: W / 2, H / 2; anchor: center; size: 15; color: ink; opacity: if(win.count < 0.5, 45%, 0) }
+    text "Nothing open here yet: Alt+Return, or a button above." { at: W / 2, H / 2; anchor: center; size: 15; color: ink; opacity: if(pick(screen.index, win.on.0, win.on.1) < 0.5, 45%, 0) }
 
     // ── the keys ──
     on key Alt+Return { launch "kitty" }
@@ -171,8 +180,10 @@ scene Session {
     on key Alt+m { promote win(win.focus) }
     on key Alt+o { toggle overview }
     on key Escape while overview { overview = false }
-    on key Alt+j { focus win(pick(mod(focus_place + 1, n), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)) }
-    on key Alt+k { focus win(pick(mod(focus_place + n - 1, n), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)) }
+    on key Alt+j { focus win(pick(mod(focus_at + 1, all), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)) }
+    on key Alt+k { focus win(pick(mod(focus_at + all - 1, all), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)) }
     on key Alt+h { ratio = clamp(ratio - 0.05, 0.25, 0.8) }
+    // The window with the keyboard, to the other monitor.
+    on key Alt+s { send win(win.focus) to 1 - pick(win.focus, win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen) }
     on key Alt+l { ratio = clamp(ratio + 0.05, 0.25, 0.8) }
 }

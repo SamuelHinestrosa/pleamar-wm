@@ -1,0 +1,101 @@
+text   · 862 system fonts in 14 ms
+pleamar · decoupled (independent render) mode · the logic blocks 600 ms after every decision
+render · scene: 272 properties, 262 instructions, 70 facts, 0 layers, 0 gestures, 88 rules, 68 zones
+headless · monitor 0: the scene's surface 0, from (0.0, 0.0) in its plane
+headless · monitor 1: the scene's surface 1, from (0.0, 10000.0) in its plane
+windows · programs connect at WAYLAND_DISPLAY=pleamar-1
+render · NVIDIA GeForce RTX 2060 (Vulkan) · Bgra8Unorm · Opaque
+render · surface 7000 on HEADLESS-1 · 1920×1080 · scale 1 · 60 Hz
+logic  · Text("screen.0.name", "HEADLESS-1")
+logic  · 'screen.0.name' now says: "HEADLESS-1"
+render · surface 7001 on HEADLESS-2 · 1920×1080 · scale 1 · 60 Hz · copy 1
+logic  · Text("screen.1.name", "HEADLESS-2")
+logic  · 'screen.1.name' now says: "HEADLESS-2"
+logic  · Text("win.socket", "pleamar-1")
+logic  · 'win.socket' now says: "pleamar-1"
+logic  · Focus(true)
+windows · programs can hand over their frames on the card: 14 layouts
+windows · programs hand over their frames on the card
+render · first frame 182 ms after starting
+mouse  · 200,23
+logic  · Enter("app.1#screen0")
+mouse  · click
+logic  · Press("app.1#screen0")
+logic  · Release("app.1#screen0")
+
+(gnome-calculator:2715235): Adwaita-WARNING **: 20:51:53.811: Using GtkSettings:gtk-application-prefer-dark-theme with libadwaita is unsupported. Please use AdwStyleManager:color-scheme instead.
+
+(gnome-calculator:2715235): Adwaita-WARNING **: 20:51:53.843: The resource style-dark.css is deprecated and shouldn't be used anymore. Use style.css with media queries instead.
+
+(gnome-calculator:2715235): Adwaita-WARNING **: 20:51:53.843: The resource style-hc.css is deprecated and shouldn't be used anymore. Use style.css with media queries instead.
+logic  · Fact("win.0.open", 1.0)
+logic  · Fact("win.0.place", 0.0)
+logic  · Fact("win.order.0", 0.0)
+logic  · Fact("win.on.0", 1.0)
+logic  · Fact("win.count", 1.0)
+logic  · Fact("win.0.focused", 1.0)
+logic  · Fact("win.focus", 0.0)
+logic  · Text("win.0.title", "Calculadora")
+logic  · 'win.0.title' now says: "Calculadora"
+logic  · Text("win.0.app", "org.gnome.Calculator")
+logic  · 'win.0.app' now says: "org.gnome.Calculator"
+logic  · Enter("title.0#screen0")
+logic  · Fact("win.0.width", 360.0)
+logic  · Fact("win.0.height", 616.0)
+logic  · Fact("win.0.width", 1896.0)
+logic  · Fact("win.0.height", 986.0)
+logic  · Leave("title.0#screen0")
+render · a shadow is cut: it needs 23 px on the left and 25 px on the right and 46 px below more than this 1920 x 1080 surface has. The shape fits; its shadow does not
+mouse  · 330,10023
+logic  · Leave("app.1#screen0")
+logic  · Enter("app.2#screen1")
+mouse  · click
+logic  · Press("app.2#screen1")
+logic  · Release("app.2#screen1")
+
+(gnome-text-editor:2715257): Adwaita-WARNING **: 20:51:55.314: Using GtkSettings:gtk-application-prefer-dark-theme with libadwaita is unsupported. Please use AdwStyleManager:color-scheme instead.
+
+(gnome-text-editor:2715257): libenchant-WARNING **: 20:51:55.386: broker.vala:159: Error loading plugin: libaspell.so.15: no se puede abrir el fichero del objeto compartido: No existe el fichero o el directorio
+
+(gnome-text-editor:2715257): libenchant-WARNING **: 20:51:55.386: broker.vala:159: Error loading plugin: libhspell.so.0: no se puede abrir el fichero del objeto compartido: No existe el fichero o el directorio
+
+(gnome-text-editor:2715257): libenchant-WARNING **: 20:51:55.386: broker.vala:159: Error loading plugin: libhunspell-1.7.so.0: no se puede abrir el fichero del objeto compartido: No existe el fichero o el directorio
+
+(gnome-text-editor:2715257): libenchant-WARNING **: 20:51:55.386: broker.vala:159: Error loading plugin: libnuspell.so.5: no se puede abrir el fichero del objeto compartido: No existe el fichero o el directorio
+
+(gnome-text-editor:2715257): libenchant-WARNING **: 20:51:55.386: broker.vala:159: Error loading plugin: libvoikko.so.1: no se puede abrir el fichero del objeto compartido: No existe el fichero o el directorio
+logic  · Fact("win.1.screen", 1.0)
+logic  · Fact("win.1.open", 1.0)
+logic  · Fact("win.1.place", 0.0)
+logic  · Fact("win.order.1", 1.0)
+logic  · Fact("win.on.1", 1.0)
+logic  · Fact("win.count", 2.0)
+logic  · Fact("win.0.focused", 0.0)
+logic  · Fact("win.1.focused", 1.0)
+logic  · Fact("win.focus", 1.0)
+logic  · Text("win.1.title", "Documento nuevo (Borrador) - Editor de texto")
+logic  · 'win.1.title' now says: "Documento nuevo (Borrador) - Editor de texto"
+logic  · Text("win.1.app", "org.gnome.TextEditor")
+logic  · 'win.1.app' now says: "org.gnome.TextEditor"
+logic  · Fact("win.1.width", 700.0)
+logic  · Fact("win.1.height", 520.0)
+logic  · Fact("win.1.width", 1896.0)
+logic  · Fact("win.1.height", 986.0)
+logic  · Enter("title.1#screen1")
+logic  · Leave("title.1#screen1")
+cycle  ·  208 frames · mean 16.60 ms · p99  18.03 ms · max  18.79 ms · reading the scene 0.18 ms · with the logic blocked: 0 frames, max 0.00 ms
+mouse  · key:Alt+s
+logic  · Key("Alt+s", None)
+logic  · Fact("win.1.screen", 0.0)
+logic  · Fact("win.1.place", 1.0)
+logic  · Fact("win.on.0", 2.0)
+logic  · Fact("win.on.1", 0.0)
+logic  · Fact("win.0.width", 1055.0)
+logic  · Fact("win.1.width", 829.0)
+cycle  ·   63 frames · mean 16.67 ms · p99  20.83 ms · max  20.83 ms · reading the scene 0.31 ms · with the logic blocked: 0 frames, max 0.00 ms
+headless · the frame shown went to /home/abel/.claude/jobs/472be502/tmp/after-1.png
+headless · the frame shown went to /home/abel/.claude/jobs/472be502/tmp/after.png
+Gdk-Message: 20:52:02.126: Lost connection to Wayland compositor.
+
+(gnome-text-editor:2715257): Gdk-WARNING **: 20:52:02.127: vkQueuePresentKHR(): A surface is no longer available. (VK_ERROR_SURFACE_LOST_KHR) (-1000000000)
+Gdk-Message: 20:52:02.127: Error flushing display: Tubería rota

@@ -91,6 +91,8 @@ struct Window {
     /// The surfaces the render was last told about: one that appears again
     /// is sent whole, even if it has not drawn anything new.
     sent: Vec<u64>,
+    /// The monitor it is on: which copy of the scene lays it out.
+    screen: usize,
 }
 
 /// Where the programs connect, and whether they can.
@@ -130,6 +132,8 @@ struct State {
     /// The size the scene wants for each slot, to answer a new window with it.
     asked: Vec<Option<(i32, i32)>>,
     focus: Option<usize>,
+    /// The monitor the pointer is on: where a new window opens.
+    on_screen: usize,
     /// Whether pleamar's own window has the keyboard: without it, no program does.
     host_focus: bool,
     pointer_on: Option<usize>,
@@ -236,6 +240,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         next_slot: 0,
         asked: vec![None; max],
         focus: None,
+        on_screen: 0,
         host_focus: true,
         pointer_on: None,
         dirty: Vec::new(),
@@ -398,6 +403,15 @@ impl State {
                 }
             }
             ToNest::Launch(command) => self.launch(&command),
+            ToNest::OnScreen(screen) => self.on_screen = screen,
+            ToNest::Send(slot, screen) => {
+                if let Some(Some(w)) = self.slots.get_mut(slot) {
+                    if w.screen != screen {
+                        w.screen = screen;
+                        self.tell(NestEvent::Screen(slot, screen));
+                    }
+                }
+            }
             ToNest::FrameDone => self.frame_done(),
             ToNest::Gpu { device, formats } => {
                 if self.dmabuf_global.is_some() {
@@ -548,9 +562,9 @@ impl State {
             }
         });
         self.output.enter(toplevel.wl_surface());
-        self.slots[slot] = Some(Window { toplevel, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new() });
+        self.slots[slot] = Some(Window { toplevel, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen: self.on_screen });
         self.order.push(slot);
-        self.tell(NestEvent::Opened { slot, title, app });
+        self.tell(NestEvent::Opened { slot, title, app, screen: self.on_screen });
         self.tell(NestEvent::Order(self.order.clone()));
         self.set_focus(Some(slot));
     }
