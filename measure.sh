@@ -17,12 +17,17 @@ wm=$(pgrep -x pleamar-wm | head -1)
 kitty=$(pgrep -f "class pleamar-measure" | head -1)
 cpu() { [ -n "$1" ] && [ -r "/proc/$1/stat" ] && awk '{print $14 + $15}' "/proc/$1/stat" || echo 0; }
 a1=$(cpu "$wm"); b1=$(cpu "$kitty")
+threads() { for t in /proc/"$wm"/task/*; do echo "$(basename "$t") $(tr ' ' _ < "$t/comm") $(awk '{print $14 + $15}' "$t/stat")"; done | sort; }
+threads > "$dir/threads.0"
 sleep 15
+threads > "$dir/threads.1"
 a2=$(cpu "$wm"); b2=$(cpu "$kitty")
 {
     echo "measured $(date '+%F %T'), 15 s, % of one core"
     echo "pleamar-wm: $(awk -v a="$a1" -v b="$a2" -v t="$ticks" 'BEGIN { printf "%.1f", (b - a) * 100 / t / 15 }') %"
     echo "terminal:   $(awk -v a="$b1" -v b="$b2" -v t="$ticks" 'BEGIN { printf "%.1f", (b - a) * 100 / t / 15 }') %"
+    echo "by thread:"
+    join "$dir/threads.0" "$dir/threads.1" | awk -v t="$ticks" '{ d = $5 - $3; if (d > 0) printf "  %-22s %5.1f %%\n", $2, d * 100 / t / 15 }' | sort -k2 -rn
     echo "where each round's time goes:"
     grep "timing ·" "$log" | tail -4
 } > "$out"
