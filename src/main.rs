@@ -6,6 +6,7 @@
 mod nest;
 mod headless;
 mod probe;
+mod screen;
 mod session;
 
 fn main() {

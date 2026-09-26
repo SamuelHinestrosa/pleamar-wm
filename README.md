@@ -34,6 +34,12 @@ a TTY of its own —Ctrl+Alt+F3 and log in there, not from inside a desktop—:
 ./session.sh                # the demo window manager, until Ctrl+Alt+Backspace
 ```
 
+Every surface of the scene is shown: its own —one copy per monitor with
+`screens: each`— and the named ones, a bar or a corner, each painted in frames
+of its own and put together on the monitor by level and anchor, as
+layer-shell would; the pointer goes to the highest one with a zone under it.
+Marea, whole, runs in it.
+
 Ctrl+Alt+Backspace leaves; Ctrl+Alt+F1…F12 go to another TTY and back. Its
 log goes to `~/.local/state/pleamar-wm/session.log`, and the end of it is shown
 when it leaves. `pleamar-wm probe` tries what the card needs for it —buffers

@@ -8,9 +8,10 @@
 //! back. Everything it does is said on its output: run it with that going to
 //! a file, so that if the screen stays black there is something to read.
 
-use pleamar::scene::{Cursor, Keyboard, Mods, Screens, Surface, ToRender};
+use pleamar::scene::{Cursor, Mods, Screens, Surface, ToRender};
 use pleamar::wgpu;
-use pleamar::{Frames, NewSheet, PlatformWindow, Target, View};
+use crate::screen::{self, LayerFrames, LayerWindow, Output, Screen};
+use pleamar::{NewSheet, Target, View};
 use smithay::backend::drm::DrmDeviceFd;
 use smithay::backend::input::{
     AbsolutePositionEvent, Axis, AxisSource, ButtonState, InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
@@ -48,39 +49,30 @@ impl pleamar::Platform for Session {
     }
 }
 
-/// What is on screen on a monitor and what is on its way there.
+/// Which of a monitor's buffers is on screen and which is on its way.
 #[derive(Default)]
 struct Flips {
     on_screen: Option<usize>,
     pending: Option<usize>,
-    /// Painted and handed over, waiting for the card to finish it.
-    queued: Option<usize>,
     /// Whether the monitor has been given its mode with a first frame.
     set: bool,
-    /// Another TTY has the screen: nothing is shown until it comes back.
-    paused: bool,
 }
 
 struct Monitor {
     name: String,
-    connector: connector::Handle,
     crtc: crtc::Handle,
-    mode: Mode,
     size: (u32, u32),
     /// Where it is on the desktop, left to right.
     x: i32,
-    /// The sheet that paints it, and where that sheet looks in the scene's plane.
-    sheet: Option<(u32, (f32, f32))>,
+    /// What is shown on it: its surfaces, put together.
+    screen: Screen,
     flips: Arc<Mutex<Flips>>,
-    /// Rung when a flip lands, for the one waiting to send the next.
-    flipped: Arc<std::sync::Condvar>,
+    mhz: i32,
 }
 
-/// A monitor's frames: three buffers of the card, lent in turn to the render.
-struct MonitorFrames {
-    /// The thread that waits for the card and flips: the render hands a frame
-    /// over and goes on.
-    flipper: Option<std::sync::mpsc::Sender<(usize, framebuffer::Handle, wgpu::SubmissionIndex)>>,
+/// A monitor's buffers on the card: three, what each frame is put together
+/// in and shown with a page flip.
+struct DrmOutput {
     drm: DrmDeviceFd,
     gbm: Arc<Mutex<gbm::Device<DrmDeviceFd>>>,
     connector: connector::Handle,
@@ -91,9 +83,6 @@ struct MonitorFrames {
     buffers: Vec<Buffer>,
     failed: bool,
     flips: Arc<Mutex<Flips>>,
-    flipped: Arc<std::sync::Condvar>,
-    to_render: Sender<ToRender>,
-    id: u32,
 }
 
 struct Buffer {
@@ -102,7 +91,7 @@ struct Buffer {
     texture: wgpu::Texture,
 }
 
-impl MonitorFrames {
+impl DrmOutput {
     fn make_buffers(&mut self, device: &wgpu::Device, modifiers: &[u64]) -> Result<(), String> {
         let (w, h) = self.size;
         let wanted: Vec<u64> = if modifiers.is_empty() { vec![0] } else { modifiers.to_vec() };
@@ -130,14 +119,14 @@ impl MonitorFrames {
             let fb = self.drm.add_planar_framebuffer(&bo, flags).map_err(|e| format!("the monitor does not take the buffer: {e}"))?;
             self.buffers.push(Buffer { _bo: bo, fb, texture });
         }
-        println!("session · {}: {w}×{h} at {} Hz, three buffers of the card (modifier {:#x})", self.name, self.mode.vrefresh(), self.buffers.first().map_or(0, |_| wanted[0]));
+        println!("session · {}: {w}×{h} at {} Hz, three buffers of the card (modifier {:#x})", self.name, self.mode.vrefresh(), wanted[0]);
         Ok(())
     }
 }
 
-impl Frames for MonitorFrames {
-    fn acquire(&mut self, device: &wgpu::Device, modifiers: &[u64]) -> Option<(usize, wgpu::Texture)> {
-        if self.flips.lock().unwrap().paused || self.failed {
+impl Output for DrmOutput {
+    fn buffer(&mut self, device: &wgpu::Device, modifiers: &[u64]) -> Option<(usize, wgpu::Texture)> {
+        if self.failed {
             return None;
         }
         if self.buffers.is_empty() {
@@ -148,83 +137,39 @@ impl Frames for MonitorFrames {
             }
         }
         let f = self.flips.lock().unwrap();
-        (0..self.buffers.len()).find(|k| f.on_screen != Some(*k) && f.pending != Some(*k) && f.queued != Some(*k)).map(|k| (k, self.buffers[k].texture.clone()))
+        (0..self.buffers.len()).find(|k| f.on_screen != Some(*k) && f.pending != Some(*k)).map(|k| (k, self.buffers[k].texture.clone()))
     }
 
-    fn present(&mut self, which: usize, done: wgpu::SubmissionIndex, device: &wgpu::Device, _: &wgpu::Queue) {
-        if self.flipper.is_none() {
-            let (tx, rx) = std::sync::mpsc::channel::<(usize, framebuffer::Handle, wgpu::SubmissionIndex)>();
-            let (device, drm, flips, flipped, to_render) = (device.clone(), self.drm.clone(), self.flips.clone(), self.flipped.clone(), self.to_render.clone());
-            let (crtc, connector, mode, name, id) = (self.crtc, self.connector, self.mode, self.name.clone(), self.id);
-            let spawned = std::thread::Builder::new().name(format!("flips {name}")).spawn(move || {
-                for (which, fb, done) in rx {
-                    // The monitor shows what is in the buffer when it flips: it has to be painted by then.
-                    let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(done), timeout: Some(Duration::from_millis(100)) });
-                    let mut f = flips.lock().unwrap();
-                    // One flip at a time: while the last one has not landed the card
-                    // says busy, and the frame was lost. It waits for it —a refresh
-                    // at most; after that it is taken as lost—.
-                    let limit = std::time::Instant::now() + Duration::from_millis(50);
-                    while f.pending.is_some() && !f.paused {
-                        let left = limit.saturating_duration_since(std::time::Instant::now());
-                        if left.is_zero() {
-                            f.pending = None;
-                            break;
-                        }
-                        f = flipped.wait_timeout(f, left).unwrap().0;
-                    }
-                    f.queued = None;
-                    if f.paused {
-                        continue;
-                    }
-                    if !f.set {
-                        match drm.set_crtc(crtc, Some(fb), (0, 0), &[connector], Some(mode)) {
-                            Ok(()) => {
-                                f.set = true;
-                                f.on_screen = Some(which);
-                                let _ = to_render.send(ToRender::Frame(id));
-                            }
-                            Err(e) => eprintln!("session · {name}: the monitor did not take its first frame: {e}"),
-                        }
-                    } else {
-                        match drm.page_flip(crtc, fb, PageFlipFlags::EVENT, None) {
-                            Ok(()) => f.pending = Some(which),
-                            Err(e) => {
-                                eprintln!("session · {name}: a frame did not go to the screen: {e}");
-                                // Without a flip there is no notice: the render is told all the same.
-                                let _ = to_render.send(ToRender::Frame(id));
-                            }
-                        }
-                    }
+    fn show(&mut self, which: usize, done: wgpu::SubmissionIndex, device: &wgpu::Device, _: &wgpu::Queue, anew: bool) -> bool {
+        // The monitor shows what is in the buffer when it flips: it has to be put together by then.
+        let _ = device.poll(wgpu::PollType::Wait { submission_index: Some(done), timeout: Some(Duration::from_millis(100)) });
+        let mut f = self.flips.lock().unwrap();
+        if anew {
+            *f = Flips::default();
+        }
+        let fb = self.buffers[which].fb;
+        if !f.set {
+            match self.drm.set_crtc(self.crtc, Some(fb), (0, 0), &[self.connector], Some(self.mode)) {
+                Ok(()) => {
+                    f.set = true;
+                    f.on_screen = Some(which);
                 }
-            });
-            match spawned {
-                Ok(_) => self.flipper = Some(tx),
+                Err(e) => eprintln!("session · {}: the monitor did not take its first frame: {e}", self.name),
+            }
+            false
+        } else {
+            match self.drm.page_flip(self.crtc, fb, PageFlipFlags::EVENT, None) {
+                Ok(()) => {
+                    f.pending = Some(which);
+                    true
+                }
                 Err(e) => {
-                    eprintln!("session · {}: no thread for the flips: {e}", self.name);
-                    return;
+                    eprintln!("session · {}: a frame did not go to the screen: {e}", self.name);
+                    false
                 }
             }
         }
-        self.flips.lock().unwrap().queued = Some(which);
-        if let Some(tx) = &self.flipper {
-            let _ = tx.send((which, self.buffers[which].fb, done));
-        }
     }
-}
-
-/// A monitor's sheet as the render sees it: the compositor it would talk to
-/// is this process, so there is nothing to ask for.
-struct MonitorWindow {
-    cursor: Arc<Mutex<Cursor>>,
-}
-
-impl PlatformWindow for MonitorWindow {
-    fn update_input_region(&self, _: &[[i32; 4]]) {}
-    fn cursor(&self, c: Cursor) {
-        *self.cursor.lock().unwrap() = c;
-    }
-    fn keyboard(&self, _: Keyboard) {}
 }
 
 /// Everything the loop holds.
@@ -279,7 +224,11 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
         let name = format!("{}-{}", info.interface().as_str(), info.interface_id());
         let (w, h) = mode.size();
         println!("session · monitor {name}: {w}×{h} at {} Hz", mode.vrefresh());
-        monitors.push(Monitor { name, connector: conn, crtc, mode, size: (w as u32, h as u32), x, sheet: None, flips: Default::default(), flipped: Default::default() });
+        let size = (w as u32, h as u32);
+        let flips: Arc<Mutex<Flips>> = Default::default();
+        let output = DrmOutput { drm: drm.clone(), gbm: gbm.clone(), connector: conn, crtc, mode, size, name: name.clone(), buffers: Vec::new(), failed: false, flips: flips.clone() };
+        let screen = screen::screen(name.clone(), size, Box::new(output));
+        monitors.push(Monitor { name, crtc, size, x, screen, flips, mhz: mode.vrefresh() as i32 * 1000 });
         x += w as i32;
     }
     if monitors.is_empty() {
@@ -298,52 +247,81 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
         println!("session · monitors, left to right: {}", monitors.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", "));
     }
 
-    // The scene's surface on the monitors: its copies (`screens: each`) one
-    // per monitor, in order; without copies, on the first. The ones with a
-    // name —corners, panels of a desktop with layers— have nowhere to go yet.
+    // The scene's surfaces on the monitors. Its own: its copies (`screens:
+    // each`) one per monitor, in order; without copies, on the first. The
+    // named ones —a bar, a corner, a panel—: where they say, and put together
+    // over or under the scene's by their level.
     let cursor_kind = Arc::new(Mutex::new(Cursor::Normal));
     let mut id = 1000;
+    let names: Vec<String> = monitors.iter().map(|m| m.name.clone()).collect();
     for (k, s) in surfaces.iter().enumerate() {
-        if !s.name.is_empty() {
-            println!("session · the surface '{}' is not shown: a session of its own shows only the scene's", s.name);
-            continue;
-        }
-        let which = match s.screens {
-            Screens::Number(n) => n,
-            _ => 0,
+        let on: Vec<usize> = match &s.screens {
+            Screens::Number(n) => vec![*n],
+            Screens::Named(want) => names.iter().enumerate().filter(|(_, n)| want.contains(n)).map(|(i, _)| i).collect(),
+            Screens::All if !s.name.is_empty() => (0..monitors.len()).collect(),
+            Screens::All => vec![0],
         };
-        let Some(m) = monitors.get_mut(which) else { continue };
-        if m.sheet.is_some() {
-            continue;
+        for which in on {
+            let Some(m) = monitors.get(which) else { continue };
+            let taken = s.name.is_empty() && m.screen.0.lock().unwrap().layers.iter().any(|l| l.main);
+            if taken {
+                continue;
+            }
+            id += 1;
+            let layer = screen::layer(id, k, s, m.size);
+            let size = (layer.rect[2] as u32, layer.rect[3] as u32);
+            if !s.name.is_empty() {
+                println!("session · the surface '{}' on {}: {}×{} at {},{}", s.name, m.name, size.0, size.1, layer.rect[0], layer.rect[1]);
+            }
+            m.screen.0.lock().unwrap().layers.push(layer);
+            let _ = to_render.send(ToRender::Sheet(Box::new(NewSheet {
+                id,
+                target: Target::Frames(Box::new(LayerFrames::new(m.screen.clone(), id, size, to_render.clone()))),
+                window: Box::new(LayerWindow { screen: m.screen.clone(), sheet: id, cursor: cursor_kind.clone() }),
+                scale: 1.0,
+                size,
+                mhz: m.mhz,
+                name: m.name.clone(),
+                view: View { surface: k, popup: None, origin: s.origin, size: (size.0 as f32, size.1 as f32) },
+            })));
         }
-        id += 1;
-        m.sheet = Some((id, s.origin));
-        let frames = MonitorFrames {
-            flipper: None,
-            drm: drm.clone(),
-            gbm: gbm.clone(),
-            connector: m.connector,
-            crtc: m.crtc,
-            mode: m.mode,
-            size: m.size,
-            name: m.name.clone(),
-            buffers: Vec::new(),
-            failed: false,
-            flips: m.flips.clone(),
-            flipped: m.flipped.clone(),
-            to_render: to_render.clone(),
-            id,
-        };
-        let _ = to_render.send(ToRender::Sheet(Box::new(NewSheet {
-            id,
-            target: Target::Frames(Box::new(frames)),
-            window: Box::new(MonitorWindow { cursor: cursor_kind.clone() }),
-            scale: 1.0,
-            size: m.size,
-            mhz: m.mode.vrefresh() as i32 * 1000,
-            name: m.name.clone(),
-            view: View { surface: k, popup: None, origin: s.origin, size: (m.size.0 as f32, m.size.1 as f32) },
-        })));
+    }
+    // A surface that changes level or edge while running (Marea's).
+    {
+        let screens: Vec<Screen> = monitors.iter().map(|m| m.screen.clone()).collect();
+        let again = screens.clone();
+        pleamar::provide_layer_hooks(pleamar::LayerHooks {
+            relayer: Box::new(move |which, level| {
+                for sc in &screens {
+                    let mut st = sc.0.lock().unwrap();
+                    let mut any = false;
+                    for l in st.layers.iter_mut().filter(|l| l.surface == which) {
+                        l.level = level;
+                        any = true;
+                    }
+                    if any {
+                        st.dirty = true;
+                        sc.1.notify_all();
+                    }
+                }
+            }),
+            reanchor: Box::new(move |which, anchor| {
+                for sc in &again {
+                    let mut st = sc.0.lock().unwrap();
+                    let size = st.size;
+                    let mut any = false;
+                    for l in st.layers.iter_mut().filter(|l| l.surface == which && !l.main) {
+                        l.anchor = anchor;
+                        l.rect = screen::place((l.rect[2] as u32, l.rect[3] as u32), anchor, l.margin, size);
+                        any = true;
+                    }
+                    if any {
+                        st.dirty = true;
+                        sc.1.notify_all();
+                    }
+                }
+            }),
+        });
     }
 
     // The keyboard as the system has it set up, for the scene and for its windows.
@@ -418,7 +396,7 @@ impl State {
             let _ = self.drm.move_cursor(m.crtc, (cx, cy));
         }
         let m = &self.monitors[on];
-        let at = m.sheet.map(|(_, origin)| (origin.0 + (px - m.x as f64) as f32, origin.1 + py as f32));
+        let at = screen::pointer_at(&m.screen.0.lock().unwrap(), (px - m.x as f64, py));
         let _ = self.to_render.send(ToRender::Pointer(at));
     }
 
@@ -458,20 +436,20 @@ impl State {
         self.cursor = Some(bo);
     }
 
-    /// Page flips done: the frame on its way is on screen, and the render may send another.
+    /// Page flips done: the frame on its way is on screen, and the monitor can
+    /// be put together again.
     fn flipped(&mut self) {
         let Ok(events) = self.drm.receive_events() else { return };
         for e in events {
             if let DrmEvent::PageFlip(e) = e {
                 for m in self.monitors.iter().filter(|m| m.crtc == e.crtc) {
-                    let mut f = m.flips.lock().unwrap();
-                    if let Some(p) = f.pending.take() {
-                        f.on_screen = Some(p);
+                    {
+                        let mut f = m.flips.lock().unwrap();
+                        if let Some(p) = f.pending.take() {
+                            f.on_screen = Some(p);
+                        }
                     }
-                    m.flipped.notify_all();
-                    if let Some((id, _)) = m.sheet {
-                        let _ = self.to_render.send(ToRender::Frame(id));
-                    }
+                    screen::landed(&m.screen, &self.to_render);
                 }
             }
         }
@@ -483,10 +461,11 @@ impl State {
                 println!("session · another TTY has the screen");
                 self.libinput.suspend();
                 for m in &self.monitors {
-                    let mut f = m.flips.lock().unwrap();
-                    f.paused = true;
-                    f.pending = None;
-                    m.flipped.notify_all();
+                    m.flips.lock().unwrap().pending = None;
+                    let mut st = m.screen.0.lock().unwrap();
+                    st.paused = true;
+                    st.idle = true;
+                    m.screen.1.notify_all();
                 }
             }
             SessionEvent::ActivateSession => {
@@ -495,8 +474,11 @@ impl State {
                     eprintln!("session · the input devices did not come back");
                 }
                 for m in &self.monitors {
-                    let mut f = m.flips.lock().unwrap();
-                    *f = Flips::default();
+                    let mut st = m.screen.0.lock().unwrap();
+                    st.paused = false;
+                    st.anew = true;
+                    st.dirty = true;
+                    m.screen.1.notify_all();
                 }
                 if let Some(bo) = self.cursor.take() {
                     for m in &self.monitors {
