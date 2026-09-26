@@ -119,7 +119,10 @@ scene Session {
         on change under {
             over = if(under, i, if(over == i, -1, over))
         }
-        // ── where it is shown going, while one is carried ──
+        // ── where it is shown going, while one is carried ── (the program is
+        // asked for that size too: it changes only when the mouse goes onto
+        // another window or monitor, so it draws itself as it would be
+        // instead of being stretched)
         let ord.me = pick(i, ord.0, ord.1, ord.2, ord.3, ord.4, ord.5)
         let swaps = over == i and not crossing and sc == dsc
         let n.shown = max(if(crossing and sc == mon, n + 1, if(crossing and sc == dsc, n - 1, n)), 1)
@@ -209,7 +212,7 @@ scene Session {
                 clip box { from: x, y; size: w, h; corner: 12 }
                 box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: tw, th - tb; show: here }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: twv, thv - tb; show: here }
             }
             // Its two buttons: to the front, and away.
             ellipse { at: x + w - 40, y + tb / 2; radius: 5.5 + lead_zone.$i.hover; color: mint; opacity: 35% + 50% * lead_zone.$i.hover }
