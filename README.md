@@ -155,9 +155,11 @@ Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
 - **Menus** go past their window: in the session they are surfaces of the
   monitor, over everything, fitted to the monitor.
 - **Drag and drop** between windows (the target is whatever is under the
-  pointer, the icon follows it), and onto the scene's `drop` zones.
+  pointer, the icon follows it), onto the scene's `drop` zones, and out of
+  another program's surface into the windows (Marea's finder: a file dragged
+  from it lands in any program, via pleamar's `carries:`).
 - **Buffers of several planes** and **video**: NV12 frames straight from a
   hardware decoder (Firefox with VA-API) and RGBA tiles are read on the card.
 
-Not yet: touch screens and tablets, dragging from the scene out to a
-program, screen sharing tested end to end.
+Not yet: touch screens and tablets, dragging out of the window manager's
+own scene (its `carries:` zones), screen sharing tested end to end.
