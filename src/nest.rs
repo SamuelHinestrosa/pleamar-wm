@@ -727,7 +727,12 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
     // what only makes sense here says so with `wm:` in front.
     if !monitors.is_empty() {
         let file = std::env::var("PLEAMAR_WM_AUTOSTART").ok().or_else(|| crate::config::user_file("autostart", "autostart"));
-        if let Some(text) = file.as_deref().and_then(|f| std::fs::read_to_string(f).ok()) {
+        // With none of the user's, the one that comes with it (inside it).
+        let text = match file.as_deref() {
+            Some(f) => std::fs::read_to_string(f).ok(),
+            None => Some(include_str!("../autostart").to_owned()),
+        };
+        if let Some(text) = text {
             state.autostart = text
                 .lines()
                 .map(str::trim)
