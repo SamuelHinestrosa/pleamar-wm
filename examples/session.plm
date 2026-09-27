@@ -23,7 +23,8 @@
 //   sideways, the keyboard to the next / previous window
 //   The keyboard goes to the window the mouse is over, without a click.
 //   With the mouse: carry a window by its title bar; let it go on another one
-//   and they change places, or on the other monitor and it goes there. While
+//   and they change places (on the other monitor too: each takes the other's),
+//   or on an empty spot of the other monitor and it goes there. While
 //   carried, a strip at the top offers five layouts —a leader on the left,
 //   columns, rows, a grid, a leader on the right—: over one, the windows show
 //   how they would be; let go there, and that monitor keeps it.
@@ -149,6 +150,9 @@ scene Session {
     // and on its own the rest close up. Its turn there is its turn in the
     // order; first, if it is let go on a layout with a leader.
     let crossing = dragging >= 0 and mon != dsc
+    // Over a window of the other monitor: they change places —and
+    // monitors—; there nothing makes room, and here nothing closes up.
+    let xswap = crossing and over >= 0
     let landing.place = if(leads, 0, (win.0.open and win.0.screen == mon and ord.0 < ordD) + (win.1.open and win.1.screen == mon and ord.1 < ordD) + (win.2.open and win.2.screen == mon and ord.2 < ordD) + (win.3.open and win.3.screen == mon and ord.3 < ordD) + (win.4.open and win.4.screen == mon and ord.4 < ordD) + (win.5.open and win.5.screen == mon and ord.5 < ordD))
     let landing.n = pick(mon, win.on.0, win.on.1) + 1
     let landing.lay = if(picked >= 0, picked, lay.here)
@@ -196,10 +200,10 @@ scene Session {
         // another window, monitor or layout, so it draws itself as it would
         // be instead of being stretched)
         let ord.me = pick(i, ord.0, ord.1, ord.2, ord.3, ord.4, ord.5)
-        let swaps = over == i and not crossing and sc == dsc
+        let swaps = over == i and sc == mon
         let promoted = leads and not crossing and sc == dsc and dragging >= 0
-        let n.shown = max(if(crossing and sc == mon, n + 1, if(crossing and sc == dsc, n - 1, n)), 1)
-        let p.shown = if(dragging == i and promoted, 0, if(promoted, p + (p < dplace), if(swaps, dplace, if(crossing and sc == mon, p + if(leads, 1, ordD < ord.me), if(crossing and sc == dsc, p - (ord.me > ordD), p)))))
+        let n.shown = max(if(crossing and not xswap and sc == mon, n + 1, if(crossing and not xswap and sc == dsc, n - 1, n)), 1)
+        let p.shown = if(dragging == i and promoted, 0, if(promoted, p + (p < dplace), if(swaps and not crossing, dplace, if(xswap, p, if(crossing and sc == mon, p + if(leads, 1, ordD < ord.me), if(crossing and sc == dsc, p - (ord.me > ordD), p))))))
         let L.shown = if(dragging >= 0 and picked >= 0 and sc == mon, picked, L)
         let Wsv = pick(sc, screen.0.width, screen.1.width) - pick(sc, win.reserved.0.left, win.reserved.1.left) - pick(sc, win.reserved.0.right, win.reserved.1.right)
         let Hsv = pick(sc, screen.0.height, screen.1.height) - pick(sc, win.reserved.0.top, win.reserved.1.top) - pick(sc, win.reserved.0.bottom, win.reserved.1.bottom)
@@ -361,7 +365,7 @@ scene Session {
         // other monitor, if it is over that one.
         // (A prop is one for every monitor's copy: what it follows cannot
         // depend on which copy it is. Which monitor shows it goes in `show`.)
-        let hollow.there = dragging == i and crossing
+        let hollow.there = dragging == i and crossing and not xswap
         prop hollow.$i = 0 ~140ms
         follow hollow.$i = if(not fr and (swaps or (dragging == i and over < 0 and not crossing) or hollow.there), 1, 0)
         // (Its own place as it would be: in the layout picked, if one is.)
@@ -560,21 +564,28 @@ scene Session {
         }
         // Let go on another one (the one under it, as the others showed).
         on release title.$i while over >= 0 and not crossing { swap win.$i with win(over) }
+        // …and on one of the other monitor: each takes the other's place and
+        // monitor (the compositor sends both across).
+        on release title.$i while xswap {
+            swap win.$i with win(over)
+            landing = i
+            landing.to = mon
+        }
         // Let go on the other monitor (the mouse is off this one), or at the
         // edge that leads to it.
         // Until the compositor says it is there, it stays with the mouse
         // (`landing`): not a frame back on the monitor it left.
-        on release title.$i while pointer.y < 0 or pointer.y > H {
+        on release title.$i while (pointer.y < 0 or pointer.y > H) and over < 0 {
             send win.$i to 1 - screen.index
             landing = i
             landing.to = 1 - screen.index
         }
-        on release title.$i while screen.index == 0 and pointer.x > W - 40 and pointer.y >= 0 and pointer.y <= H {
+        on release title.$i while screen.index == 0 and pointer.x > W - 40 and pointer.y >= 0 and pointer.y <= H and over < 0 {
             send win.$i to 1
             landing = i
             landing.to = 1
         }
-        on release title.$i while screen.index == 1 and pointer.x < 40 and pointer.y >= 0 and pointer.y <= H {
+        on release title.$i while screen.index == 1 and pointer.x < 40 and pointer.y >= 0 and pointer.y <= H and over < 0 {
             send win.$i to 0
             landing = i
             landing.to = 0
