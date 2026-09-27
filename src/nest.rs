@@ -2014,8 +2014,16 @@ fn hit_tree(root: &WlSurface, at: Point<f64, Logical>, origin: (i32, i32)) -> Op
             let (x, y) = (x + dx, y + dy);
             let Some(p) = states.data_map.get::<Mutex<Content>>() else { return };
             let (w, h) = p.lock().unwrap().size;
-            // Nearest first: the first one under the point is the one seen.
-            if found.is_none() && at.x >= x as f64 && at.y >= y as f64 && at.x < (x + w as i32) as f64 && at.y < (y + h as i32) as f64 {
+            // Nearest first: the first one under the point that takes the
+            // pointer there. A surface that only shows —Firefox paints its
+            // page in one with an empty input region— lets it through to the
+            // one below, which is the one its program listens to.
+            let inside = at.x >= x as f64 && at.y >= y as f64 && at.x < (x + w as i32) as f64 && at.y < (y + h as i32) as f64;
+            let takes = || {
+                let local = ((at.x - x as f64).floor() as i32, (at.y - y as f64).floor() as i32);
+                states.cached_state.get::<SurfaceAttributes>().current().input_region.as_ref().is_none_or(|r| r.contains(local))
+            };
+            if found.is_none() && inside && takes() {
                 found = Some((s.clone(), Point::from((x, y))));
             }
         },
