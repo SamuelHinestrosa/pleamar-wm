@@ -811,9 +811,6 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
                 }
             }
         }
-        // What has not been shown for a while is not kept (a surface's frames
-        // take turns, so one that was not used this time may be the next).
-        bound.retain(|b| round - b.used < 8);
         part(2, &mut parts);
         queue.submit(Some(encoder.finish()));
         let done = pleamar::Sent::after(&queue);
@@ -824,6 +821,11 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
             let pixels = capture(&device, &queue, &pipeline, &groups, &bound, size, *piece);
             layers::tell(ToLayers::Captured { id: *id, pixels });
         }
+        // What has not been shown for a while is not kept (a surface's frames
+        // take turns, so one that was not used this time may be the next).
+        // Only now: `groups` points into `bound` by place, and the pictures
+        // above still draw with it.
+        bound.retain(|b| round - b.used < 8);
         let shown_at = std::time::Instant::now();
         // A flip on its way from before it is asked for: its landing may be told
         // before `show` returns (at once, headless; a fast event from the card),
