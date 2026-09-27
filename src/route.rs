@@ -28,7 +28,9 @@ impl Route {
     pub fn pointer(&mut self, on: &Screen, (mx, my): (f64, f64)) -> bool {
         let hit = {
             let st = on.0.lock().unwrap();
-            match self.grab {
+            // (Dragging something out of it, the pointer goes where it is:
+            // the windows and surfaces it crosses are where it may be let go.)
+            match self.grab.filter(|_| !layers::dragging()) {
                 // Held: the one it was pressed on keeps it, wherever it goes.
                 Some(id) => match st.clients.iter().find(|c| c.id == id) {
                     Some(c) => Hit::Client(id, (mx - c.rect[0] as f64, my - c.rect[1] as f64)),
@@ -64,6 +66,13 @@ impl Route {
     /// A button (evdev code). Says whether a program's surface had it: then,
     /// let go, the pointer is to be placed again (the grab is over).
     pub fn button(&mut self, screens: &[Screen], code: u32, down: bool) -> bool {
+        // Let go while a program drags something: straight to the compositor,
+        // which drops it wherever the pointer is (a window, a surface, the scene).
+        if layers::dragging() && !down {
+            self.grab = None;
+            layers::tell(ToLayers::Button { code, down });
+            return true;
+        }
         if let Hit::Client(id, _) = self.hit {
             if down {
                 self.grab = Some(id);

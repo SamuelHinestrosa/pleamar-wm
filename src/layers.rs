@@ -78,6 +78,12 @@ static HOLD: Mutex<Option<Hold>> = Mutex::new(None);
 /// one, and its id there), and where the pointer is on the desktop, in units.
 static DRAG: Mutex<(Vec<(usize, u64)>, (f64, f64))> = Mutex::new((Vec::new(), (0.0, 0.0)));
 
+/// Whether a program is dragging something (its icon is up): the pointer then
+/// goes to whatever is under it, not to the surface the press began on.
+pub fn dragging() -> bool {
+    !DRAG.lock().unwrap().0.is_empty()
+}
+
 pub fn set_drag_icon(ids: Vec<(usize, u64)>) {
     DRAG.lock().unwrap().0 = ids;
 }
