@@ -311,6 +311,8 @@ own scene (its `carries:` zones), screen sharing tested end to end.
 
 pleamar-wm is under the [BSD 3-Clause License][License], like Hyprland.
 
+Contributions are welcome, made with AI or without it: see the [AI policy](AI_POLICY.md).
+
 Made by **[@k4ditano][X]** — follow along on X for what comes next.
 If it makes your desktop nicer, you can **[buy me a coffee on Ko-fi][Ko-fi]** ☕
 
