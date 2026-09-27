@@ -41,6 +41,7 @@ pub struct Session;
 
 impl pleamar::Platform for Session {
     fn run(self: Box<Self>, surfaces: Vec<Surface>, _extra_height: u32, _instance: wgpu::Instance, to_render: Sender<ToRender>) {
+        keep_ahead();
         if let Err(e) = run(surfaces, to_render.clone()) {
             eprintln!("session · {e}");
             let _ = to_render.send(ToRender::Quit);
@@ -1130,4 +1131,49 @@ impl CursorMover {
         lock.lock().unwrap().entry(crtc).or_default().image = Some((image, hot));
         cv.notify_one();
     }
+}
+
+/// The threads a frame goes through —the input loop, the windows, the render,
+/// each monitor's composing, the cursor— run ahead of the programs, as
+/// Hyprland's do (round robin at priority 1). A browser loading a page keeps
+/// every core busy, and a compositor at the same level as its threads waited
+/// its turn in the middle of a frame: 15, 18, 25 ms where the frame had 6.
+/// Only them, and never what they start (reset on fork): a program launched
+/// from here runs as any other. The monitors' threads come when their first
+/// frame does, so it looks again every couple of seconds.
+fn keep_ahead() {
+    let _ = std::thread::Builder::new().name("keep ahead".into()).spawn(|| {
+        let ours = |name: &str| matches!(name, "pleamar-wm" | "render" | "windows" | "cursor") || name.starts_with("screen ");
+        let mut done: std::collections::HashSet<i32> = Default::default();
+        let mut told = false;
+        loop {
+            if let Ok(tasks) = std::fs::read_dir("/proc/self/task") {
+                for t in tasks.flatten() {
+                    let Some(tid) = t.file_name().to_str().and_then(|s| s.parse::<i32>().ok()) else { continue };
+                    if done.contains(&tid) {
+                        continue;
+                    }
+                    let name = std::fs::read_to_string(t.path().join("comm")).unwrap_or_default();
+                    if !ours(name.trim()) {
+                        continue;
+                    }
+                    let param = libc::sched_param { sched_priority: 1 };
+                    // SAFETY: a thread of this process, by its id; the parameters are valid.
+                    let r = unsafe { libc::sched_setscheduler(tid, libc::SCHED_RR | libc::SCHED_RESET_ON_FORK, &param) };
+                    if r == 0 {
+                        done.insert(tid);
+                    } else if !told {
+                        told = true;
+                        eprintln!("session · the compositor's threads could not run ahead of the programs ({}): it may stutter under load", std::io::Error::last_os_error());
+                    }
+                }
+            }
+            if !told && !done.is_empty() {
+                // Once is enough to say it.
+                told = true;
+                println!("session · the compositor's threads run ahead of the programs (round robin, priority 1)");
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    });
 }
