@@ -356,6 +356,10 @@ scene Session {
     on key Super+q { close win(win.focus) }
     // Marea's search (she runs in the session: see autostart).
     on key Super+space { launch "$HOME/Proyectos/marea-plm/marea search" }
+    // Her screenshots, as on Hyprland: a piece, the screen, the active window.
+    on key Print { launch "$HOME/Proyectos/marea-plm/marea shot_region" }
+    on key Shift+Print { launch "$HOME/Proyectos/marea-plm/marea shot_screen" }
+    on key Ctrl+Print { launch "$HOME/Proyectos/marea-plm/marea shot_window" }
     // Her lock screen (ext-session-lock).
     on key Super+l { launch "$HOME/Proyectos/marea-plm/marea lock" }
     on key Super+Tab { toggle overview }
