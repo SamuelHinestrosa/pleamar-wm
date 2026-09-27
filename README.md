@@ -152,5 +152,12 @@ and do the rest through GTK's. `sudo ./install.sh remove` takes it out.
 says whether it got a window and drew in it: kitty, alacritty, GTK 3 and 4,
 Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
 
-Not yet: multi-plane buffers, menus beyond their window, touch screens and
-tablets, drag and drop from the scene, screen sharing tested end to end.
+- **Menus** go past their window: in the session they are surfaces of the
+  monitor, over everything, fitted to the monitor.
+- **Drag and drop** between windows (the target is whatever is under the
+  pointer, the icon follows it), and onto the scene's `drop` zones.
+- **Buffers of several planes** and **video**: NV12 frames straight from a
+  hardware decoder (Firefox with VA-API) and RGBA tiles are read on the card.
+
+Not yet: touch screens and tablets, dragging from the scene out to a
+program, screen sharing tested end to end.
