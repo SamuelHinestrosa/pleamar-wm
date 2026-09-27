@@ -21,6 +21,24 @@
 use crate::layers::{self, ClientLayer, ClientPiece, ToLayers};
 use pleamar::scene::{DmabufPiece, NestEvent, PieceContent, ToNest, ToRender, WindowPiece};
 use smithay::delegate_layer_shell;
+use smithay::input::pointer::RelativeMotionEvent;
+use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
+use smithay::wayland::content_type::ContentTypeState;
+use smithay::wayland::foreign_toplevel_list::{ForeignToplevelHandle, ForeignToplevelListHandler, ForeignToplevelListState};
+use smithay::wayland::idle_inhibit::{IdleInhibitHandler, IdleInhibitManagerState};
+use smithay::wayland::idle_notify::{IdleNotifierHandler, IdleNotifierState};
+use smithay::wayland::input_method::{InputMethodHandler, InputMethodManagerState, PopupSurface as ImePopup};
+use smithay::wayland::pointer_constraints::{with_pointer_constraint, PointerConstraint, PointerConstraintsHandler, PointerConstraintsState};
+use smithay::wayland::presentation::{PresentationFeedbackCachedState, PresentationFeedbackCallback, PresentationState, Refresh};
+use smithay::wayland::relative_pointer::RelativePointerManagerState;
+use smithay::wayland::selection::ext_data_control::{DataControlHandler as ExtDataControlHandler, DataControlState as ExtDataControlState};
+use smithay::wayland::selection::primary_selection::{set_primary_focus, PrimarySelectionHandler, PrimarySelectionState};
+use smithay::wayland::selection::wlr_data_control::{DataControlHandler as WlrDataControlHandler, DataControlState as WlrDataControlState};
+use smithay::wayland::shell::xdg::dialog::{XdgDialogHandler, XdgDialogState};
+use smithay::wayland::text_input::TextInputManagerState;
+use smithay::wayland::virtual_keyboard::VirtualKeyboardManagerState;
+use smithay::wayland::xdg_activation::{XdgActivationHandler, XdgActivationState, XdgActivationToken, XdgActivationTokenData};
+use smithay::wayland::xdg_foreign::{XdgForeignHandler, XdgForeignState};
 use smithay::delegate_session_lock;
 use smithay::delegate_drm_syncobj;
 use smithay::wayland::drm_syncobj::{supports_syncobj_eventfd, DrmSyncPoint, DrmSyncobjCachedState, DrmSyncobjHandler, DrmSyncobjState};
@@ -121,6 +139,8 @@ struct Window {
     screen: usize,
     /// Where the scene shows it: on which monitor, and its box there.
     shown: Option<(String, [i32; 4])>,
+    /// Its entry in ext-foreign-toplevel-list (what a screen share lists).
+    listed: ForeignToplevelHandle,
 }
 
 /// A number for a program, the same for all its surfaces and buffers.
@@ -218,7 +238,7 @@ struct State {
     seats: SeatState<State>,
     data_device: DataDeviceState,
     popups: PopupManager,
-    _seat: Seat<State>,
+    seat: Seat<State>,
     keyboard: KeyboardHandle<State>,
     pointer: PointerHandle<State>,
     /// One per monitor, with its name (`DP-3`); nested, a single one.
@@ -274,6 +294,37 @@ struct State {
     /// their frame is ready and are told when it is no longer read.
     syncobj: Option<DrmSyncobjState>,
     next_number: u64,
+    // The usual protocols: activation (a program that asks for its window to
+    // come forward), the middle-click selection and clipboard managers,
+    // idleness, virtual keyboards and input methods, pointer lock (games),
+    // dialogs, the window list, and when each frame was shown.
+    activation: XdgActivationState,
+    primary: PrimarySelectionState,
+    _wlr_data_control: WlrDataControlState,
+    _ext_data_control: ExtDataControlState,
+    idle: IdleNotifierState<State>,
+    last_activity: Instant,
+    /// Surfaces that keep the screen awake (a video playing).
+    inhibitors: Vec<WlSurface>,
+    _idle_inhibit: IdleInhibitManagerState,
+    _virtual_keyboard: VirtualKeyboardManagerState,
+    _text_input: TextInputManagerState,
+    _input_method: InputMethodManagerState,
+    _constraints: PointerConstraintsState,
+    _relative: RelativePointerManagerState,
+    foreign: XdgForeignState,
+    _dialog: XdgDialogState,
+    toplevel_list: ForeignToplevelListState,
+    _presentation: PresentationState,
+    _content_type: ContentTypeState,
+    /// Frames waiting to be said shown, and on which monitor.
+    presented: Vec<(PresentationFeedbackCallback, usize)>,
+    presented_seq: u64,
+    /// The surface under the pointer and where it is, as last told: where
+    /// relative motion goes.
+    last_under: Option<(WlSurface, Point<f64, Logical>)>,
+    /// The surface that holds the pointer (locked or confined), if any.
+    constrained: Option<WlSurface>,
     socket: String,
     /// XWayland's display (`:1`), once it is ready.
     x_display: Option<String>,
@@ -385,6 +436,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         })
         .map_err(|e| e.to_string())?;
 
+    let primary = PrimarySelectionState::new::<State>(&dh);
     let mut state = State {
         compositor: CompositorState::new::<State>(&dh),
         xdg: XdgShellState::new::<State>(&dh),
@@ -393,8 +445,30 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         shm: ShmState::new::<State>(&dh, vec![]),
         data_device: DataDeviceState::new::<State>(&dh),
         popups: PopupManager::default(),
+        activation: XdgActivationState::new::<State>(&dh),
+        _wlr_data_control: WlrDataControlState::new::<State, _>(&dh, Some(&primary), |_| true),
+        _ext_data_control: ExtDataControlState::new::<State, _>(&dh, Some(&primary), |_| true),
+        primary,
+        idle: IdleNotifierState::new(&dh, event_loop.handle()),
+        last_activity: Instant::now(),
+        inhibitors: Vec::new(),
+        _idle_inhibit: IdleInhibitManagerState::new::<State>(&dh),
+        _virtual_keyboard: VirtualKeyboardManagerState::new::<State, _>(&dh, |_| true),
+        _text_input: TextInputManagerState::new::<State>(&dh),
+        _input_method: InputMethodManagerState::new::<State, _>(&dh, |_| true),
+        _constraints: PointerConstraintsState::new::<State>(&dh),
+        _relative: RelativePointerManagerState::new::<State>(&dh),
+        foreign: XdgForeignState::new::<State>(&dh),
+        _dialog: XdgDialogState::new::<State>(&dh),
+        toplevel_list: ForeignToplevelListState::new::<State>(&dh),
+        _presentation: PresentationState::new::<State>(&dh, libc::CLOCK_MONOTONIC as u32),
+        _content_type: ContentTypeState::new::<State>(&dh),
+        presented: Vec::new(),
+        presented_seq: 0,
+        last_under: None,
+        constrained: None,
         seats,
-        _seat: seat,
+        seat,
         keyboard,
         pointer,
         _output_manager: OutputManagerState::new_with_xdg_output::<State>(&dh),
@@ -529,18 +603,23 @@ impl State {
                 let g = win.geometry;
                 let at: Point<f64, Logical> = (g[0] as f64 + x, g[1] as f64 + y).into();
                 let root = win.toplevel.wl_surface().clone();
-                let under = self.surface_under(&root, g, at);
+                let under = self.surface_under(&root, g, at).map(|(s, o)| (s, o.to_f64()));
                 self.pointer_on = Some(slot);
                 self.panel_pointer = None;
+                self.last_under = under.clone();
                 let p = self.pointer.clone();
-                p.motion(self, under.map(|(s, o)| (s, o.to_f64())), &MotionEvent { location: at, serial, time });
+                p.motion(self, under, &MotionEvent { location: at, serial, time });
                 p.frame(self);
+                self.update_constraint();
+                self.activity();
             }
             ToNest::PointerOut => {
                 if self.pointer_on.take().is_some() {
+                    self.last_under = None;
                     let p = self.pointer.clone();
                     p.motion(self, None, &MotionEvent { location: (0.0, 0.0).into(), serial, time });
                     p.frame(self);
+                    self.update_constraint();
                 }
             }
             ToNest::Button { code, down } => {
@@ -561,6 +640,7 @@ impl State {
                 let state = if down { smithay::backend::input::ButtonState::Pressed } else { smithay::backend::input::ButtonState::Released };
                 p.button(self, &ButtonEvent { serial, time, button: code, state });
                 p.frame(self);
+                self.activity();
             }
             ToNest::Wheel(dy) => {
                 let p = self.pointer.clone();
@@ -587,6 +667,7 @@ impl State {
                 let k = self.keyboard.clone();
                 let state = if down { smithay::backend::input::KeyState::Pressed } else { smithay::backend::input::KeyState::Released };
                 k.input::<(), _>(self, (code + 8).into(), state, serial, time, |_, _, _| FilterResult::Forward);
+                self.activity();
             }
             ToNest::HostFocus(yes) => {
                 self.host_focus = yes;
@@ -963,18 +1044,22 @@ impl State {
             ToLayers::Pointer { id, x, y } => {
                 let Some(root) = self.panels.iter().find(|p| p.id == id).map(|p| p.shell.wl_surface().clone()) else { return };
                 let at: Point<f64, Logical> = (x, y).into();
-                let under = self.surface_under(&root, [0, 0, 0, 0], at);
+                let under = self.surface_under(&root, [0, 0, 0, 0], at).map(|(s, o)| (s, o.to_f64()));
                 self.pointer_on = None;
                 self.panel_pointer = Some(id);
+                self.last_under = under.clone();
                 let p = self.pointer.clone();
-                p.motion(self, under.map(|(s, o)| (s, o.to_f64())), &MotionEvent { location: at, serial, time });
+                p.motion(self, under, &MotionEvent { location: at, serial, time });
                 p.frame(self);
+                self.update_constraint();
             }
             ToLayers::PointerOut => {
                 if self.panel_pointer.take().is_some() {
+                    self.last_under = None;
                     let p = self.pointer.clone();
                     p.motion(self, None, &MotionEvent { location: (0.0, 0.0).into(), serial, time });
                     p.frame(self);
+                    self.update_constraint();
                 }
             }
             ToLayers::Button { code, down } => {
@@ -1009,7 +1094,72 @@ impl State {
             ToLayers::Released(numbers) => self.release(numbers),
             ToLayers::Monitors => self.monitors_changed(),
             ToLayers::Captured { id, pixels } => self.hand_picture(id, pixels),
+            ToLayers::Relative { dx, dy, ux, uy, utime } => {
+                // A hold its program let go of (it unlocked): the pointer is free again.
+                if let Some(s) = self.constrained.clone() {
+                    if !s.alive() || !with_pointer_constraint(&s, &self.pointer, |c| c.is_some_and(|c| c.is_active())) {
+                        self.constrained = None;
+                        layers::set_pointer_hold(None);
+                    }
+                }
+                let focus = self.last_under.clone().filter(|(s, _)| s.alive() && self.pointer.current_focus().as_ref() == Some(s));
+                if focus.is_some() {
+                    let p = self.pointer.clone();
+                    p.relative_motion(self, focus, &RelativeMotionEvent { delta: (dx, dy).into(), delta_unaccel: (ux, uy).into(), utime });
+                    p.frame(self);
+                }
+            }
+            ToLayers::Activity => self.activity(),
         }
+    }
+
+    /// Someone touched something: whoever watches for idleness is told (not
+    /// more than a few times a second).
+    fn activity(&mut self) {
+        if self.last_activity.elapsed() < Duration::from_millis(200) {
+            return;
+        }
+        self.last_activity = Instant::now();
+        let seat = self.seat.clone();
+        self.idle.notify_activity(&seat);
+    }
+
+    /// A program that asked to hold the pointer gets it while the pointer is
+    /// on its surface, and lets go of it when it leaves; the session is told
+    /// to keep the pointer still or inside that window.
+    fn update_constraint(&mut self) {
+        let focus = self.pointer.current_focus();
+        if let Some(s) = self.constrained.clone() {
+            if focus.as_ref() != Some(&s) {
+                if s.alive() {
+                    with_pointer_constraint(&s, &self.pointer, |c| {
+                        if let Some(c) = c {
+                            c.deactivate();
+                        }
+                    });
+                }
+                self.constrained = None;
+                layers::set_pointer_hold(None);
+            }
+        }
+        let Some(f) = focus else { return };
+        if self.constrained.as_ref() == Some(&f) {
+            return;
+        }
+        let locked = with_pointer_constraint(&f, &self.pointer, |c| {
+            let c = c?;
+            if !c.is_active() {
+                c.activate();
+            }
+            Some(matches!(&*c, PointerConstraint::Locked(_)))
+        });
+        let Some(locked) = locked else { return };
+        self.constrained = Some(f);
+        let monitors = layers::monitors();
+        let rect = self.pointer_on.and_then(|s| self.slots.get(s)).and_then(Option::as_ref).and_then(|w| w.shown.clone()).and_then(|(name, r)| {
+            monitors.iter().find(|m| m.name == name).map(|m| [r[0] + m.x, r[1] + m.y, r[2], r[3]])
+        });
+        layers::set_pointer_hold(Some(if locked { layers::Hold::Locked } else { layers::Hold::Confined(rect) }));
     }
 
     fn monitor_size(&self, k: usize) -> (i32, i32) {
@@ -1147,6 +1297,20 @@ impl State {
         for cb in self.callbacks.drain(..) {
             cb.done(t);
         }
+        // When they were shown (presentation-time): now, on their monitor.
+        if !self.presented.is_empty() {
+            let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+            // SAFETY: a valid timespec for the call to fill.
+            unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+            let now = Duration::new(ts.tv_sec as u64, ts.tv_nsec as u32);
+            self.presented_seq += 1;
+            for (cb, monitor) in std::mem::take(&mut self.presented) {
+                let Some(output) = self.outputs.get(monitor).or(self.outputs.first()) else { continue };
+                let mhz = output.current_mode().map_or(60_000, |m| m.refresh.max(1));
+                let refresh = Refresh::fixed(Duration::from_nanos(1_000_000_000_000 / mhz as u64));
+                cb.presented(output, now, refresh, self.presented_seq, wp_presentation_feedback::Kind::Vsync);
+            }
+        }
     }
 
     /// A slot for a new window, if there is one free: turning round from the last one given.
@@ -1172,7 +1336,8 @@ impl State {
             }
         });
         self.outputs[self.on_screen.min(self.outputs.len() - 1)].enter(toplevel.wl_surface());
-        self.slots[slot] = Some(Window { toplevel, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen: self.on_screen, shown: None });
+        let listed = self.toplevel_list.new_toplevel::<State>(title.clone(), app.clone());
+        self.slots[slot] = Some(Window { toplevel, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen: self.on_screen, shown: None, listed });
         self.order.push(slot);
         self.tell(NestEvent::Opened { slot, title, app, screen: self.on_screen });
         self.tell(NestEvent::Order(self.order.clone()));
@@ -1185,7 +1350,9 @@ impl State {
     fn forget(&mut self, toplevel: &ToplevelSurface) {
         self.waiting.retain(|t| t != toplevel);
         let Some(slot) = self.slots.iter().position(|w| w.as_ref().is_some_and(|w| &w.toplevel == toplevel)) else { return };
-        self.slots[slot] = None;
+        if let Some(w) = self.slots[slot].take() {
+            self.toplevel_list.remove_toplevel(&w.listed);
+        }
         self.order.retain(|s| *s != slot);
         for (_, h) in self.toplevel_handles.iter().filter(|(s, _)| *s == slot) {
             h.closed();
@@ -1479,6 +1646,7 @@ impl CompositorHandler for State {
             (attrs.buffer.take(), std::mem::take(&mut attrs.frame_callbacks))
         });
         self.callbacks.extend(callbacks);
+        let feedback = with_states(surface, |s| std::mem::take(&mut s.cached_state.get::<PresentationFeedbackCachedState>().current().callbacks));
         let buffer_was_removed = matches!(buffer, Some(BufferAssignment::Removed));
         // Each surface has its number for the render the first time it shows something.
         if !with_states(surface, |s| s.data_map.get::<Mutex<Content>>().is_some()) {
@@ -1558,6 +1726,10 @@ impl CompositorHandler for State {
         while let Some(p) = get_parent(&root) {
             root = p;
         }
+        if !feedback.is_empty() {
+            let monitor = self.panels.iter().find(|p| p.shell.wl_surface() == &root).map(|p| p.monitor).or_else(|| self.window_of(&root).and_then(|s| self.slots[s].as_ref()).map(|w| w.screen)).unwrap_or(self.on_screen);
+            self.presented.extend(feedback.into_iter().map(|f| (f, monitor)));
+        }
         // A program's surface: told its size (again, if it asks for another or
         // it was hidden), and shown.
         if let Some(k) = self.panels.iter().position(|p| p.shell.wl_surface() == &root) {
@@ -1573,12 +1745,15 @@ impl CompositorHandler for State {
                 t.send_configure();
             }
             self.dirty.push(root);
-        } else if let Some(PopupKind::Xdg(p)) = self.popups.find_popup(&root) {
-            if !p.is_initial_configure_sent() {
-                let _ = p.send_configure();
+        } else if let Some(popup) = self.popups.find_popup(&root) {
+            if let PopupKind::Xdg(p) = &popup {
+                if !p.is_initial_configure_sent() {
+                    let _ = p.send_configure();
+                }
             }
-            // A menu is drawn inside its window: that window's image changes.
-            if let Ok(owner) = smithay::desktop::find_popup_root_surface(&PopupKind::Xdg(p)) {
+            // A menu (or an input method's candidates) is drawn inside its
+            // window: that window's image changes.
+            if let Ok(owner) = smithay::desktop::find_popup_root_surface(&popup) {
                 self.dirty.push(owner);
             }
         } else if let Some(t) = self.waiting.iter().find(|t| t.wl_surface() == &root).cloned() {
@@ -1642,6 +1817,8 @@ impl XdgShellHandler for State {
         let title = with_states(surface.wl_surface(), |s| s.data_map.get::<XdgToplevelSurfaceData>().and_then(|d| d.lock().unwrap().title.clone())).unwrap_or_default();
         if let Some(Some(w)) = self.slots.get_mut(slot) {
             w.title = title.clone();
+            w.listed.send_title(&title);
+            w.listed.send_done();
         }
         for (_, h) in self.toplevel_handles.iter().filter(|(s, _)| *s == slot) {
             h.title(title.clone());
@@ -1655,6 +1832,8 @@ impl XdgShellHandler for State {
         let app = with_states(surface.wl_surface(), |s| s.data_map.get::<XdgToplevelSurfaceData>().and_then(|d| d.lock().unwrap().app_id.clone())).unwrap_or_default();
         if let Some(Some(w)) = self.slots.get_mut(slot) {
             w.app = app.clone();
+            w.listed.send_app_id(&app);
+            w.listed.send_done();
         }
         for (_, h) in self.toplevel_handles.iter().filter(|(s, _)| *s == slot) {
             h.app_id(app.clone());
@@ -1713,7 +1892,8 @@ impl SeatHandler for State {
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
         // What is copied goes with the keyboard: the focused program is offered it.
         let client = focused.and_then(|s| self.dh.get_client(s.id()).ok());
-        smithay::wayland::selection::data_device::set_data_device_focus(&self.dh, seat, client);
+        smithay::wayland::selection::data_device::set_data_device_focus(&self.dh, seat, client.clone());
+        set_primary_focus(&self.dh, seat, client);
     }
 
     /// The cursor the program asks for, by its name: pleamar draws its own of
@@ -1998,6 +2178,106 @@ impl WlrLayerShellHandler for State {
 }
 impl TabletSeatHandler for State {}
 
+impl PrimarySelectionHandler for State {
+    fn primary_selection_state(&self) -> &PrimarySelectionState {
+        &self.primary
+    }
+}
+
+impl WlrDataControlHandler for State {
+    fn data_control_state(&self) -> &WlrDataControlState {
+        &self._wlr_data_control
+    }
+}
+
+impl ExtDataControlHandler for State {
+    fn data_control_state(&self) -> &ExtDataControlState {
+        &self._ext_data_control
+    }
+}
+
+/// A program asks for a window to come forward (a link opened in the browser
+/// that is already running): it does, with a token from the last few seconds.
+impl XdgActivationHandler for State {
+    fn activation_state(&mut self) -> &mut XdgActivationState {
+        &mut self.activation
+    }
+
+    fn request_activation(&mut self, token: XdgActivationToken, data: XdgActivationTokenData, surface: WlSurface) {
+        if data.timestamp.elapsed() < Duration::from_secs(10) {
+            if let Some(slot) = self.window_of(&surface) {
+                self.set_focus(Some(slot));
+            }
+        }
+        self.activation.remove_token(&token);
+    }
+}
+
+impl IdleNotifierHandler for State {
+    fn idle_notifier_state(&mut self) -> &mut IdleNotifierState<Self> {
+        &mut self.idle
+    }
+}
+
+impl IdleInhibitHandler for State {
+    fn inhibit(&mut self, surface: WlSurface) {
+        self.inhibitors.retain(|s| s.alive() && s != &surface);
+        self.inhibitors.push(surface);
+        self.idle.set_is_inhibited(true);
+        layers::set_inhibited(true);
+    }
+
+    fn uninhibit(&mut self, surface: WlSurface) {
+        self.inhibitors.retain(|s| s.alive() && s != &surface);
+        let any = !self.inhibitors.is_empty();
+        self.idle.set_is_inhibited(any);
+        layers::set_inhibited(any);
+    }
+}
+
+/// An input method's candidates (fcitx5): a menu of the window being typed in.
+impl InputMethodHandler for State {
+    fn new_popup(&mut self, surface: ImePopup) {
+        if let Err(e) = self.popups.track_popup(PopupKind::from(surface)) {
+            eprintln!("windows · an input method's popup could not be tracked: {e:?}");
+        }
+    }
+
+    fn dismiss_popup(&mut self, surface: ImePopup) {
+        if let Some(parent) = surface.get_parent().map(|p| p.surface.clone()) {
+            let _ = PopupManager::dismiss_popup(&parent, &PopupKind::from(surface));
+        }
+    }
+
+    fn popup_repositioned(&mut self, _: ImePopup) {}
+
+    fn parent_geometry(&self, parent: &WlSurface) -> smithay::utils::Rectangle<i32, Logical> {
+        with_states(parent, |s| s.cached_state.get::<SurfaceCachedState>().current().geometry).unwrap_or_default()
+    }
+}
+
+impl PointerConstraintsHandler for State {
+    fn new_constraint(&mut self, _: &WlSurface, _: &PointerHandle<Self>) {
+        self.update_constraint();
+    }
+
+    fn cursor_position_hint(&mut self, _: &WlSurface, _: &PointerHandle<Self>, _: Point<f64, Logical>) {}
+}
+
+impl XdgForeignHandler for State {
+    fn xdg_foreign_state(&mut self) -> &mut XdgForeignState {
+        &mut self.foreign
+    }
+}
+
+impl XdgDialogHandler for State {}
+
+impl ForeignToplevelListHandler for State {
+    fn foreign_toplevel_list_state(&mut self) -> &mut ForeignToplevelListState {
+        &mut self.toplevel_list
+    }
+}
+
 delegate_compositor!(State);
 delegate_shm!(State);
 delegate_xdg_shell!(State);
@@ -2010,3 +2290,19 @@ delegate_dmabuf!(State);
 delegate_layer_shell!(State);
 delegate_session_lock!(State);
 delegate_drm_syncobj!(State);
+smithay::delegate_primary_selection!(State);
+smithay::delegate_data_control!(State);
+smithay::delegate_ext_data_control!(State);
+smithay::delegate_xdg_activation!(State);
+smithay::delegate_idle_notify!(State);
+smithay::delegate_idle_inhibit!(State);
+smithay::delegate_virtual_keyboard_manager!(State);
+smithay::delegate_text_input_manager!(State);
+smithay::delegate_input_method_manager!(State);
+smithay::delegate_pointer_constraints!(State);
+smithay::delegate_relative_pointer!(State);
+smithay::delegate_xdg_foreign!(State);
+smithay::delegate_xdg_dialog!(State);
+smithay::delegate_foreign_toplevel_list!(State);
+smithay::delegate_presentation!(State);
+smithay::delegate_content_type!(State);

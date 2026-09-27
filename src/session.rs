@@ -194,6 +194,7 @@ struct State {
     /// a pinch: how many, and how much bigger or smaller.
     swipe: Option<(u32, f64, f64)>,
     pinch: Option<(u32, f64)>,
+    last_touch: std::time::Instant,
     /// Who has the pointer: the scene, or a program's surface (layer-shell).
     hit: Hit,
     /// The program's surface a button was pressed on: it keeps the pointer until it is let go.
@@ -319,7 +320,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     let first = monitors.first().map_or((0.0, 0.0), |m| (m.x as f64 + m.size.0 as f64 / 2.0, m.y as f64 + m.size.1 as f64 / 2.0));
     layers::set_card(drm.clone());
     layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz }, m.screen.clone())).collect());
-    let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, hit: Hit::Scene(None), grab: None, key_client: None, gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
+    let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), hit: Hit::Scene(None), grab: None, key_client: None, gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
     state.make_cursors(&gbm);
     // The cursor the scene and the programs ask for, whenever it changes.
     let (cursor_tx, cursor_rx) = smithay::reexports::calloop::channel::channel::<(bool, Cursor)>();
@@ -563,7 +564,12 @@ impl State {
     /// The pointer moved by that much: across the monitors as they are
     /// placed. Off all of them, it stays at the edge of the nearest.
     fn move_pointer(&mut self, dx: f64, dy: f64) {
-        let (px, py) = (self.pointer.0 + dx, self.pointer.1 + dy);
+        let (mut px, mut py) = (self.pointer.0 + dx, self.pointer.1 + dy);
+        // Confined by a program: inside its window.
+        if let Some(layers::Hold::Confined(Some(r))) = layers::pointer_hold() {
+            px = px.clamp(r[0] as f64, (r[0] + r[2]).max(r[0] + 1) as f64 - 1.0);
+            py = py.clamp(r[1] as f64, (r[1] + r[3]).max(r[1] + 1) as f64 - 1.0);
+        }
         let clamp = |m: &Monitor| (px.clamp(m.x as f64, (m.x + m.size.0 as i32) as f64 - 1.0), py.clamp(m.y as f64, (m.y + m.size.1 as i32) as f64 - 1.0));
         let Some((on, (px, py))) = self
             .monitors
@@ -780,8 +786,20 @@ impl State {
     }
 
     fn input(&mut self, event: InputEvent<LibinputInputBackend>) {
+        // Anything but a device coming or going is someone there.
+        if !matches!(event, InputEvent::DeviceAdded { .. } | InputEvent::DeviceRemoved { .. }) {
+            self.touched();
+        }
         match event {
-            InputEvent::PointerMotion { event } => self.move_pointer(event.delta_x(), event.delta_y()),
+            InputEvent::PointerMotion { event } => {
+                // As it moved, for a program that locked the pointer (a game).
+                layers::tell(ToLayers::Relative { dx: event.delta_x(), dy: event.delta_y(), ux: event.delta_x_unaccel(), uy: event.delta_y_unaccel(), utime: smithay::backend::input::Event::time(&event) });
+                match layers::pointer_hold() {
+                    // Locked: the pointer stays where it is; only the motion is told.
+                    Some(layers::Hold::Locked) => {}
+                    _ => self.move_pointer(event.delta_x(), event.delta_y()),
+                }
+            }
             InputEvent::PointerMotionAbsolute { event } => {
                 // A tablet or a virtual machine's pointer: over all of the desktop.
                 let x0 = self.monitors.iter().map(|m| m.x).min().unwrap_or(0);
@@ -921,6 +939,15 @@ impl State {
                 return;
             }
             let _ = self.to_render.send(ToRender::KeyReleased(name, evdev));
+        }
+    }
+
+    /// Someone is there: the compositor tells whoever watches for idleness
+    /// (not more than a few times a second).
+    fn touched(&mut self) {
+        if self.last_touch.elapsed() > Duration::from_millis(200) {
+            self.last_touch = std::time::Instant::now();
+            layers::tell(ToLayers::Activity);
         }
     }
 

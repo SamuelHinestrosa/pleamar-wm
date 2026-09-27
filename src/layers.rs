@@ -48,6 +48,40 @@ pub enum ToLayers {
     /// A picture a program asked for (wlr-screencopy): its pixels, BGRA,
     /// row after row with no padding; none if it could not be taken.
     Captured { id: u64, pixels: Option<Vec<u8>> },
+    /// The mouse moved, as it moved (a game that locked the pointer reads
+    /// this): accelerated and not, and when, in µs.
+    Relative { dx: f64, dy: f64, ux: f64, uy: f64, utime: u64 },
+    /// Someone touched something: not idle.
+    Activity,
+}
+
+/// What a program holding the pointer asks of it: that it stays where it is
+/// (a game looking around), or inside its window (on the desktop, x, y, w, h).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Hold {
+    Locked,
+    Confined(Option<[i32; 4]>),
+}
+
+static HOLD: Mutex<Option<Hold>> = Mutex::new(None);
+
+pub fn set_pointer_hold(h: Option<Hold>) {
+    *HOLD.lock().unwrap() = h;
+}
+
+pub fn pointer_hold() -> Option<Hold> {
+    *HOLD.lock().unwrap()
+}
+
+/// Whether a program keeps the screen awake (idle-inhibit: a video playing).
+static INHIBITED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn set_inhibited(yes: bool) {
+    INHIBITED.store(yes, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn inhibited() -> bool {
+    INHIBITED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// A program's surface on a monitor: where, at what level, and what it shows.
