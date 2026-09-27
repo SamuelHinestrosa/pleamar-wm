@@ -417,6 +417,9 @@ struct State {
     /// The program's surface the pointer is on, or the one with the keyboard.
     panel_pointer: Option<u64>,
     panel_keyboard: Option<u64>,
+    /// Whether the program's surface with the keyboard has it because it
+    /// asked for all of it (then it goes back when it stops asking).
+    exclusive_keyboard: bool,
     _session_lock: SessionLockManagerState,
     /// Who listens to what windows there are (wlr-foreign-toplevel: Marea's
     /// «where the focus is», a taskbar), and each window's handle for each.
@@ -663,6 +666,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         pictures: HashMap::new(),
         panel_pointer: None,
         panel_keyboard: None,
+        exclusive_keyboard: false,
         _session_lock: SessionLockManagerState::new::<State, _>(&dh, |_| true),
         toplevel_managers: Vec::new(),
         toplevel_handles: Vec::new(),
@@ -1439,6 +1443,7 @@ impl State {
                 if self.panel_keyboard != Some(id) {
                     let Some(surface) = self.panels.iter().find(|p| p.id == id).map(|p| p.shell.wl_surface().clone()) else { return };
                     self.panel_keyboard = Some(id);
+                    self.exclusive_keyboard = false;
                     let k = self.keyboard.clone();
                     k.set_focus(self, Some(surface), serial);
                 }
@@ -1612,6 +1617,21 @@ impl State {
             KeyboardInteractivity::Exclusive => 1,
             KeyboardInteractivity::OnDemand => 2,
         };
+        // Asking for all of the keyboard (Marea's finder as it opens), it is
+        // given at once, not with the first key: the program is told it has
+        // it, and puts its cursor in its field. Letting go, it goes back to
+        // the window that had it.
+        let visible = w > 0 && h > 0;
+        if keyboard == 1 && visible && self.panel_keyboard != Some(id) {
+            self.panel_keyboard = Some(id);
+            self.exclusive_keyboard = true;
+            let k = self.keyboard.clone();
+            k.set_focus(self, Some(root.clone()), SERIAL_COUNTER.next_serial());
+        } else if (keyboard != 1 || !visible) && self.panel_keyboard == Some(id) && self.exclusive_keyboard {
+            self.panel_keyboard = None;
+            self.exclusive_keyboard = false;
+            self.set_focus(self.focus);
+        }
         let blur: Vec<[i32; 4]> = with_states(&root, |s| s.data_map.get::<Blur>().map(|b| b.0.lock().unwrap().clone())).unwrap_or_default().iter().map(|b| [px(b[0]), px(b[1]), px(b[2]), px(b[3])]).collect();
         if std::env::var_os("PLEAMAR_DEBUG_WINDOWS").is_some() {
             eprintln!("windows · surface {id}: level {level}, keyboard {keyboard}, {}×{} at {x},{y}", w, h);
