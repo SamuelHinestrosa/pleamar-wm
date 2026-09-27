@@ -153,7 +153,9 @@ scene Session {
         // A window is laid out on its own monitor: how big that one is and how
         // many windows share it. Each copy of the scene draws only its own.
         let sc = win.$i.screen
-        let here = win.$i.open and sc == screen.index and not win.$i.minimized
+        // (Asked to close: see `seen`.)
+        prop bye.$i = 0 ~0ms
+        let here = win.$i.open and sc == screen.index and not win.$i.minimized and bye.$i < 0.5
         // (Drawn while it goes away into the island, too.)
         let drawn = win.$i.open and sc == screen.index
         let n = max(pick(sc, win.on.0, win.on.1), 1)
@@ -246,14 +248,19 @@ scene Session {
         fact fh.$i = 0
         fact maxed.$i = 0
         fact stamp.$i = 0
+        // Which monitor its free place was made on: monitors differ in size,
+        // so a place from the other one is not a place here.
+        fact fsc.$i = -1
         let F = pick(sc, free.0, free.1)
-        // (Only once it has a place of its own: the frame free is taken,
-        // it has none yet, and it headed for the corner.)
-        let fr = F > 0.5 and fw.$i > 0.5 and not win.$i.fullscreen and not win.$i.dialog
-        let fgx = if(maxed.$i, x0 + gap, fx.$i)
-        let fgy = if(maxed.$i, y0, fy.$i)
-        let fgw = if(maxed.$i, Ws - 2 * gap, fw.$i)
-        let fgh = if(maxed.$i, ah, fh.$i)
+        // (Only once it has a place of its own on this monitor: the frame free
+        // is taken, it has none yet, and it headed for the corner.)
+        let fr = F > 0.5 and fw.$i > 0.5 and fsc.$i == sc and not win.$i.fullscreen and not win.$i.dialog
+        // Never lost: no bigger than its monitor, and always with a good
+        // piece of it —and all of its title bar— inside, to take it by.
+        let fgw = if(maxed.$i, Ws - 2 * gap, min(fw.$i, Ws - 2 * gap))
+        let fgh = if(maxed.$i, ah, min(fh.$i, ah))
+        let fgx = if(maxed.$i, x0 + gap, clamp(fx.$i, x0 + 160 - fgw, x0 + Ws - 160))
+        let fgy = if(maxed.$i, y0, clamp(fy.$i, pick(sc, win.reserved.0.top, win.reserved.1.top), y0 + ah - tb - 40))
         // Put away, it stays where it was (the others close up without it),
         // and flies from there into Marea's island.
         fact mx.$i = 0
@@ -272,16 +279,23 @@ scene Session {
         let goal.w = if(win.$i.minimized, mw.$i, if(fr, fgw, twv))
         let goal.h = if(win.$i.minimized, mh.$i, if(fr, fgh, thv))
         // How far into the island: 0 here, 1 put away.
-        prop mini.$i = 0 ~420ms
+        prop mini.$i = 0 ~720ms
         follow mini.$i = if(win.$i.minimized, 1, 0)
         // Free for the first time: where it is now. Opened free: in the middle, a step down per slot.
         // (A little smaller than its tile, in the middle of it: it is seen
         // coming off.)
-        on change F while fw.$i < 1 and win.$i.open {
-            fx.$i = x.$i + w.$i * 0.07
-            fy.$i = y.$i + h.$i * 0.06
-            fw.$i = w.$i * 0.86
-            fh.$i = h.$i * 0.88
+        // From where its tile is on this monitor —not from where it is shown
+        // going, which may be mid-glide or on the other monitor—. The same
+        // when it arrives free on a monitor its place was not made on
+        // (unless it was let go there: then that is its place).
+        let unplaced = F > 0.5 and win.$i.open and (fw.$i < 1 or fsc.$i != sc) and dragging != i and not (landing == i and sc != landing.to)
+        on change unplaced while unplaced {
+            fx.$i = tx + tw * 0.07
+            fy.$i = ty + th * 0.06
+            fw.$i = tw * 0.86
+            fh.$i = th * 0.88
+            fsc.$i = sc
+            maxed.$i = 0
         }
         // Tiled to free and back, each one gives a little jump, and free it
         // floats: a deeper shadow.
@@ -293,6 +307,7 @@ scene Session {
             fh.$i = ah * 0.7
             fx.$i = x0 + Ws * 0.2 + 28 * i
             fy.$i = y0 + ah * 0.1 + 28 * i
+            fsc.$i = sc
             maxed.$i = 0
         }
         on change win.$i.open while not win.$i.open {
@@ -316,9 +331,16 @@ scene Session {
         // Carried with the mouse: how far from its place.
         prop dx.$i = 0 ~glide
         prop dy.$i = 0 ~glide
-        prop seen.$i = 0 ~300ms
-        follow seen.$i = if(win.$i.open, 1, 0)
+        // Asked to close, it goes at once: the program may take its time to
+        // leave (a browser, a second), and nobody should wait for it. If it
+        // is still there a while later —it asked whether to save—, it is back.
+        on change win.$i.open while win.$i.open { bye.$i: 0 }
+        prop seen.$i = 0 ~260ms
+        follow seen.$i = if(win.$i.open and bye.$i < 0.5, 1, 0)
         prop lit.$i = 0 ~220ms
+        // Maximized or back: a wave runs through it from the button, and
+        // it swells a little as it passes, like water filling a basin.
+        prop wave.$i = 1 ~720ms
         follow lit.$i = if(win.$i.focused and not overview, 1, if(overview, 1, 0))
 
         let x = x.$i + dx.$i
@@ -377,7 +399,7 @@ scene Session {
             show: seen.$i > 0.01 and sc == screen.index and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog and mini.$i < 0.001
             opacity: seen.$i
             pivot: x + w / 2, y + h / 2
-            scale: (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F))
+            scale: (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F)) * (1 + 0.012 * sin(180 * wave.$i))
             body {
                 color: #0c0e10
                 shadow: 0, 14 + 8 * lit.$i + 10 * lift.$i, 34 + 18 * lift.$i, 45% + 20% * lit.$i + 10% * lift.$i
@@ -392,11 +414,55 @@ scene Session {
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
                 window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: goal.w, goal.h - tb; show: drawn and not win.$i.fullscreen }
             }
-            // Its three buttons: put away (into Marea), to the front (free,
-            // the whole monitor), and away for good.
-            ellipse { at: x + w - 60, y + tb / 2; radius: 5.5 + mini_zone.$i.hover; color: amber; opacity: 40% + 50% * mini_zone.$i.hover }
-            ellipse { at: x + w - 40, y + tb / 2; radius: 5.5 + lead_zone.$i.hover; color: mint; opacity: 35% + 50% * lead_zone.$i.hover }
-            ellipse { at: x + w - 20, y + tb / 2; radius: 5.5 + close_zone.$i.hover; color: coral; opacity: 45% + 50% * close_zone.$i.hover }
+            // (The wave: two soft crests of light, the second behind the first.)
+            group {
+                show: wave.$i > 0.001 and wave.$i < 0.999
+                blur: 6
+                mode: screen
+                clip box { from: x, y; size: w, h; corner: 12 }
+                ellipse { at: x + w - 40, y + tb / 2; radius: 20 + wave.$i * (w + h); stroke: 44 * (1 - wave.$i) + 4; color: mint; opacity: 55% * (1 - wave.$i) }
+                ellipse { at: x + w - 40, y + tb / 2; radius: 10 + max(wave.$i - 0.2, 0) * (w + h); stroke: 20 * (1 - wave.$i) + 2; color: #dffaf0; opacity: 40% * (1 - wave.$i) }
+            }
+            // Its three buttons, three drops of water: put away (into
+            // Marea), to the front (free, the whole monitor), and away for
+            // good. Lit from above, a glint on top; the mouse over one, it
+            // swells, a halo spreads round it and it shows what it does.
+            let by = y + tb / 2
+            let b.any = max(max(mini_zone.$i.hover, lead_zone.$i.hover), close_zone.$i.hover)
+            group {
+                opacity: 45% + 55% * max(lit.$i, b.any)
+                ellipse { at: x + w - 60, by; radius: 8 + 3 * mini_zone.$i.hover; stroke: 1.2; color: amber; opacity: 55% * mini_zone.$i.hover }
+                ellipse { at: x + w - 40, by; radius: 8 + 3 * lead_zone.$i.hover; stroke: 1.2; color: mint; opacity: 55% * lead_zone.$i.hover }
+                ellipse { at: x + w - 20, by; radius: 8 + 3 * close_zone.$i.hover; stroke: 1.2; color: coral; opacity: 55% * close_zone.$i.hover }
+                body {
+                    gradient: radial x + w - 62, by - 3 radius 10, #fff3d6, amber 45%, #a8781f
+                    rim: 35%
+                    shadow: 0, 1, 3, 40%
+                    ellipse { at: x + w - 60, by; radius: 6 + 1.5 * mini_zone.$i.hover }
+                }
+                body {
+                    gradient: radial x + w - 42, by - 3 radius 10, #e8fff5, mint 45%, #3f8f76
+                    rim: 35%
+                    shadow: 0, 1, 3, 40%
+                    ellipse { at: x + w - 40, by; radius: 6 + 1.5 * lead_zone.$i.hover }
+                }
+                body {
+                    gradient: radial x + w - 22, by - 3 radius 10, #ffe4dc, coral 45%, #b0412f
+                    rim: 35%
+                    shadow: 0, 1, 3, 40%
+                    ellipse { at: x + w - 20, by; radius: 6 + 1.5 * close_zone.$i.hover }
+                }
+                ellipse { at: x + w - 62, by - 3; radius: 2; scale: 1.3, 0.75; color: #fff; opacity: 75% }
+                ellipse { at: x + w - 42, by - 3; radius: 2; scale: 1.3, 0.75; color: #fff; opacity: 75% }
+                ellipse { at: x + w - 22, by - 3; radius: 2; scale: 1.3, 0.75; color: #fff; opacity: 75% }
+                // What each does, over the one the mouse is on.
+                box { at: x + w - 60, by + 0.5; size: 6.5, 1.6; corner: 0.8; color: #4a3308; opacity: mini_zone.$i.hover }
+                box { at: x + w - 40, by + 0.5; size: 6.5, 6.5; corner: 1.5; stroke: 1.4; color: #0f3d2f; opacity: lead_zone.$i.hover * (1 - maxed.$i) }
+                box { at: x + w - 41.2, by + 1.7; size: 5, 5; corner: 1.2; stroke: 1.3; color: #0f3d2f; opacity: lead_zone.$i.hover * maxed.$i }
+                box { at: x + w - 38.8, by - 0.7; size: 5, 5; corner: 1.2; stroke: 1.3; color: #0f3d2f; opacity: lead_zone.$i.hover * maxed.$i * 0.6 }
+                box { at: x + w - 20, by + 0.3; size: 7.5, 1.6; corner: 0.8; rotate: 45deg; color: #4a140b; opacity: close_zone.$i.hover }
+                box { at: x + w - 20, by + 0.3; size: 7.5, 1.6; corner: 0.8; rotate: -45deg; color: #4a140b; opacity: close_zone.$i.hover }
+            }
             box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: lit.$i * 70% * (1 - ov) }
         }
         // Taken by an edge or the corner: where it was and how big.
@@ -442,7 +508,12 @@ scene Session {
             fw.$i = max(g.w + drag.dx, 240)
             fh.$i = max(g.h + drag.dy, 140)
         }
-        on press lead_zone.$i while fr { toggle maxed.$i }
+        on press lead_zone.$i while fr {
+            focus win.$i
+            toggle maxed.$i
+            wave.$i: 0 ~0ms
+            wave.$i: 1 after 16ms
+        }
         on press title.$i {
             focus win.$i
             grab.x = pointer.x - x.$i
@@ -471,6 +542,7 @@ scene Session {
         on release title.$i while pick(mon, free.0, free.1) > 0.5 and picked < 0 {
             fx.$i = mouse.x - grab.x
             fy.$i = max(mouse.y - grab.y, pick(mon, win.reserved.0.top, win.reserved.1.top))
+            fsc.$i = mon
             maxed.$i = 0
             x.$i: mouse.x - grab.x ~0ms
             y.$i: max(mouse.y - grab.y, pick(mon, win.reserved.0.top, win.reserved.1.top)) ~0ms
@@ -520,7 +592,19 @@ scene Session {
             focus win(if(pointed, i, -1))
         }
         on press lead_zone.$i while not fr { promote win.$i }
-        on press close_zone.$i { close win.$i }
+        on press close_zone.$i {
+            close win.$i
+            bye.$i: 1
+            bye.$i: 0 after 2500ms
+        }
+        on key Super+q while win.focus == i {
+            bye.$i: 1
+            bye.$i: 0 after 2500ms
+        }
+        on swipe3_down while win.focus == i {
+            bye.$i: 1
+            bye.$i: 0 after 2500ms
+        }
         on press mini_zone.$i { minimize win.$i }
         on press choose.$i {
             focus win.$i
@@ -691,7 +775,8 @@ scene Session {
     repeat i in 0..6 {
         let sc = win.$i.screen
         let isl = if(island.screen >= 0, island.screen, sc)
-        let m = mini.$i
+        // (Eased in: the spring is quick at first, and the melting is to be seen.)
+        let m = pow(mini.$i, 1.8)
         let off = screen.0.width * (sc - screen.index)
         let x = x.$i + off
         let y = y.$i
@@ -700,24 +785,72 @@ scene Session {
         // Where it goes, from this monitor's corner: at Marea's left, at her height.
         let tx = screen.0.width * (isl - screen.index) + pick(isl, screen.0.width, screen.1.width) / 2 - 97
         let ty = 46
+        // On its way it melts into water: its corners round off, it turns
+        // the colour of the sea and draws out along its path like a falling
+        // drop; halfway a real drop takes over, with two droplets behind it,
+        // and where it lands the island ripples. Brought back, the same
+        // backwards: the drop leaves the ripple and swells into the window.
+        let q = smooth(0.05, 0.5, m)
+        // (It shrinks to the size of the drop by the time the drop takes over.)
+        let s0 = 1 - smooth(0, 0.62, m) * (1 - 22 / max(max(w, h), 22))
+        let cx = x + w / 2 + (tx - x - w / 2) * m
+        let cy = y + h / 2 + (ty - y - h / 2) * (2 * m - m * m)
+        let round = 12 + q * min(w, h) * 0.5
         group {
-            show: m > 0.001 and m < 0.995 and win.$i.open and (screen.index == sc or screen.index == isl)
-            opacity: 1 - m * m
+            show: m > 0.001 and m < 0.75 and win.$i.open and (screen.index == sc or screen.index == isl)
+            opacity: 1 - smooth(0.5, 0.68, m)
             pivot: x + w / 2, y + h / 2
             move: (tx - x - w / 2) * m, (ty - y - h / 2) * (2 * m - m * m)
-            scale: 1 - 0.95 * m
+            scale: s0 * (1 - 0.2 * sin(180 * m)), s0 * (1 + 0.25 * sin(180 * m))
             body {
                 color: #0c0e10
-                shadow: 0, 18, 44, 55%
-                box { from: x, y; size: w, h; corner: 12 }
+                shadow: 0, 18 * (1 - q), 44, 55%
+                box { from: x, y; size: w, h; corner: round }
             }
             group {
-                clip box { from: x, y; size: w, h; corner: 12 }
+                clip box { from: x, y; size: w, h; corner: round }
                 box { from: x, y; size: w, tb; color: #1d2b27 }
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink }
                 window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: w, h - tb }
+                body {
+                    gradient: x, y to x, y + h, #c9f1e4, mint 35%, #2c7684
+                    opacity: 88% * q
+                    box { from: x, y; size: w, h }
+                }
             }
-            box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: 60% }
+            box { from: x, y; size: w, h; corner: round; stroke: 1.5 + 2 * q; color: #dffaf0; opacity: 60% }
+        }
+        let drop = smooth(0.45, 0.62, m) * (1 - smooth(0.9, 0.995, m))
+        let c1 = max(m - 0.07, 0)
+        let c2 = max(m - 0.14, 0)
+        group {
+            show: drop > 0.01 and win.$i.open and (screen.index == sc or screen.index == isl)
+            opacity: drop
+            body {
+                gradient: radial cx - 3, cy - 4 radius 14, #effffa, mint 40%, #2c7684
+                rim: 40%
+                shadow: 0, 4, 10, 35%
+                ellipse { at: cx, cy; radius: 9; scale: 1 - 0.2 * sin(180 * m), 1 + 0.3 * sin(180 * m) }
+            }
+            ellipse { at: cx - 3, cy - 4; radius: 2.2; color: #fff; opacity: 80% }
+            ellipse { at: x + w / 2 + (tx - x - w / 2) * c1, y + h / 2 + (ty - y - h / 2) * (2 * c1 - c1 * c1); radius: 4.5; color: mint; opacity: 70% }
+            ellipse { at: x + w / 2 + (tx - x - w / 2) * c2, y + h / 2 + (ty - y - h / 2) * (2 * c2 - c2 * c2); radius: 2.8; color: mint; opacity: 45% }
+        }
+        // The ripple where it lands (or leaves from).
+        prop splash.$i = 1 ~900ms
+        on change win.$i.minimized while win.$i.minimized {
+            splash.$i: 0 ~0ms
+            splash.$i: 1 after 430ms
+        }
+        on change win.$i.minimized while not win.$i.minimized and win.$i.open {
+            splash.$i: 0 ~0ms
+            splash.$i: 1 after 16ms
+        }
+        group {
+            show: splash.$i > 0.001 and splash.$i < 0.995 and screen.index == isl and win.$i.open
+            ellipse { at: tx, ty; radius: 4 + 30 * splash.$i; scale: 1, 0.45; stroke: 2.5 * (1 - splash.$i) + 0.6; color: mint; opacity: 80% * (1 - splash.$i) }
+            ellipse { at: tx, ty; radius: 2 + 20 * max(splash.$i - 0.15, 0); scale: 1, 0.45; stroke: 2 * (1 - splash.$i) + 0.5; color: #dffaf0; opacity: 60% * (1 - splash.$i) }
+            ellipse { at: tx, ty - 10 * sin(180 * splash.$i); radius: 2.4 * (1 - splash.$i); color: mint; opacity: 90% * (1 - splash.$i) }
         }
     }
 
