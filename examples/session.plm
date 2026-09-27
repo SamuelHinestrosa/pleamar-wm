@@ -103,7 +103,7 @@ scene Session {
     fact lay.1 = 0
     // ── or free, as on Windows or KDE: each window where it is left and as big
     // as it is made, the one touched on top. Per monitor; Super+W or the
-    // button in the bar. Each window remembers where it was free.
+    // Marea's menu. Each window remembers where it was free.
     fact free.0 = 0
     fact free.1 = 0
     // The last one put away: Super+Shift+M brings it back.
