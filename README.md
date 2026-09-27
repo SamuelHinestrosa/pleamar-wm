@@ -104,5 +104,53 @@ recorder, Marea's lens), and `pleamar-wm hyprctl monitors|activewindow` says
 the desktop the way Hyprland does, for what used to ask it. Monitors can be
 plugged in and out while it runs.
 
-Not yet: multi-plane buffers, menus beyond their window,
-XWayland, more than one scale, and the portals.
+## Setting it up
+
+`~/.config/pleamar-wm/config`, one thing a line (`config.example` has them
+all); what it does not say is taken from Hyprland's configuration, so a
+desktop set up there comes out the same. `pleamar-wm config` shows what it
+understood.
+
+```text
+monitor DP-3 1920x1080@165 at 0,0          # mode, refresh, where
+monitor HDMI-A-1 preferred at 1920,0 scale 1.5
+keyboard layout es repeat 25 delay 400
+pointer accel flat
+touchpad tap on natural on
+idle off-after 600                          # the monitors go dark
+```
+
+To have it in the login screen (SDDM, GDM): `sudo ./install.sh` —«pleamar-wm»
+appears in the list of sessions, and runs this repo's build through
+`session.sh`—. There, dbus and systemd are told where the desktop is, and the
+portals (`pleamar-portals.conf`) share the screen through Hyprland's portal
+and do the rest through GTK's. `sudo ./install.sh remove` takes it out.
+
+## What programs find
+
+- **X11 programs** open like any other (XWayland: Steam, older games,
+  xterm), their menus drawn with their window; copy and paste crosses both
+  ways. `PLEAMAR_WM_NO_X11=1` leaves XWayland out.
+- **Fullscreen** when they ask (F11, a video, a game) or with Super+F: over
+  the whole monitor, other programs' bars stepping aside. **Dialogs** —a
+  message, a file chooser— float over the rest at their own size.
+- **HiDPI**: `scale 1.5` on a monitor line; programs are told the exact scale
+  (fractional-scale, viewporter) and draw sharp at it.
+- **Idleness**: `idle off-after`, or hypridle / swayidle / wlopm through
+  ext-idle-notify and wlr-output-power-management; a video keeps the screen
+  awake (idle-inhibit). `vrr` on a monitor line: variable refresh.
+- **Touchpad**: three and four finger swipes and pinches are the scene's
+  events (`swipe3_down`, `swipe4_left`, `pinch3_in`…); session.plm does as
+  Hyprland did.
+- And the usual: xdg-activation, the middle-click selection and clipboard
+  managers (wlr and ext data-control), virtual keyboards (wtype), input
+  methods (text-input, input-method), pointer lock and relative motion
+  (games), xdg-foreign and xdg-dialog, ext-foreign-toplevel-list,
+  presentation-time, content-type, single-pixel buffers.
+
+`./apps-test.sh` opens each installed program alone, with no screen, and
+says whether it got a window and drew in it: kitty, alacritty, GTK 3 and 4,
+Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
+
+Not yet: multi-plane buffers, menus beyond their window, touch screens and
+tablets, drag and drop from the scene, screen sharing tested end to end.
