@@ -965,6 +965,12 @@ impl State {
         if std::env::var_os("PLEAMAR_WM_EXPORT").is_none() || layers::monitors().is_empty() {
             return;
         }
+        // Hyprland open on another TTY: the portals are its (they are one per
+        // user), and pointing them here would leave it without them.
+        if std::process::Command::new("pgrep").args(["-x", "Hyprland"]).stdout(std::process::Stdio::null()).status().is_ok_and(|s| s.success()) {
+            println!("windows · Hyprland is open too: the portals stay its (sharing the screen from here will not work)");
+            return;
+        }
         let mut vars = vec![format!("WAYLAND_DISPLAY={}", self.socket), "XDG_SESSION_TYPE=wayland".to_owned()];
         vars.push(format!("XDG_CURRENT_DESKTOP={}", std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "pleamar".into())));
         if let Some(d) = &self.x_display {
