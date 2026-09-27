@@ -727,7 +727,10 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
             }
             gone
         };
-        buffers.retain(|b, _| !released.contains(b));
+        // What was read of a buffer given back is kept: the program draws into
+        // it again in a moment (it goes round two or three), and reading it
+        // anew each time was most of what a monitor cost. It goes when the
+        // program destroys it (`forget`).
         pixels.retain(|k, _| surfaces.contains(k));
         if !released.is_empty() {
             layers::tell(ToLayers::Released(released));
