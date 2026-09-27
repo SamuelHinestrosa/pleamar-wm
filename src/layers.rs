@@ -42,6 +42,8 @@ pub enum ToLayers {
     FrameDone,
     /// Buffers a monitor no longer reads.
     Released(Vec<u64>),
+    /// The monitors changed (one was plugged in or out): see `monitors()`.
+    Monitors,
     /// A picture a program asked for (wlr-screencopy): its pixels, BGRA,
     /// row after row with no padding; none if it could not be taken.
     Captured { id: u64, pixels: Option<Vec<u8>> },
@@ -296,6 +298,16 @@ pub fn uncapture(id: u64) {
     for (_, sc) in MONITORS.lock().unwrap().iter() {
         sc.0.lock().unwrap().captures.retain(|c| c.0 != id);
     }
+}
+
+/// The monitors stop putting themselves together (the process is leaving):
+/// each finishes what it is doing with the card and ends.
+pub fn stop_all() {
+    for (_, sc) in MONITORS.lock().unwrap().iter() {
+        sc.0.lock().unwrap().quit = true;
+        sc.1.notify_all();
+    }
+    std::thread::sleep(std::time::Duration::from_millis(150));
 }
 
 /// Buffers the programs destroyed: the monitors drop what they kept of them.

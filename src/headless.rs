@@ -130,6 +130,8 @@ impl pleamar::Platform for Headless {
         crate::layers::register(screens.iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * size.0 as i32, mhz: 60_000 }, sc.clone())).collect());
         let cursor = Arc::new(Mutex::new(Cursor::Normal));
         let mut id = 7000;
+        // Which sheets are on each monitor: to take one away, as if unplugged.
+        let mut sheets_on: Vec<Vec<u32>> = vec![Vec::new(); count];
         for (k, s) in surfaces.iter().enumerate() {
             let on: Vec<usize> = match &s.screens {
                 Screens::Number(n) => vec![*n],
@@ -146,6 +148,7 @@ impl pleamar::Platform for Headless {
                 let lsize = (layer.rect[2] as u32, layer.rect[3] as u32);
                 println!("headless · monitor {which}: surface {k} '{}' {}×{} at {},{}", s.name, lsize.0, lsize.1, layer.rect[0], layer.rect[1]);
                 sc.0.lock().unwrap().layers.push(layer);
+                sheets_on[which].push(id);
                 let _ = to_render.send(ToRender::Sheet(Box::new(NewSheet {
                     id,
                     target: Target::Frames(Box::new(LayerFrames::new(sc.clone(), id, lsize, to_render.clone()))),
@@ -157,6 +160,27 @@ impl pleamar::Platform for Headless {
                     view: View { surface: k, popup: None, origin: s.origin, size: (lsize.0 as f32, lsize.1 as f32) },
                 })));
             }
+        }
+        // `PLEAMAR_HEADLESS_UNPLUG=s`: the last monitor goes away after that
+        // long, as a session sees one unplugged: its surfaces are taken from the
+        // render, and the compositor inside is told.
+        if let Some(after) = std::env::var("PLEAMAR_HEADLESS_UNPLUG").ok().and_then(|v| v.parse::<f32>().ok()).filter(|_| count > 1) {
+            let (tx, screens, sheets_on) = (to_render.clone(), screens.clone(), sheets_on.clone());
+            std::thread::spawn(move || {
+                std::thread::sleep(Duration::from_secs_f32(after));
+                let last = screens.len() - 1;
+                println!("headless · monitor HEADLESS-{} unplugged", last + 1);
+                for id in &sheets_on[last] {
+                    let _ = tx.send(ToRender::SheetGone(*id));
+                }
+                {
+                    let (lock, cv) = &*screens[last];
+                    lock.lock().unwrap().quit = true;
+                    cv.notify_all();
+                }
+                crate::layers::register(screens[..last].iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * size.0 as i32, mhz: 60_000 }, sc.clone())).collect());
+                crate::layers::tell(crate::layers::ToLayers::Monitors);
+            });
         }
         // At the hour of the picture everything is painted, so that a monitor
         // where nothing moves shows its frame all the same.

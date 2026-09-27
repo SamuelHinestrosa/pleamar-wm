@@ -96,6 +96,13 @@ Programs sync with the card explicitly when they can (`linux-drm-syncobj`):
 they say when a frame is ready and are told when it is no longer read, instead
 of the driver guessing it (with NVIDIA, a terminal spent a third less).
 
+The cursor is the system's theme (XCURSOR_THEME, or what ~/.icons/default
+inherits), on the card's cursor plane, with the shape whoever has the pointer
+asks for. Other programs' bars keep their room (exclusive zones: the scene
+reads `win.reserved.$s.top`…). Screenshots work (`wlr-screencopy`: grim, a
+recorder, Marea's lens), and `pleamar-wm hyprctl monitors|activewindow` says
+the desktop the way Hyprland does, for what used to ask it. Monitors can be
+plugged in and out while it runs.
+
 Not yet: multi-plane buffers, menus beyond their window,
-XWayland, more than one scale, exclusive zones, screencopy (Marea's lens skin
-and her screenshots), plugging monitors in while it runs, and the portals.
+XWayland, more than one scale, and the portals.

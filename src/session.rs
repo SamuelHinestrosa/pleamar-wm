@@ -20,7 +20,7 @@ use smithay::backend::input::{
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::session::libseat::LibSeatSession;
 use smithay::backend::session::{Event as SessionEvent, Session as _};
-use smithay::backend::udev::{all_gpus, primary_gpu};
+use smithay::backend::udev::{all_gpus, primary_gpu, UdevBackend, UdevEvent};
 use smithay::reexports::calloop::generic::Generic;
 use smithay::reexports::calloop::{EventLoop, Interest, Mode as LoopMode, PostAction};
 use smithay::reexports::drm::control::{connector, crtc, framebuffer, Device as ControlDevice, Event as DrmEvent, FbCmd2Flags, Mode, ModeTypeFlags, PageFlipFlags};
@@ -44,9 +44,7 @@ impl pleamar::Platform for Session {
             std::thread::sleep(Duration::from_millis(300));
             std::process::exit(1);
         }
-        let _ = to_render.send(ToRender::Quit);
-        std::thread::sleep(Duration::from_millis(300));
-        std::process::exit(0);
+        // Done: pleamar stops the render and leaves (see `provide_before_quit`).
     }
 }
 
@@ -195,6 +193,13 @@ struct State {
     grab: Option<u64>,
     /// The program's surface that took the keyboard when clicked.
     key_client: Option<u64>,
+    /// What is needed to put monitors up when they are plugged in: the card's
+    /// buffers, the scene's surfaces, and the sheets given to the render.
+    gbm: Arc<Mutex<gbm::Device<DrmDeviceFd>>>,
+    surfaces: Vec<Surface>,
+    cursor_kind: Arc<Mutex<Cursor>>,
+    sheets: Vec<u32>,
+    next_sheet: u32,
     quit: bool,
 }
 
@@ -213,91 +218,22 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     let gbm = Arc::new(Mutex::new(gbm::Device::new(drm.clone()).map_err(|e| format!("no buffers on the card (gbm): {e}"))?));
 
     // The monitors that are connected, each with its preferred mode and a
-    // controller of its own, left to right in the order the card lists them.
-    let res = drm.resource_handles().map_err(|e| format!("the card says nothing of its monitors: {e}"))?;
+    // controller of its own, left to right as `PLEAMAR_MONITORS` says.
     let mut monitors: Vec<Monitor> = Vec::new();
-    let mut x = 0;
-    for &conn in res.connectors() {
-        let Ok(info) = drm.get_connector(conn, true) else { continue };
-        if info.state() != connector::State::Connected {
-            continue;
-        }
-        let Some(mode) = info.modes().iter().find(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED)).or(info.modes().first()).copied() else { continue };
+    for (name, conn, mode, crtcs) in connected(&drm) {
         let used: Vec<crtc::Handle> = monitors.iter().map(|m| m.crtc).collect();
-        let Some(crtc) = info
-            .encoders()
-            .iter()
-            .filter_map(|e| drm.get_encoder(*e).ok())
-            .flat_map(|e| res.filter_crtcs(e.possible_crtcs()))
-            .find(|c| !used.contains(c))
-        else {
-            continue;
-        };
-        let name = format!("{}-{}", info.interface().as_str(), info.interface_id());
-        let (w, h) = mode.size();
-        println!("session · monitor {name}: {w}×{h} at {} Hz", mode.vrefresh());
-        let size = (w as u32, h as u32);
-        let flips: Arc<Mutex<Flips>> = Default::default();
-        let output = DrmOutput { drm: drm.clone(), gbm: gbm.clone(), connector: conn, crtc, mode, size, name: name.clone(), buffers: Vec::new(), failed: false, flips: flips.clone() };
-        let screen = screen::screen(name.clone(), size, Box::new(output));
-        monitors.push(Monitor { name, crtc, size, x, screen, flips, mhz: mode.vrefresh() as i32 * 1000 });
-        x += w as i32;
+        let Some(crtc) = crtcs.into_iter().find(|c| !used.contains(c)) else { continue };
+        monitors.push(make_monitor(&drm, &gbm, name, conn, mode, crtc));
     }
     if monitors.is_empty() {
         return Err("no monitor is connected".into());
     }
-    // Left to right as `PLEAMAR_MONITORS` says («DP-3,HDMI-A-1»); the ones it
-    // does not name, after, in the card's order.
-    if let Ok(order) = std::env::var("PLEAMAR_MONITORS") {
-        let names: Vec<&str> = order.split(',').map(str::trim).collect();
-        monitors.sort_by_key(|m| names.iter().position(|n| *n == m.name).unwrap_or(names.len()));
-        let mut x = 0;
-        for m in &mut monitors {
-            m.x = x;
-            x += m.size.0 as i32;
-        }
-        println!("session · monitors, left to right: {}", monitors.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", "));
-    }
+    place_monitors(&mut monitors);
 
-    // The scene's surfaces on the monitors. Its own: its copies (`screens:
-    // each`) one per monitor, in order; without copies, on the first. The
-    // named ones —a bar, a corner, a panel—: where they say, and put together
-    // over or under the scene's by their level.
+    // The scene's surfaces on the monitors.
     let cursor_kind = Arc::new(Mutex::new(Cursor::Normal));
-    let mut id = 1000;
-    let names: Vec<String> = monitors.iter().map(|m| m.name.clone()).collect();
-    for (k, s) in surfaces.iter().enumerate() {
-        let on: Vec<usize> = match &s.screens {
-            Screens::Number(n) => vec![*n],
-            Screens::Named(want) => names.iter().enumerate().filter(|(_, n)| want.contains(n)).map(|(i, _)| i).collect(),
-            Screens::All if !s.name.is_empty() => (0..monitors.len()).collect(),
-            Screens::All => vec![0],
-        };
-        for which in on {
-            let Some(m) = monitors.get(which) else { continue };
-            let taken = s.name.is_empty() && m.screen.0.lock().unwrap().layers.iter().any(|l| l.main);
-            if taken {
-                continue;
-            }
-            id += 1;
-            let layer = screen::layer(id, k, s, m.size);
-            let size = (layer.rect[2] as u32, layer.rect[3] as u32);
-            if !s.name.is_empty() {
-                println!("session · the surface '{}' on {}: {}×{} at {},{}", s.name, m.name, size.0, size.1, layer.rect[0], layer.rect[1]);
-            }
-            m.screen.0.lock().unwrap().layers.push(layer);
-            let _ = to_render.send(ToRender::Sheet(Box::new(NewSheet {
-                id,
-                target: Target::Frames(Box::new(LayerFrames::new(m.screen.clone(), id, size, to_render.clone()))),
-                window: Box::new(LayerWindow { screen: m.screen.clone(), sheet: id, cursor: cursor_kind.clone() }),
-                scale: 1.0,
-                size,
-                mhz: m.mhz,
-                name: m.name.clone(),
-                view: View { surface: k, popup: None, origin: s.origin, size: (size.0 as f32, size.1 as f32) },
-            })));
-        }
-    }
+    let mut next_sheet = 1000;
+    let sheets = give_sheets(&monitors, &surfaces, &to_render, &cursor_kind, &mut next_sheet);
     // A surface that changes level or edge while running (Marea's).
     {
         let screens: Vec<Screen> = monitors.iter().map(|m| m.screen.clone()).collect();
@@ -351,6 +287,18 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     let mut event_loop: EventLoop<State> = EventLoop::try_new().map_err(|e| e.to_string())?;
     let h = event_loop.handle();
     h.insert_source(input, |event, _, state: &mut State| state.input(event)).map_err(|e| e.to_string())?;
+    // A monitor plugged in or out: the card's device changes.
+    match UdevBackend::new(&seat) {
+        Ok(udev) => {
+            h.insert_source(udev, |event, _, state: &mut State| {
+                if let UdevEvent::Changed { .. } = event {
+                    state.rescan();
+                }
+            })
+            .map_err(|e| e.to_string())?;
+        }
+        Err(e) => eprintln!("session · monitors plugged in later will not be seen ({e})"),
+    }
     h.insert_source(notifier, |event, _, state: &mut State| state.session_event(event)).map_err(|e| e.to_string())?;
     h.insert_source(Generic::new(drm.clone(), Interest::READ, LoopMode::Level), |_, _, state: &mut State| {
         state.flipped();
@@ -361,7 +309,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     let first = monitors.first().map_or((0.0, 0.0), |m| (m.size.0 as f64 / 2.0, m.size.1 as f64 / 2.0));
     layers::set_card(drm.clone());
     layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, mhz: m.mhz }, m.screen.clone())).collect());
-    let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, hit: Hit::Scene(None), grab: None, key_client: None, quit: false };
+    let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, hit: Hit::Scene(None), grab: None, key_client: None, gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
     state.make_cursors(&gbm);
     // The cursor the scene and the programs ask for, whenever it changes.
     let (cursor_tx, cursor_rx) = smithay::reexports::calloop::channel::channel::<(bool, Cursor)>();
@@ -386,6 +334,93 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     }
     println!("session · leaving");
     Ok(())
+}
+
+/// The monitors connected to the card now: their name (`DP-3`), connector,
+/// preferred mode and the controllers that can drive them.
+fn connected(drm: &DrmDeviceFd) -> Vec<(String, connector::Handle, Mode, Vec<crtc::Handle>)> {
+    let Ok(res) = drm.resource_handles() else { return Vec::new() };
+    let mut out = Vec::new();
+    for &conn in res.connectors() {
+        let Ok(info) = drm.get_connector(conn, true) else { continue };
+        if info.state() != connector::State::Connected {
+            continue;
+        }
+        let Some(mode) = info.modes().iter().find(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED)).or(info.modes().first()).copied() else { continue };
+        let crtcs: Vec<crtc::Handle> = info.encoders().iter().filter_map(|e| drm.get_encoder(*e).ok()).flat_map(|e| res.filter_crtcs(e.possible_crtcs())).collect();
+        out.push((format!("{}-{}", info.interface().as_str(), info.interface_id()), conn, mode, crtcs));
+    }
+    out
+}
+
+/// A monitor put up: its buffers on the card and the one that puts it together.
+fn make_monitor(drm: &DrmDeviceFd, gbm: &Arc<Mutex<gbm::Device<DrmDeviceFd>>>, name: String, conn: connector::Handle, mode: Mode, crtc: crtc::Handle) -> Monitor {
+    let (w, h) = mode.size();
+    println!("session · monitor {name}: {w}×{h} at {} Hz", mode.vrefresh());
+    let size = (w as u32, h as u32);
+    let flips: Arc<Mutex<Flips>> = Default::default();
+    let output = DrmOutput { drm: drm.clone(), gbm: gbm.clone(), connector: conn, crtc, mode, size, name: name.clone(), buffers: Vec::new(), failed: false, flips: flips.clone() };
+    let screen = screen::screen(name.clone(), size, Box::new(output));
+    Monitor { name, crtc, size, x: 0, screen, flips, mhz: mode.vrefresh() as i32 * 1000 }
+}
+
+/// Left to right as `PLEAMAR_MONITORS` says («DP-3,HDMI-A-1»); the ones it
+/// does not name, after, in the card's order.
+fn place_monitors(monitors: &mut [Monitor]) {
+    if let Ok(order) = std::env::var("PLEAMAR_MONITORS") {
+        let names: Vec<&str> = order.split(',').map(str::trim).collect();
+        monitors.sort_by_key(|m| names.iter().position(|n| *n == m.name).unwrap_or(names.len()));
+    }
+    let mut x = 0;
+    for m in monitors.iter_mut() {
+        m.x = x;
+        x += m.size.0 as i32;
+    }
+    println!("session · monitors, left to right: {}", monitors.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", "));
+}
+
+/// The scene's surfaces on the monitors, as sheets for the render. Its own:
+/// its copies (`screens: each`) one per monitor, in order; without copies, on
+/// the first. The named ones —a bar, a corner, a panel—: where they say, and
+/// put together over or under the scene's by their level.
+fn give_sheets(monitors: &[Monitor], surfaces: &[Surface], to_render: &Sender<ToRender>, cursor_kind: &Arc<Mutex<Cursor>>, next: &mut u32) -> Vec<u32> {
+    let mut given = Vec::new();
+    let names: Vec<String> = monitors.iter().map(|m| m.name.clone()).collect();
+    for (k, s) in surfaces.iter().enumerate() {
+        let on: Vec<usize> = match &s.screens {
+            Screens::Number(n) => vec![*n],
+            Screens::Named(want) => names.iter().enumerate().filter(|(_, n)| want.contains(n)).map(|(i, _)| i).collect(),
+            Screens::All if !s.name.is_empty() => (0..monitors.len()).collect(),
+            Screens::All => vec![0],
+        };
+        for which in on {
+            let Some(m) = monitors.get(which) else { continue };
+            let taken = s.name.is_empty() && m.screen.0.lock().unwrap().layers.iter().any(|l| l.main);
+            if taken {
+                continue;
+            }
+            *next += 1;
+            let id = *next;
+            let layer = screen::layer(id, k, s, m.size);
+            let size = (layer.rect[2] as u32, layer.rect[3] as u32);
+            if !s.name.is_empty() {
+                println!("session · the surface '{}' on {}: {}×{} at {},{}", s.name, m.name, size.0, size.1, layer.rect[0], layer.rect[1]);
+            }
+            m.screen.0.lock().unwrap().layers.push(layer);
+            let _ = to_render.send(ToRender::Sheet(Box::new(NewSheet {
+                id,
+                target: Target::Frames(Box::new(LayerFrames::new(m.screen.clone(), id, size, to_render.clone()))),
+                window: Box::new(LayerWindow { screen: m.screen.clone(), sheet: id, cursor: cursor_kind.clone() }),
+                scale: 1.0,
+                size,
+                mhz: m.mhz,
+                name: m.name.clone(),
+                view: View { surface: k, popup: None, origin: s.origin, size: (size.0 as f32, size.1 as f32) },
+            })));
+            given.push(id);
+        }
+    }
+    given
 }
 
 /// The system's keyboard layout: `XKB_DEFAULT_LAYOUT` if set, else what
@@ -414,6 +449,62 @@ fn keymap() -> Result<xkb::Keymap, String> {
 }
 
 impl State {
+    /// The monitors again, after one was plugged in or out: the ones that are
+    /// still there go on as they were; a new one is put up, one that left is
+    /// let go, and the scene's surfaces are given again for the new row
+    /// (which copy is on which monitor may have changed).
+    fn rescan(&mut self) {
+        let now = connected(&self.drm);
+        let names: Vec<&str> = now.iter().map(|c| c.0.as_str()).collect();
+        let before: Vec<String> = self.monitors.iter().map(|m| m.name.clone()).collect();
+        let (kept, gone): (Vec<Monitor>, Vec<Monitor>) = std::mem::take(&mut self.monitors).into_iter().partition(|m| names.contains(&m.name.as_str()));
+        self.monitors = kept;
+        for m in gone {
+            println!("session · monitor {} unplugged", m.name);
+            let mut st = m.screen.0.lock().unwrap();
+            st.quit = true;
+            drop(st);
+            m.screen.1.notify_all();
+            let _ = self.drm.set_crtc(m.crtc, None, (0, 0), &[], None);
+        }
+        for (name, conn, mode, crtcs) in now {
+            if self.monitors.iter().any(|m| m.name == name) {
+                continue;
+            }
+            let used: Vec<crtc::Handle> = self.monitors.iter().map(|m| m.crtc).collect();
+            let Some(crtc) = crtcs.into_iter().find(|c| !used.contains(c)) else {
+                eprintln!("session · {name}: no controller left to drive it");
+                continue;
+            };
+            let m = make_monitor(&self.drm, &self.gbm, name, conn, mode, crtc);
+            println!("session · monitor {} plugged in", m.name);
+            self.monitors.push(m);
+        }
+        if self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<_>>() == before {
+            return;
+        }
+        place_monitors(&mut self.monitors);
+        if self.monitors.is_empty() {
+            return;
+        }
+        // The scene's surfaces, given again for the new row of monitors.
+        for id in std::mem::take(&mut self.sheets) {
+            let _ = self.to_render.send(ToRender::SheetGone(id));
+        }
+        for m in &self.monitors {
+            let mut st = m.screen.0.lock().unwrap();
+            st.layers.clear();
+            st.changed_all = true;
+            st.dirty = true;
+        }
+        self.sheets = give_sheets(&self.monitors, &self.surfaces, &self.to_render, &self.cursor_kind, &mut self.next_sheet);
+        layers::register(self.monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, mhz: m.mhz }, m.screen.clone())).collect());
+        layers::tell(ToLayers::Monitors);
+        // The cursor on every monitor, and the pointer within them.
+        self.shown = None;
+        self.show_cursor();
+    }
+
     /// The pointer moved by that much: across the monitors, left to right.
     fn move_pointer(&mut self, dx: f64, dy: f64) {
         let width: i32 = self.monitors.iter().map(|m| m.size.0 as i32).sum();

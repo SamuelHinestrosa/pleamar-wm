@@ -223,6 +223,7 @@ struct State {
     pointer: PointerHandle<State>,
     /// One per monitor, with its name (`DP-3`); nested, a single one.
     outputs: Vec<Output>,
+    output_globals: Vec<smithay::reexports::wayland_server::backend::GlobalId>,
     _output_manager: OutputManagerState,
     layer_shell: WlrLayerShellState,
     panels: Vec<Panel>,
@@ -362,9 +363,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
             })
             .collect()
     };
-    for o in &outputs {
-        let _ = o.create_global::<State>(&dh);
-    }
+    let output_globals: Vec<smithay::reexports::wayland_server::backend::GlobalId> = outputs.iter().map(|o| o.create_global::<State>(&dh)).collect();
     // Pictures of the monitors, for the programs that take them (grim, a
     // recorder): only in a session of its own, which has monitors.
     if !monitors.is_empty() {
@@ -397,6 +396,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         _output_manager: OutputManagerState::new_with_xdg_output::<State>(&dh),
         layer_shell: WlrLayerShellState::new::<State>(&dh),
         outputs,
+        output_globals,
         panels: Vec::new(),
         reserved: Vec::new(),
         pictures: HashMap::new(),
@@ -806,6 +806,87 @@ impl State {
         let _ = std::fs::write(desktop_file(), text);
     }
 
+    /// A monitor was plugged in or out: the outputs follow, by name. What was
+    /// on one that left goes to the first: its windows, and its programs'
+    /// surfaces are told they are closed (as layer-shell asks).
+    fn monitors_changed(&mut self) {
+        let monitors = layers::monitors();
+        if monitors.is_empty() {
+            return;
+        }
+        let old_names: Vec<String> = self.outputs.iter().map(|o| o.name()).collect();
+        let mut outputs = Vec::new();
+        let mut globals = Vec::new();
+        for m in &monitors {
+            let mode = OutputMode { size: (m.size.0 as i32, m.size.1 as i32).into(), refresh: m.mhz };
+            let (o, g) = match old_names.iter().position(|n| *n == m.name) {
+                Some(i) => (self.outputs[i].clone(), self.output_globals[i].clone()),
+                None => {
+                    println!("windows · a monitor for the programs: {}", m.name);
+                    let o = Output::new(m.name.clone(), PhysicalProperties { size: (0, 0).into(), subpixel: Subpixel::Unknown, make: "pleamar".into(), model: m.name.clone() });
+                    let g = o.create_global::<State>(&self.dh);
+                    (o, g)
+                }
+            };
+            o.change_current_state(Some(mode), Some(Transform::Normal), Some(Scale::Integer(1)), Some((m.x, 0).into()));
+            o.set_preferred(mode);
+            outputs.push(o);
+            globals.push(g);
+        }
+        for (i, name) in old_names.iter().enumerate() {
+            if !monitors.iter().any(|m| &m.name == name) {
+                println!("windows · the monitor {name} is gone");
+                self.dh.remove_global::<State>(self.output_globals[i].clone());
+            }
+        }
+        let new_index = |old: usize| old_names.get(old).and_then(|n| monitors.iter().position(|m| &m.name == n));
+        // The windows, by the name of their monitor; the ones on one that left, to the first.
+        let mut moved = Vec::new();
+        for (slot, w) in self.slots.iter_mut().enumerate() {
+            let Some(w) = w else { continue };
+            let to = new_index(w.screen).unwrap_or(0);
+            if to != w.screen || new_index(w.screen).is_none() {
+                w.screen = to;
+                moved.push((slot, to, w.toplevel.wl_surface().clone()));
+            }
+        }
+        for (slot, to, surface) in moved {
+            if let Some(o) = outputs.get(to) {
+                o.enter(&surface);
+            }
+            self.tell(NestEvent::Screen(slot, to));
+        }
+        // The programs' surfaces: on their monitor by its name; the ones on one that left, closed.
+        let mut closed = Vec::new();
+        for p in &mut self.panels {
+            match new_index(p.monitor) {
+                Some(i) => p.monitor = i,
+                None => closed.push(p.id),
+            }
+        }
+        for id in &closed {
+            if let Some(p) = self.panels.iter().find(|p| p.id == *id) {
+                if let Shell::Layer(l) = &p.shell {
+                    l.send_close();
+                }
+            }
+            layers::hide(*id);
+        }
+        self.panels.retain(|p| !closed.contains(&p.id));
+        self.outputs = outputs;
+        self.output_globals = globals;
+        self.on_screen = self.on_screen.min(self.outputs.len() - 1);
+        // Everything shown again where it now is.
+        for k in 0..self.panels.len() {
+            self.panels[k].configured = None;
+            self.configure_panel(k);
+            self.show_panel(k);
+        }
+        self.reserved.clear();
+        self.tell_reserved();
+        self.write_desktop();
+    }
+
     /// A picture taken: into the program's memory, and told it is ready.
     fn hand_picture(&mut self, id: u64, pixels: Option<Vec<u8>>) {
         let Some(p) = self.pictures.remove(&id) else { return };
@@ -901,6 +982,7 @@ impl State {
             }
             ToLayers::FrameDone => self.frame_done(),
             ToLayers::Released(numbers) => self.release(numbers),
+            ToLayers::Monitors => self.monitors_changed(),
             ToLayers::Captured { id, pixels } => self.hand_picture(id, pixels),
         }
     }
