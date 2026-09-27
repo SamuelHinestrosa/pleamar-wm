@@ -162,18 +162,40 @@ impl Toplevel {
         }
     }
 
-    /// The size the scene gives it; an X11 one keeps where it is on the desktop.
+    /// The size the scene gives it (0 × 0: the one it chooses); an X11 one
+    /// keeps where it is on the desktop.
     fn resize(&self, w: i32, h: i32) {
         match self {
             Toplevel::Xdg(t) => {
-                t.with_pending_state(|s| s.size = Some((w.max(1), h.max(1)).into()));
+                t.with_pending_state(|s| s.size = (w > 0 && h > 0).then(|| (w, h).into()));
                 if t.is_initial_configure_sent() {
                     t.send_pending_configure();
                 }
             }
             Toplevel::X11(x) => {
-                let loc = x.geometry().loc;
-                let _ = x.configure(smithay::utils::Rectangle::new(loc, (w.max(1), h.max(1)).into()));
+                if w > 0 && h > 0 {
+                    let loc = x.geometry().loc;
+                    let _ = x.configure(smithay::utils::Rectangle::new(loc, (w, h).into()));
+                }
+            }
+        }
+    }
+
+    /// Whether it is a dialog: it belongs to another window, or it has a size
+    /// of its own it cannot leave (a message, a file chooser, a splash).
+    fn is_dialog(&self, surface: &WlSurface) -> bool {
+        match self {
+            Toplevel::Xdg(t) => {
+                let (min, max) = with_states(surface, |s| {
+                    let c = *s.cached_state.get::<SurfaceCachedState>().current();
+                    (c.min_size, c.max_size)
+                });
+                t.parent().is_some() || (min.w > 0 && min.h > 0 && min == max)
+            }
+            Toplevel::X11(x) => {
+                use smithay::xwayland::xwm::WmWindowType as T;
+                let fixed = matches!((x.min_size(), x.max_size()), (Some(a), Some(b)) if a == b && a.w > 0);
+                x.is_transient_for().is_some() || fixed || matches!(x.window_type(), Some(T::Dialog | T::Utility | T::Splash))
             }
         }
     }
@@ -242,6 +264,8 @@ struct Window {
     /// Its entry in ext-foreign-toplevel-list (what a screen share lists).
     listed: ForeignToplevelHandle,
     fullscreen: bool,
+    /// A dialog floats: it is not in the layout's order.
+    dialog: bool,
 }
 
 /// A number for a program, the same for all its surfaces and buffers.
@@ -920,6 +944,22 @@ impl State {
         }
     }
 
+    /// A dialog is left out of the layout's order (the scene floats it);
+    /// back in it at the end if it stops being one.
+    fn set_dialog(&mut self, slot: usize, yes: bool) {
+        let Some(Some(w)) = self.slots.get_mut(slot) else { return };
+        if w.dialog == yes {
+            return;
+        }
+        w.dialog = yes;
+        self.order.retain(|s| *s != slot);
+        if !yes {
+            self.order.push(slot);
+        }
+        self.tell(NestEvent::Dialog(slot, yes));
+        self.tell(NestEvent::Order(self.order.clone()));
+    }
+
     /// A window's title, to the scene and to whoever lists the windows.
     fn set_title(&mut self, slot: usize, title: String) {
         if let Some(Some(w)) = self.slots.get_mut(slot) {
@@ -1564,7 +1604,7 @@ impl State {
         }
         self.outputs[self.on_screen.min(self.outputs.len() - 1)].enter(&surface);
         let listed = self.toplevel_list.new_toplevel::<State>(title.clone(), app.clone());
-        self.slots[slot] = Some(Window { toplevel, surface, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen: self.on_screen, shown: None, listed, fullscreen: false });
+        self.slots[slot] = Some(Window { toplevel, surface, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen: self.on_screen, shown: None, listed, fullscreen: false, dialog: false });
         self.order.push(slot);
         self.tell(NestEvent::Opened { slot, title, app, screen: self.on_screen });
         self.tell(NestEvent::Order(self.order.clone()));
@@ -1621,6 +1661,10 @@ impl State {
                 continue;
             }
             let Some(slot) = self.window_of(&root) else { continue };
+            // It may say it is a dialog only now (a parent, a fixed size).
+            if let Some(dialog) = self.slots[slot].as_ref().map(|w| w.toplevel.is_dialog(&root)) {
+                self.set_dialog(slot, dialog);
+            }
             let Some((w, h)) = content_of(&root, |c| c.size) else { continue };
             if w == 0 || h == 0 {
                 continue;

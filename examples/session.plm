@@ -199,7 +199,7 @@ scene Session {
         }
         group {
             // Carried, it is drawn over the others, further down.
-            show: seen.$i > 0.01 and sc == screen.index and dragging != i and not (landing == i and sc != landing.to)
+            show: seen.$i > 0.01 and sc == screen.index and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog
             opacity: seen.$i
             pivot: x + w / 2, y + h / 2
             scale: 0.92 + 0.08 * seen.$i + 0.025 * pick.$i.hover * ov
@@ -224,11 +224,11 @@ scene Session {
         }
         // Where it is laid out, not where it is carried: a drag goes on while
         // its zone still holds the point it was pressed on.
-        zone box title.$i { from: x.$i, y.$i; size: w - 56, tb; cursor: pointer; active: here and not overview }
-        zone ellipse lead_zone.$i { at: x + w - 40, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview }
-        zone ellipse close_zone.$i { at: x + w - 20, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview }
+        zone box title.$i { from: x.$i, y.$i; size: w - 56, tb; cursor: pointer; active: here and not overview and not win.$i.dialog }
+        zone ellipse lead_zone.$i { at: x + w - 40, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog }
+        zone ellipse close_zone.$i { at: x + w - 20, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog }
         // At a glance, the whole window is a button: pressing it chooses it.
-        zone box pick.$i { from: x, y; size: w, h; cursor: pointer; active: here and overview }
+        zone box pick.$i { from: x, y; size: w, h; cursor: pointer; active: here and overview and not win.$i.dialog }
         on press title.$i {
             focus win.$i
             grab.x = pointer.x - x.$i
@@ -382,6 +382,35 @@ scene Session {
     // The leader narrower or wider.
     on key Super+minus { ratio = clamp(ratio - 0.05, 0.25, 0.8) }
     on key Super+plus { ratio = clamp(ratio + 0.05, 0.25, 0.8) }
+    // ── dialogs: a message, a file chooser, a window of another's: over the
+    // rest, at the size it chooses, in the middle of its monitor ──
+    repeat i in 0..6 {
+        let dw = max(win.$i.width, 120)
+        let dh = max(win.$i.height, 40) + tb
+        let dx = (W - dw) / 2
+        let dy = (H - dh) / 2
+        prop dlg.$i = 0 ~220ms
+        follow dlg.$i = if(win.$i.dialog and win.$i.open, 1, 0)
+        group {
+            show: dlg.$i > 0.01 and win.$i.screen == screen.index
+            opacity: dlg.$i
+            pivot: dx + dw / 2, dy + dh / 2
+            scale: 0.94 + 0.06 * dlg.$i
+            body {
+                color: #0c0e10
+                shadow: 0, 18, 44, 55%
+                box { from: dx, dy; size: dw, dh; corner: 12 }
+            }
+            group {
+                clip box { from: dx, dy; size: dw, dh; corner: 12 }
+                box { from: dx, dy; size: dw, tb; color: #1d2b27 }
+                text win.$i.title { at: dx + 14, dy + tb / 2; anchor: left center; size: 12; weight: 500; width: max(dw - 40, 10); lines: 1; color: ink }
+                window win.$i { at: dx, dy + tb; size: win.$i.width, win.$i.height; ask: 0, 0; show: win.$i.dialog and win.$i.open and win.$i.screen == screen.index }
+            }
+            box { from: dx, dy; size: dw, dh; corner: 12; stroke: 1.5; color: mint; opacity: 70% * win.$i.focused }
+        }
+    }
+
     // ── fullscreen: one that asked (F11, a video, a game) or Super+F covers
     // its monitor, over the bar and the other programs' bars ──
     repeat i in 0..6 {
