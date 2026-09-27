@@ -12,8 +12,9 @@
 //   Super+Shift+Right   to the right monitor
 //   Super+Shift+Up/Down change places with the one before / after it
 //   Super+Tab  everything at a glance       Super+-/+  the leader narrower / wider
+//   Super+F    fullscreen, and back
 //   Super+Space  Marea's search (the wallpaper and Marea start with it: autostart)
-//   Touchpad: three fingers down close, up everything at a glance; four
+//   Touchpad: three fingers down close, up fullscreen; four
 //   sideways, the keyboard to the next / previous window
 //   With the mouse: carry a window by its title bar; let it go on another one
 //   and they change places, or at the edge and it goes to the other monitor.
@@ -214,7 +215,7 @@ scene Session {
                 clip box { from: x, y; size: w, h; corner: 12 }
                 box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: twv, thv - tb; show: here }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: twv, thv - tb; show: here and not win.$i.fullscreen }
             }
             // Its two buttons: to the front, and away.
             ellipse { at: x + w - 40, y + tb / 2; radius: 5.5 + lead_zone.$i.hover; color: mint; opacity: 35% + 50% * lead_zone.$i.hover }
@@ -381,15 +382,30 @@ scene Session {
     // The leader narrower or wider.
     on key Super+minus { ratio = clamp(ratio - 0.05, 0.25, 0.8) }
     on key Super+plus { ratio = clamp(ratio + 0.05, 0.25, 0.8) }
+    // ── fullscreen: one that asked (F11, a video, a game) or Super+F covers
+    // its monitor, over the bar and the other programs' bars ──
+    repeat i in 0..6 {
+        let fs.here = win.$i.fullscreen and win.$i.open and win.$i.screen == screen.index
+        prop fs.$i = 0 ~160ms
+        follow fs.$i = if(win.$i.fullscreen and win.$i.open, 1, 0)
+        group {
+            show: fs.$i > 0.01 and win.$i.screen == screen.index
+            opacity: fs.$i
+            box { from: 0, 0; size: W, H; color: #000 }
+            window win.$i { at: 0, 0; size: W, H; ask: W, H; show: fs.here }
+        }
+    }
+    on key Super+f { fullscreen win(win.focus) }
+
     // ── the touchpad: as on Hyprland ──
-    // Three fingers down closes; up, everything at a glance; four sideways,
-    // the keyboard to the next or the one before.
+    // Three fingers down closes; up, fullscreen; four sideways, the keyboard
+    // to the next or the one before.
     event swipe3_down
     event swipe3_up
     event swipe4_left
     event swipe4_right
     on swipe3_down { close win(win.focus) }
-    on swipe3_up { toggle overview }
+    on swipe3_up { fullscreen win(win.focus) }
     on swipe4_left { focus win(previous) }
     on swipe4_right { focus win(next) }
 }

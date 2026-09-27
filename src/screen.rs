@@ -80,13 +80,16 @@ pub struct ScreenState {
     pub captures: Vec<(u64, [i32; 4], bool, u64)>,
     output: Option<Box<dyn Output>>,
     pub quit: bool,
+    /// A window is fullscreen on this monitor: other programs' bars (their
+    /// `top` layer) are not shown over it, as on any desktop.
+    pub fullscreen: bool,
 }
 
 pub type Screen = Arc<(Mutex<ScreenState>, Condvar)>;
 
 pub fn screen(name: String, size: (u32, u32), output: Box<dyn Output>) -> Screen {
     Arc::new((
-        Mutex::new(ScreenState { name, size, layers: Vec::new(), dirty: false, idle: true, paused: false, anew: true, fresh: Vec::new(), on_flip: Vec::new(), modifiers: Vec::new(), clients: Vec::new(), held: Vec::new(), forget: Vec::new(), changed: Vec::new(), changed_all: true, captures: Vec::new(), output: Some(output), quit: false }),
+        Mutex::new(ScreenState { name, size, layers: Vec::new(), dirty: false, idle: true, paused: false, anew: true, fresh: Vec::new(), on_flip: Vec::new(), modifiers: Vec::new(), clients: Vec::new(), held: Vec::new(), forget: Vec::new(), changed: Vec::new(), changed_all: true, captures: Vec::new(), output: Some(output), quit: false, fullscreen: false }),
         Condvar::new(),
     ))
 }
@@ -147,6 +150,9 @@ fn stacked(st: &ScreenState) -> Vec<Item> {
         all.push(((level_rank(l.level), if l.main { 0 } else { 1 }, l.surface), Item::Scene(k)));
     }
     for (k, c) in st.clients.iter().enumerate() {
+        if st.fullscreen && c.level == 2 {
+            continue;
+        }
         all.push(((c.level, 2, k), Item::Client(k)));
     }
     all.sort_by_key(|(key, _)| *key);

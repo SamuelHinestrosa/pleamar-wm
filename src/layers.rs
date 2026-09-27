@@ -65,6 +65,20 @@ pub enum Hold {
 
 static HOLD: Mutex<Option<Hold>> = Mutex::new(None);
 
+/// Which monitors have a fullscreen window: there, other programs' bars step aside.
+pub fn set_fullscreen(on: &[bool]) {
+    for (k, (_, sc)) in MONITORS.lock().unwrap().iter().enumerate() {
+        let yes = on.get(k).copied().unwrap_or(false);
+        let mut st = sc.0.lock().unwrap();
+        if st.fullscreen != yes {
+            st.fullscreen = yes;
+            st.dirty = true;
+            st.changed_all = true;
+            sc.1.notify_all();
+        }
+    }
+}
+
 pub fn set_pointer_hold(h: Option<Hold>) {
     *HOLD.lock().unwrap() = h;
 }

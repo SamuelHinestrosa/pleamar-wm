@@ -141,6 +141,7 @@ struct Window {
     shown: Option<(String, [i32; 4])>,
     /// Its entry in ext-foreign-toplevel-list (what a screen share lists).
     listed: ForeignToplevelHandle,
+    fullscreen: bool,
 }
 
 /// A number for a program, the same for all its surfaces and buffers.
@@ -689,6 +690,10 @@ impl State {
                 }
             }
             ToNest::Launch(command) => self.launch(&command),
+            ToNest::Fullscreen(slot) => {
+                let now = self.slots.get(slot).and_then(Option::as_ref).is_some_and(|w| w.fullscreen);
+                self.set_fullscreen(slot, !now);
+            }
             ToNest::OnScreen(screen) => {
                 if self.on_screen != screen {
                     self.on_screen = screen;
@@ -724,6 +729,7 @@ impl State {
                             }
                         }
                         self.tell(NestEvent::Screen(slot, screen));
+                        self.tell_fullscreen();
                     }
                 }
             }
@@ -786,6 +792,39 @@ impl State {
             Ok(s) if s.success() => println!("windows · dbus and systemd know where the desktop is: {}", vars.join(" ")),
             _ => eprintln!("windows · dbus-update-activation-environment failed: portals may not find the desktop"),
         }
+    }
+
+    /// A window to fullscreen or back: the program is told (it hides its own
+    /// bars), and the scene, which decides where it goes. The monitors are
+    /// told which have one.
+    fn set_fullscreen(&mut self, slot: usize, yes: bool) {
+        let Some(Some(w)) = self.slots.get_mut(slot) else { return };
+        if w.fullscreen == yes {
+            return;
+        }
+        w.fullscreen = yes;
+        w.toplevel.with_pending_state(|s| {
+            if yes {
+                s.states.set(xdg_toplevel::State::Fullscreen);
+            } else {
+                s.states.unset(xdg_toplevel::State::Fullscreen);
+            }
+        });
+        if w.toplevel.is_initial_configure_sent() {
+            w.toplevel.send_pending_configure();
+        }
+        self.tell(NestEvent::Fullscreen(slot, yes));
+        self.tell_fullscreen();
+    }
+
+    fn tell_fullscreen(&self) {
+        let mut on = vec![false; self.outputs.len()];
+        for w in self.slots.iter().flatten().filter(|w| w.fullscreen) {
+            if let Some(o) = on.get_mut(w.screen) {
+                *o = true;
+            }
+        }
+        layers::set_fullscreen(&on);
     }
 
     /// A program, started so that it opens here and not on the desktop.
@@ -1337,7 +1376,7 @@ impl State {
         });
         self.outputs[self.on_screen.min(self.outputs.len() - 1)].enter(toplevel.wl_surface());
         let listed = self.toplevel_list.new_toplevel::<State>(title.clone(), app.clone());
-        self.slots[slot] = Some(Window { toplevel, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen: self.on_screen, shown: None, listed });
+        self.slots[slot] = Some(Window { toplevel, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen: self.on_screen, shown: None, listed, fullscreen: false });
         self.order.push(slot);
         self.tell(NestEvent::Opened { slot, title, app, screen: self.on_screen });
         self.tell(NestEvent::Order(self.order.clone()));
@@ -1352,6 +1391,9 @@ impl State {
         let Some(slot) = self.slots.iter().position(|w| w.as_ref().is_some_and(|w| &w.toplevel == toplevel)) else { return };
         if let Some(w) = self.slots[slot].take() {
             self.toplevel_list.remove_toplevel(&w.listed);
+            if w.fullscreen {
+                self.tell_fullscreen();
+            }
         }
         self.order.retain(|s| *s != slot);
         for (_, h) in self.toplevel_handles.iter().filter(|(s, _)| *s == slot) {
@@ -1847,6 +1889,45 @@ impl XdgShellHandler for State {
         surface.with_pending_state(|s| s.geometry = geometry);
         if let Err(e) = self.popups.track_popup(PopupKind::Xdg(surface)) {
             eprintln!("windows · a menu could not be tracked: {e:?}");
+        }
+    }
+
+    /// F11, a video, a game: fullscreen, on the monitor it names if it names one.
+    fn fullscreen_request(&mut self, surface: ToplevelSurface, output: Option<WlOutput>) {
+        let Some(slot) = self.window_of(surface.wl_surface()) else {
+            // Not in a slot yet (waiting): it is answered all the same.
+            if surface.is_initial_configure_sent() {
+                surface.send_configure();
+            }
+            return;
+        };
+        if let Some(k) = output.and_then(|o| self.outputs.iter().position(|x| x.owns(&o))) {
+            self.handle(ToNest::Send(slot, k));
+        }
+        self.set_fullscreen(slot, true);
+    }
+
+    fn unfullscreen_request(&mut self, surface: ToplevelSurface) {
+        match self.window_of(surface.wl_surface()) {
+            Some(slot) => self.set_fullscreen(slot, false),
+            None if surface.is_initial_configure_sent() => {
+                surface.send_configure();
+            }
+            None => {}
+        }
+    }
+
+    /// The layout is the scene's: a window that asks to be maximized is
+    /// answered, and stays where the scene has it.
+    fn maximize_request(&mut self, surface: ToplevelSurface) {
+        if surface.is_initial_configure_sent() {
+            surface.send_configure();
+        }
+    }
+
+    fn unmaximize_request(&mut self, surface: ToplevelSurface) {
+        if surface.is_initial_configure_sent() {
+            surface.send_configure();
         }
     }
 
