@@ -51,6 +51,7 @@ scene Session {
     let home.x = 24
     let home.y = 12
     spring glide = 210, 23
+    spring pop = 320, 12
 
     fact ratio = 0.56                    // the leader's share of the width
     fact overview = false
@@ -240,7 +241,9 @@ scene Session {
         fact maxed.$i = 0
         fact stamp.$i = 0
         let F = pick(sc, free.0, free.1)
-        let fr = F > 0.5 and not win.$i.fullscreen and not win.$i.dialog
+        // (Only once it has a place of its own: the frame free is taken,
+        // it has none yet, and it headed for the corner.)
+        let fr = F > 0.5 and fw.$i > 0.5 and not win.$i.fullscreen and not win.$i.dialog
         let fgx = if(maxed.$i, x0 + gap, fx.$i)
         let fgy = if(maxed.$i, y0, fy.$i)
         let fgw = if(maxed.$i, Ws - 2 * gap, fw.$i)
@@ -250,12 +253,18 @@ scene Session {
         let goal.w = if(fr, fgw, twv)
         let goal.h = if(fr, fgh, thv)
         // Free for the first time: where it is now. Opened free: in the middle, a step down per slot.
+        // (A little smaller than its tile, in the middle of it: it is seen
+        // coming off.)
         on change F while fw.$i < 1 and win.$i.open {
-            fx.$i = x.$i
-            fy.$i = y.$i
-            fw.$i = w.$i
-            fh.$i = h.$i
+            fx.$i = x.$i + w.$i * 0.07
+            fy.$i = y.$i + h.$i * 0.06
+            fw.$i = w.$i * 0.86
+            fh.$i = h.$i * 0.88
         }
+        // Tiled to free and back, each one gives a little jump, and free it
+        // floats: a deeper shadow.
+        prop lift.$i = 0 ~pop
+        follow lift.$i = F
         // (What comes from the compositor is already new when the rules look.)
         on change win.$i.open while win.$i.open and F > 0.5 {
             fw.$i = Ws * 0.6
@@ -344,10 +353,10 @@ scene Session {
             show: seen.$i > 0.01 and sc == screen.index and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog
             opacity: seen.$i
             pivot: x + w / 2, y + h / 2
-            scale: 0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov
+            scale: (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F))
             body {
                 color: #0c0e10
-                shadow: 0, 14 + 8 * lit.$i, 34, 45% + 20% * lit.$i
+                shadow: 0, 14 + 8 * lit.$i + 10 * lift.$i, 34 + 18 * lift.$i, 45% + 20% * lit.$i + 10% * lift.$i
                 box { from: x, y; size: w, h; corner: 12 }
             }
             // Without the keyboard, grey and a step back.
@@ -432,10 +441,15 @@ scene Session {
             dy.$i: 0 after 30ms
         }
         // Free: it stays where it was let go (on the monitor it was let go on).
+        // (Right there, at once: nothing to glide to.)
         on release title.$i while pick(mon, free.0, free.1) > 0.5 and picked < 0 {
             fx.$i = mouse.x - grab.x
             fy.$i = max(mouse.y - grab.y, pick(mon, win.reserved.0.top, win.reserved.1.top))
             maxed.$i = 0
+            x.$i: mouse.x - grab.x ~0ms
+            y.$i: max(mouse.y - grab.y, pick(mon, win.reserved.0.top, win.reserved.1.top)) ~0ms
+            dx.$i: 0 ~0ms
+            dy.$i: 0 ~0ms
         }
         // Let go on another one (the one under it, as the others showed).
         on release title.$i while over >= 0 and not crossing { swap win.$i with win(over) }
@@ -562,6 +576,33 @@ scene Session {
             }
             box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: 80% }
         }
+    }
+
+    // ── which mode a monitor has just taken: a pill at its top, for a moment ──
+    prop told.0 = 0 ~200ms
+    prop told.1 = 0 ~200ms
+    on change free.0 {
+        told.0: 1
+        told.0: 0 after 1300ms
+    }
+    on change free.1 {
+        told.1: 1
+        told.1: 0 after 1300ms
+    }
+    let told.here = pick(screen.index, told.0, told.1)
+    let free.now = pick(screen.index, free.0, free.1)
+    group {
+        show: told.here > 0.01
+        opacity: told.here
+        move: 0, -10 * (1 - told.here)
+        body {
+            color: #0d1013
+            shadow: 0, 10, 28, 45%
+            box { from: W / 2 - 90, pick(screen.index, win.reserved.0.top, win.reserved.1.top) + 8; size: 180, 36; corner: 18; opacity: 92% }
+        }
+        box { from: W / 2 - 90, pick(screen.index, win.reserved.0.top, win.reserved.1.top) + 8; size: 180, 36; corner: 18; stroke: 1; color: mint; opacity: 40% }
+        text "Free windows" { at: W / 2, pick(screen.index, win.reserved.0.top, win.reserved.1.top) + 26; anchor: center; size: 13; weight: 600; color: ink; opacity: free.now }
+        text "Tiled" { at: W / 2, pick(screen.index, win.reserved.0.top, win.reserved.1.top) + 26; anchor: center; size: 13; weight: 600; color: ink; opacity: 1 - free.now }
     }
 
     // ── the layouts strip: while a window is carried, at the top of the
