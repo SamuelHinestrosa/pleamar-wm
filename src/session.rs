@@ -999,7 +999,13 @@ impl State {
             return;
         }
         println!("session · gesture {name}");
-        let _ = self.to_render.send(ToRender::ExternalSignal(pleamar::scene::intern(&name), None));
+        // Bound in keys.conf, its action; if not, the scene's event of that name.
+        match crate::keys::get().gesture(&name) {
+            Some(action) => self.route.perform(action),
+            None => {
+                let _ = self.to_render.send(ToRender::ExternalSignal(pleamar::scene::intern(&name), None));
+            }
+        }
     }
 }
 

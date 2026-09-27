@@ -723,11 +723,18 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
     let _ = state.to_render.send(ToRender::Nest(NestEvent::Socket(socket)));
     let _ = ready.send(Some(()));
     // A session of its own starts what the desktop has (the wallpaper, Marea):
-    // `PLEAMAR_WM_AUTOSTART`, or ~/.config/pleamar-wm/autostart, one command a line.
+    // `PLEAMAR_WM_AUTOSTART`, or ~/.config/pleamar/autostart, one command a
+    // line. The same file `pleamar --autostart` runs on another compositor;
+    // what only makes sense here says so with `wm:` in front.
     if !monitors.is_empty() {
-        let file = std::env::var("PLEAMAR_WM_AUTOSTART").ok().or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.config/pleamar-wm/autostart")));
+        let file = std::env::var("PLEAMAR_WM_AUTOSTART").ok().or_else(|| crate::config::user_file("autostart", "autostart"));
         if let Some(text) = file.as_deref().and_then(|f| std::fs::read_to_string(f).ok()) {
-            state.autostart = text.lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with('#')).map(str::to_owned).collect();
+            state.autostart = text
+                .lines()
+                .map(str::trim)
+                .filter(|l| !l.is_empty() && !l.starts_with('#'))
+                .map(|l| l.strip_prefix("wm:").map_or(l, str::trim_start).to_owned())
+                .collect();
         }
     }
 
@@ -1473,6 +1480,7 @@ impl State {
                 }
             }
             ToLayers::FrameDone => self.frame_done(),
+            ToLayers::Launch(command) => self.launch(&command),
             ToLayers::Released(numbers) => self.release(numbers),
             ToLayers::Monitors => self.monitors_changed(),
             ToLayers::Captured { id, pixels } => self.hand_picture(id, pixels),

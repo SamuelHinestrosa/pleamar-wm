@@ -1,5 +1,11 @@
-//! How the session is set up: `~/.config/pleamar-wm/config` (or
-//! `PLEAMAR_WM_CONFIG`), one thing a line, the way `autostart` is.
+//! How the session is set up: `~/.config/pleamar/session.conf` (or
+//! `PLEAMAR_WM_CONFIG`; the old `~/.config/pleamar-wm/config` still counts),
+//! one thing a line, the way `autostart` is.
+//!
+//! Everything of the user's is in one folder, `~/.config/pleamar/`, the one
+//! that goes into their dotfiles: `session.conf`, `keys.conf`, `autostart`,
+//! `wm/session.plm` (their own window manager), their `shells/`. What is not
+//! there is taken from what comes with pleamar-wm.
 //!
 //! ```text
 //! # which mode, where, and whether it is used at all
@@ -90,11 +96,29 @@ pub fn get() -> &'static Config {
     CONFIG.get_or_init(read)
 }
 
+/// Where the user's configuration lives: `PLEAMAR_CONFIG`, or
+/// `$XDG_CONFIG_HOME/pleamar` (`~/.config/pleamar`).
+pub fn user_dir() -> Option<String> {
+    if let Some(d) = std::env::var("PLEAMAR_CONFIG").ok().filter(|v| !v.is_empty()) {
+        return Some(d);
+    }
+    Some(format!("{}/pleamar", config_home()?))
+}
+
+fn config_home() -> Option<String> {
+    std::env::var("XDG_CONFIG_HOME").ok().filter(|v| !v.is_empty()).or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.config")))
+}
+
+/// One of the user's files: in `~/.config/pleamar/`, or where it used to be
+/// (`~/.config/pleamar-wm/…`) if only that one exists. `None` if neither does.
+pub fn user_file(name: &str, old: &str) -> Option<String> {
+    let new = user_dir().map(|d| format!("{d}/{name}"));
+    let old = config_home().map(|h| format!("{h}/pleamar-wm/{old}"));
+    [new, old].into_iter().flatten().find(|p| std::path::Path::new(p).exists())
+}
+
 fn path() -> Option<String> {
-    std::env::var("PLEAMAR_WM_CONFIG").ok().or_else(|| {
-        let base = std::env::var("XDG_CONFIG_HOME").ok().filter(|v| !v.is_empty()).or_else(|| std::env::var("HOME").ok().map(|h| format!("{h}/.config")))?;
-        Some(format!("{base}/pleamar-wm/config"))
-    })
+    std::env::var("PLEAMAR_WM_CONFIG").ok().or_else(|| user_file("session.conf", "config"))
 }
 
 fn read() -> Config {

@@ -7,6 +7,7 @@ mod config;
 mod nest;
 mod headless;
 mod layers;
+mod keys;
 mod probe;
 mod route;
 mod screen;
@@ -27,6 +28,16 @@ fn main() {
     // screenshots) and now runs here.
     if args.first().map(String::as_str) == Some("hyprctl") {
         std::process::exit(hyprctl(args.get(1).map(String::as_str).unwrap_or("")));
+    }
+    // `pleamar-wm init`: ~/.config/pleamar with a starting point, never over
+    // what is already there.
+    if args.first().map(String::as_str) == Some("init") {
+        std::process::exit(init());
+    }
+    // `pleamar-wm keys`: the bindings that come with it, to copy from.
+    if args.first().map(String::as_str) == Some("keys") {
+        print!("{}", keys::DEFAULTS);
+        return;
     }
     // `pleamar-wm config`: the session's configuration as it is understood.
     if args.first().map(String::as_str) == Some("config") {
@@ -107,4 +118,38 @@ fn hyprctl(what: &str) -> i32 {
             1
         }
     }
+}
+
+/// The user's folder, to start from: what the session reads, commented, and
+/// the folders for their own window manager and shells.
+fn init() -> i32 {
+    let Some(dir) = config::user_dir() else {
+        eprintln!("init · no HOME");
+        return 1;
+    };
+    let files: [(&str, &str); 3] = [
+        ("session.conf", include_str!("../config.example")),
+        (
+            "keys.conf",
+            "# Your key bindings. `defaults` keeps pleamar-wm's (see them with\n# `pleamar-wm keys`); change or add below. Actions and syntax are explained there.\ndefaults\n\n# bind Super+b launch zen-browser\n# bind Super+q minimize\n# unbind Super+t\n",
+        ),
+        ("autostart", include_str!("../autostart")),
+    ];
+    for sub in ["wm", "shells"] {
+        let _ = std::fs::create_dir_all(format!("{dir}/{sub}"));
+    }
+    for (name, text) in files {
+        let path = format!("{dir}/{name}");
+        if std::path::Path::new(&path).exists() {
+            println!("init · {path} is already there: left as it is");
+            continue;
+        }
+        match std::fs::write(&path, text) {
+            Ok(()) => println!("init · {path}"),
+            Err(e) => eprintln!("init · {path}: {e}"),
+        }
+    }
+    println!("init · {dir}/wm: your own window manager (session.plm), if you want one");
+    println!("init · {dir}/shells: your scenes (bars, widgets, apps); start them from autostart");
+    0
 }

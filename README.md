@@ -49,9 +49,9 @@ names (`DP-3`), and the windows are listed with `wlr-foreign-toplevel`: the
 title, the program, which one has the keyboard and on which monitor — what
 pleamar's `window` service reads, and with it Marea's «follow me».
 
-What starts with the session is in `autostart` (or
-`~/.config/pleamar-wm/autostart`, if you have one): one command a line; by
-default the wallpaper Marea has saved and Marea. Super+Space is her search.
+What starts with the session is in `autostart` (yours in
+`~/.config/pleamar/autostart`): one command a line; by default the wallpaper
+Marea has saved and Marea. Super+Space is her search.
 
 Ctrl+Alt+Backspace leaves; Ctrl+Alt+F1…F12 go to another TTY and back. Its
 log goes to `~/.local/state/pleamar-wm/session.log`, and the end of it is shown
@@ -106,10 +106,39 @@ plugged in and out while it runs.
 
 ## Setting it up
 
-`~/.config/pleamar-wm/config`, one thing a line (`config.example` has them
-all); what it does not say is taken from Hyprland's configuration, so a
-desktop set up there comes out the same. `pleamar-wm config` shows what it
-understood.
+Everything of yours is in one folder, `~/.config/pleamar/` —the one for your
+dotfiles—; `pleamar-wm init` makes it with a commented starting point and
+never writes over what is there:
+
+```text
+~/.config/pleamar/
+  session.conf     monitors, keyboard, pointer, idle (below)
+  keys.conf        key bindings and touchpad gestures
+  autostart        what starts with the desktop, one command a line
+  wm/session.plm   your own window manager, instead of the one that comes with it
+  shells/          your scenes: bars, widgets, apps
+```
+
+`keys.conf` binds keys to the window manager's actions —the events its scene
+declares: `close`, `minimize`, `toggle_free`, `focus_next`…— or to programs.
+Start it with `defaults` to keep pleamar-wm's and change what you want;
+`pleamar-wm keys` shows them all:
+
+```text
+defaults
+bind Super+b      launch zen-browser
+bind Super+q      minimize
+unbind Super+t
+gesture swipe3_down close
+```
+
+Only `session.conf`, `keys.conf` and `wm/` are pleamar-wm's. Your shells work
+on any compositor: on Hyprland, `exec-once = pleamar --autostart` starts the
+same `autostart` (lines that begin with `wm:` are left for pleamar-wm's session).
+
+`session.conf`, one thing a line (`config.example` has them all); what it does
+not say is taken from Hyprland's configuration, so a desktop set up there comes
+out the same. `pleamar-wm config` shows what it understood.
 
 ```text
 monitor DP-3 1920x1080@165 at 0,0          # mode, refresh, where

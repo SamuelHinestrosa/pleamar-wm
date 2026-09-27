@@ -15,12 +15,14 @@ pub struct Route {
     grab: Option<u64>,
     /// The program's surface that took the keyboard when clicked.
     key_client: Option<u64>,
+    /// Keys held down that went to a binding: their release is the binding's too.
+    bound: Vec<u32>,
     to_render: Sender<ToRender>,
 }
 
 impl Route {
     pub fn new(to_render: Sender<ToRender>) -> Route {
-        Route { hit: Hit::Scene(None), grab: None, key_client: None, to_render }
+        Route { hit: Hit::Scene(None), grab: None, key_client: None, bound: Vec::new(), to_render }
     }
 
     /// The pointer at that point of a monitor, in its pixels. Says whether it
@@ -118,6 +120,21 @@ impl Route {
 
     /// A key, by its keysym's name, what it types (if anything) and its evdev code.
     pub fn key(&mut self, screens: &[Screen], name: &str, typed: Option<String>, mods: Mods, evdev: u32, down: bool) {
+        // A binding (keys.conf) takes the key before anyone —not while locked—.
+        if down && !layers::locked() {
+            if let Some(action) = crate::keys::get().find(name, mods) {
+                println!("session · key {}{}{}{}{name} → {action:?}", if mods.ctrl { "Ctrl+" } else { "" }, if mods.alt { "Alt+" } else { "" }, if mods.shift { "Shift+" } else { "" }, if mods.logo { "Super+" } else { "" });
+                self.perform(action);
+                self.bound.push(evdev);
+                return;
+            }
+        }
+        if !down {
+            if let Some(k) = self.bound.iter().position(|c| *c == evdev) {
+                self.bound.remove(k);
+                return;
+            }
+        }
         if down {
             let owner = self.key_owner(screens);
             // Locked, a key goes to the lock screen or nowhere: never to the
@@ -143,6 +160,16 @@ impl Route {
                 return;
             }
             let _ = self.to_render.send(ToRender::KeyReleased(name.to_owned(), evdev));
+        }
+    }
+
+    /// A binding's action: a program, or an event of the window manager's scene.
+    pub fn perform(&self, action: &crate::keys::Action) {
+        match action {
+            crate::keys::Action::Launch(command) => layers::tell(ToLayers::Launch(command.clone())),
+            crate::keys::Action::Emit(event) => {
+                let _ = self.to_render.send(ToRender::ExternalSignal(pleamar::scene::intern(event), None));
+            }
         }
     }
 

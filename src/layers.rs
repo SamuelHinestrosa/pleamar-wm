@@ -32,6 +32,8 @@ pub struct MonitorInfo {
 /// What the session and the monitors tell the compositor inside.
 #[derive(Debug)]
 pub enum ToLayers {
+    /// A program to start (a key binding's `launch`).
+    Launch(String),
     /// The pointer on a program's surface, in its coordinates.
     Pointer { id: u64, x: f64, y: f64 },
     /// No longer on any.

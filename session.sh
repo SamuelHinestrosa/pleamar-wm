@@ -13,7 +13,10 @@ here=$(dirname "$(readlink -f "$0")")
 dir_state="${XDG_STATE_HOME:-$HOME/.local/state}/pleamar-wm"
 log="$dir_state/session.log"
 mkdir -p "$(dirname "$log")"
+# Yours, if you made one (~/.config/pleamar/wm/session.plm); else the one here.
+config="${PLEAMAR_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/pleamar}"
 scene="$here/examples/session.plm"
+[ -f "$config/wm/session.plm" ] && scene="$config/wm/session.plm"
 case "$1" in
     *.plm) scene="$1"; shift ;;
 esac
@@ -25,11 +28,10 @@ if [ -z "$PLEAMAR_MONITORS" ] && [ -f "$order" ]; then
     PLEAMAR_MONITORS=$(cat "$order")
     export PLEAMAR_MONITORS
 fi
-# What starts with it: yours (~/.config/pleamar-wm/autostart) or the one here:
-# the wallpaper Marea has saved, and Marea.
-if [ -z "$PLEAMAR_WM_AUTOSTART" ]; then
-    PLEAMAR_WM_AUTOSTART="$HOME/.config/pleamar-wm/autostart"
-    [ -f "$PLEAMAR_WM_AUTOSTART" ] || PLEAMAR_WM_AUTOSTART="$here/autostart"
+# What starts with it: yours (~/.config/pleamar/autostart, found by pleamar-wm
+# itself) or the one here: the wallpaper Marea has saved, and Marea.
+if [ -z "$PLEAMAR_WM_AUTOSTART" ] && [ ! -f "$config/autostart" ] && [ ! -f "$HOME/.config/pleamar-wm/autostart" ]; then
+    PLEAMAR_WM_AUTOSTART="$here/autostart"
     export PLEAMAR_WM_AUTOSTART
 fi
 if [ -z "$PLEAMAR_WALLPAPER" ]; then

@@ -1,4 +1,5 @@
-# pleamar-wm's session: copy it to ~/.config/pleamar-wm/config.
+# pleamar-wm's session: ~/.config/pleamar/session.conf (`pleamar-wm init` puts
+# this there).
 # What is not said here is taken from Hyprland's configuration (~/.config/hypr:
 # its monitor lines, kb_layout, accel_profile, sensitivity), if there is one.
 # `pleamar-wm config` shows what comes out.

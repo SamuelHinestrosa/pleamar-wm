@@ -231,7 +231,19 @@ impl pleamar::Platform for Headless {
                             let mut parts = what[4..].splitn(2, ':');
                             let name = parts.next().unwrap_or("");
                             let Some(code) = parts.next().and_then(|c| c.parse::<u32>().ok()) else { continue };
-                            let typed = Some(name.to_owned()).filter(|n| n.chars().count() == 1);
+                            // `key:Super+Shift+q:16`: modifiers before the name.
+                            let (mods_part, name) = name.rsplit_once('+').unwrap_or(("", name));
+                            let mut mods = pleamar::scene::Mods::default();
+                            for m in mods_part.split('+') {
+                                match m.to_lowercase().as_str() {
+                                    "super" => mods.logo = true,
+                                    "ctrl" => mods.ctrl = true,
+                                    "alt" => mods.alt = true,
+                                    "shift" => mods.shift = true,
+                                    _ => {}
+                                }
+                            }
+                            let typed = Some(name.to_owned()).filter(|n| n.chars().count() == 1 && !mods.logo && !mods.ctrl && !mods.alt);
                             println!("headless · key {name} → {:?}", route.key_owner(&screens));
                             if std::env::var_os("PLEAMAR_DEBUG_WINDOWS").is_some() {
                                 for (m, s) in screens.iter().enumerate() {
@@ -240,8 +252,8 @@ impl pleamar::Platform for Headless {
                                     }
                                 }
                             }
-                            route.key(&screens, name, typed, Default::default(), code, true);
-                            route.key(&screens, name, None, Default::default(), code, false);
+                            route.key(&screens, name, typed, mods, code, true);
+                            route.key(&screens, name, None, mods, code, false);
                         }
                         _ => {
                             let Some((x, y)) = what.split_once(',').and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?))) else { continue };

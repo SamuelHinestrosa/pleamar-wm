@@ -6,6 +6,8 @@
 //
 //   Ctrl+Alt+Backspace  leave        Ctrl+Alt+F1…F12  another TTY
 //
+//   The keys below are keys.conf's (pleamar-wm's own, or yours in
+//   ~/.config/pleamar/keys.conf): this scene only declares the actions.
 //   Super+T / Super+Return  a terminal     Super+Q  close the one with the keyboard
 //   Super+arrows        the keyboard to the next / previous window
 //   Super+Shift+Left    make it lead (if it already leads, to the left monitor)
@@ -617,11 +619,7 @@ scene Session {
             bye.$i: 1
             bye.$i: 0 after 2500ms
         }
-        on key Super+q while win.focus == i {
-            bye.$i: 1
-            bye.$i: 0 after 2500ms
-        }
-        on swipe3_down while win.focus == i {
+        on close while win.focus == i {
             bye.$i: 1
             bye.$i: 0 after 2500ms
         }
@@ -724,41 +722,47 @@ scene Session {
         }
     }
 
-    // ── the keys: Super, as on Hyprland ──
+    // ── what it can be asked to do: its actions ──
+    // Keys and gestures are not here: `keys.conf` binds them to these —the one
+    // that comes with pleamar-wm, or yours in ~/.config/pleamar/keys.conf—.
+    // Each is an event, so Marea or anyone can ask too
+    // (`pleamar-wm --say wm "emit overview"`).
     let fplace = pick(win.focus, win.0.place, win.1.place, win.2.place, win.3.place, win.4.place, win.5.place)
     let next = pick(mod(focus_at + 1, all), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)
     let previous = pick(mod(focus_at + all - 1, all), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)
-    on key Super+t { launch "kitty" }
-    on key Super+Return { launch "kitty" }
-    on key Super+q { close win(win.focus) }
+    event close
+    event minimize
+    event restore_last
+    event fullscreen
+    event overview
+    event focus_next
+    event focus_previous
+    event move_left
+    event move_right
+    event move_up
+    event move_down
+    event narrower
+    event wider
+    on close { close win(win.focus) }
     // Put away into Marea, and the last one back.
-    on key Super+m { minimize win(win.focus) }
-    on key Super+Shift+m { restore win(last_min) }
-    // Marea's search (she runs in the session: see autostart).
-    on key Super+space { launch "$HOME/Proyectos/marea-plm/marea search" }
-    // Her screenshots, as on Hyprland: a piece, the screen, the active window.
-    on key Print { launch "$HOME/Proyectos/marea-plm/marea shot_region" }
-    on key Shift+Print { launch "$HOME/Proyectos/marea-plm/marea shot_screen" }
-    on key Ctrl+Print { launch "$HOME/Proyectos/marea-plm/marea shot_window" }
-    // Her lock screen (ext-session-lock).
-    on key Super+l { launch "$HOME/Proyectos/marea-plm/marea lock" }
-    on key Super+Tab { toggle overview }
+    on minimize { minimize win(win.focus) }
+    on restore_last { restore win(last_min) }
+    on fullscreen { fullscreen win(win.focus) }
+    on overview { toggle overview }
     on key Escape while overview { overview = false }
     // The keyboard to the next one, or the one before.
-    on key Super+Right { focus win(next) }
-    on key Super+Down { focus win(next) }
-    on key Super+Left { focus win(previous) }
-    on key Super+Up { focus win(previous) }
+    on focus_next { focus win(next) }
+    on focus_previous { focus win(previous) }
     // Moving it: left, to lead (and if it already leads, to the monitor on the
     // left); right, to the monitor on the right; up and down, in the order.
-    on key Super+Shift+Left while fplace > 0.5 { promote win(win.focus) }
-    on key Super+Shift+Left while fplace < 0.5 and fscreen > 0.5 { send win(win.focus) to 0 }
-    on key Super+Shift+Right while fscreen < 0.5 { send win(win.focus) to 1 }
-    on key Super+Shift+Up { swap win(win.focus) with win(previous) }
-    on key Super+Shift+Down { swap win(win.focus) with win(next) }
+    on move_left while fplace > 0.5 { promote win(win.focus) }
+    on move_left while fplace < 0.5 and fscreen > 0.5 { send win(win.focus) to 0 }
+    on move_right while fscreen < 0.5 { send win(win.focus) to 1 }
+    on move_up { swap win(win.focus) with win(previous) }
+    on move_down { swap win(win.focus) with win(next) }
     // The leader narrower or wider.
-    on key Super+minus { ratio = clamp(ratio - 0.05, 0.25, 0.8) }
-    on key Super+plus { ratio = clamp(ratio + 0.05, 0.25, 0.8) }
+    on narrower { ratio = clamp(ratio - 0.05, 0.25, 0.8) }
+    on wider { ratio = clamp(ratio + 0.05, 0.25, 0.8) }
     // ── into Marea's island, and out of it ──
     // A window put away is sucked into the island where Marea lives —on its
     // monitor, or on the other one: Marea says which (`island.screen`)—, up
@@ -894,27 +898,12 @@ scene Session {
             window win.$i { at: 0, 0; size: W, H; ask: W, H; show: fs.here }
         }
     }
-    on key Super+f { fullscreen win(win.focus) }
-    // Tiled or free, on the monitor under the mouse.
-    on key Super+w while mon == 0 { free.0 = 1 - free.0 }
-    on key Super+w while mon == 1 { free.1 = 1 - free.1 }
     // Marea follows the mouse from monitor to monitor: she is told which.
     on change mon while mon == 0 { launch "pleamar-wm --say marea 'emit pointer_monitor 0'" }
     on change mon while mon == 1 { launch "pleamar-wm --say marea 'emit pointer_monitor 1'" }
-    // The same, from outside: Marea's menu (`pleamar --say wm "emit toggle_free"`).
+    // Tiled or free, on the monitor under the mouse (Super+W; Marea's menu too).
     event toggle_free
     on toggle_free while mon == 0 { free.0 = 1 - free.0 }
     on toggle_free while mon == 1 { free.1 = 1 - free.1 }
 
-    // ── the touchpad: as on Hyprland ──
-    // Three fingers down closes; up, fullscreen; four sideways, the keyboard
-    // to the next or the one before.
-    event swipe3_down
-    event swipe3_up
-    event swipe4_left
-    event swipe4_right
-    on swipe3_down { close win(win.focus) }
-    on swipe3_up { fullscreen win(win.focus) }
-    on swipe4_left { focus win(previous) }
-    on swipe4_right { focus win(next) }
 }
