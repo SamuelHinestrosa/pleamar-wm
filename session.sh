@@ -36,6 +36,10 @@ if [ -z "$PLEAMAR_WALLPAPER" ]; then
     w=$(grep -o '"wallpaper" *: *"[^"]*"' "$HOME/.local/share/pleamar/marea/settings.json" 2> /dev/null | sed 's/.*: *"\(.*\)"/\1/')
     [ -n "$w" ] && PLEAMAR_WALLPAPER="$w" && export PLEAMAR_WALLPAPER
 fi
+# Where each frame's time goes, every 300 frames, and in each slow one: cheap,
+# and it is what answers «it feels slow» from the log alone.
+: "${PLEAMAR_TIMING:=1}"
+export PLEAMAR_TIMING
 echo "pleamar-wm · its log: $log"
 "$here/target/release/pleamar-wm" session "$scene" "$@" > "$log" 2>&1
 status=$?
