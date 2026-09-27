@@ -74,9 +74,10 @@ fn hyprctl(what: &str) -> i32 {
         "monitors" => {
             for (id, line) in text.lines().filter_map(|l| l.strip_prefix("monitor ")).enumerate() {
                 let f: Vec<&str> = line.split(' ').collect();
-                let [name, w, h, x, y, mhz, focused] = f[..] else { continue };
+                let [name, w, h, x, y, mhz, focused, scale] = f[..] else { continue };
                 let hz = mhz.parse::<f64>().unwrap_or(60_000.0) / 1000.0;
-                println!("Monitor {name} (ID {id}):\n\t{w}x{h}@{hz:.5} at {x}x{y}\n\tscale: 1.00\n\tfocused: {}\n", if focused == "1" { "yes" } else { "no" });
+                let scale = scale.parse::<f64>().unwrap_or(1.0);
+                println!("Monitor {name} (ID {id}):\n\t{w}x{h}@{hz:.5} at {x}x{y}\n\tscale: {scale:.2}\n\tfocused: {}\n", if focused == "1" { "yes" } else { "no" });
             }
             0
         }

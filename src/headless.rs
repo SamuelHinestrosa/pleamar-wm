@@ -114,6 +114,9 @@ fn write_png(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture
 impl pleamar::Platform for Headless {
     fn run(self: Box<Self>, surfaces: Vec<Surface>, _: u32, _: wgpu::Instance, to_render: Sender<ToRender>) {
         let size = (1920u32, 1080u32);
+        // `PLEAMAR_HEADLESS_SCALE=1.5`: monitors of that scale, to check HiDPI.
+        let scale = std::env::var("PLEAMAR_HEADLESS_SCALE").ok().and_then(|v| v.parse::<f64>().ok()).filter(|s| *s > 0.0).unwrap_or(1.0);
+        let unit_w = (size.0 as f64 / scale).round() as i32;
         let count = std::env::var("PLEAMAR_HEADLESS_SCREENS").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(1);
         let png = std::env::var("PLEAMAR_HEADLESS_PNG").unwrap_or_else(|_| "/tmp/pleamar-headless.png".into());
         let at = std::env::var("PLEAMAR_HEADLESS_AT").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(8.0);
@@ -127,7 +130,7 @@ impl pleamar::Platform for Headless {
                 sc
             })
             .collect();
-        crate::layers::register(screens.iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * size.0 as i32, y: 0, mhz: 60_000 }, sc.clone())).collect());
+        crate::layers::register(screens.iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * unit_w, y: 0, mhz: 60_000, scale }, sc.clone())).collect());
         let cursor = Arc::new(Mutex::new(Cursor::Normal));
         let mut id = 7000;
         // Which sheets are on each monitor: to take one away, as if unplugged.
@@ -144,8 +147,9 @@ impl pleamar::Platform for Headless {
                     continue;
                 }
                 id += 1;
-                let layer = screen::layer(id, k, s, size);
+                let layer = screen::layer(id, k, s, size, scale as f32);
                 let lsize = (layer.rect[2] as u32, layer.rect[3] as u32);
+                let units = layer.units;
                 println!("headless · monitor {which}: surface {k} '{}' {}×{} at {},{}", s.name, lsize.0, lsize.1, layer.rect[0], layer.rect[1]);
                 sc.0.lock().unwrap().layers.push(layer);
                 sheets_on[which].push(id);
@@ -153,11 +157,11 @@ impl pleamar::Platform for Headless {
                     id,
                     target: Target::Frames(Box::new(LayerFrames::new(sc.clone(), id, lsize, to_render.clone()))),
                     window: Box::new(LayerWindow { screen: sc.clone(), sheet: id, cursor: cursor.clone() }),
-                    scale: 1.0,
-                    size: lsize,
+                    scale: scale as f32,
+                    size: units,
                     mhz: 60_000,
                     name: format!("HEADLESS-{}", which + 1),
-                    view: View { surface: k, popup: None, origin: s.origin, size: (lsize.0 as f32, lsize.1 as f32) },
+                    view: View { surface: k, popup: None, origin: s.origin, size: (units.0 as f32, units.1 as f32) },
                 })));
             }
         }
@@ -178,7 +182,7 @@ impl pleamar::Platform for Headless {
                     lock.lock().unwrap().quit = true;
                     cv.notify_all();
                 }
-                crate::layers::register(screens[..last].iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * size.0 as i32, y: 0, mhz: 60_000 }, sc.clone())).collect());
+                crate::layers::register(screens[..last].iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * unit_w, y: 0, mhz: 60_000, scale }, sc.clone())).collect());
                 crate::layers::tell(crate::layers::ToLayers::Monitors);
             });
         }

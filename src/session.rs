@@ -66,9 +66,11 @@ struct Monitor {
     /// Lit, or dark (idle, or a program turned it off).
     on: bool,
     size: (u32, u32),
-    /// Where it is on the desktop: its top left corner.
+    /// Where it is on the desktop: its top left corner, in units.
     x: i32,
     y: i32,
+    /// How many pixels a unit is on it (1, 1.25, 1.5, 2): from the configuration.
+    scale: f64,
     /// What is shown on it: its surfaces, put together.
     screen: Screen,
     flips: Arc<Mutex<Flips>>,
@@ -94,6 +96,13 @@ struct Buffer {
     _bo: gbm::BufferObject<()>,
     fb: framebuffer::Handle,
     texture: wgpu::Texture,
+}
+
+impl Monitor {
+    /// Its size in units of the desktop.
+    fn units(&self) -> (i32, i32) {
+        ((self.size.0 as f64 / self.scale).round() as i32, (self.size.1 as f64 / self.scale).round() as i32)
+    }
 }
 
 impl DrmOutput {
@@ -278,7 +287,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
                     let mut any = false;
                     for l in st.layers.iter_mut().filter(|l| l.surface == which && !l.main) {
                         l.anchor = anchor;
-                        l.rect = screen::place((l.rect[2] as u32, l.rect[3] as u32), anchor, l.margin, size);
+                        l.rect = screen::placed(l.units, anchor, l.margin, size, l.scale).1;
                         any = true;
                     }
                     if any {
@@ -326,9 +335,9 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     })
     .map_err(|e| e.to_string())?;
 
-    let first = monitors.first().map_or((0.0, 0.0), |m| (m.x as f64 + m.size.0 as f64 / 2.0, m.y as f64 + m.size.1 as f64 / 2.0));
+    let first = monitors.first().map_or((0.0, 0.0), |m| (m.x as f64 + m.units().0 as f64 / 2.0, m.y as f64 + m.units().1 as f64 / 2.0));
     layers::set_card(drm.clone());
-    layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz }, m.screen.clone())).collect());
+    layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz, scale: m.scale }, m.screen.clone())).collect());
     let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, hit: Hit::Scene(None), grab: None, key_client: None, gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
     state.make_cursors(&gbm);
     // The cursor the scene and the programs ask for, whenever it changes.
@@ -455,7 +464,11 @@ fn make_monitor(drm: &DrmDeviceFd, gbm: &Arc<Mutex<gbm::Device<DrmDeviceFd>>>, n
     let flips: Arc<Mutex<Flips>> = Default::default();
     let output = DrmOutput { drm: drm.clone(), gbm: gbm.clone(), connector: conn, crtc, mode, size, name: name.clone(), buffers: Vec::new(), failed: false, flips: flips.clone() };
     let screen = screen::screen(name.clone(), size, Box::new(output));
-    Monitor { name, crtc, connector: conn, on: true, size, x: 0, y: 0, screen, flips, mhz: refresh_mhz(&mode) }
+    let scale = config::get().monitor(&name).and_then(|r| r.scale).unwrap_or(1.0).clamp(0.5, 4.0);
+    if scale != 1.0 {
+        println!("session · {name}: scale {scale}");
+    }
+    Monitor { name, crtc, connector: conn, on: true, size, x: 0, y: 0, scale, screen, flips, mhz: refresh_mhz(&mode) }
 }
 
 /// Where the configuration puts them; the ones it does not place, left to
@@ -467,13 +480,13 @@ fn place_monitors(monitors: &mut [Monitor]) {
         monitors.sort_by_key(|m| names.iter().position(|n| *n == m.name).unwrap_or(names.len()));
     }
     let placed: Vec<Option<(i32, i32)>> = monitors.iter().map(|m| config::get().monitor(&m.name).and_then(|r| r.at)).collect();
-    let mut x = monitors.iter().zip(&placed).filter_map(|(m, p)| p.map(|(px, _)| px + m.size.0 as i32)).max().unwrap_or(0);
+    let mut x = monitors.iter().zip(&placed).filter_map(|(m, p)| p.map(|(px, _)| px + m.units().0)).max().unwrap_or(0);
     for (m, p) in monitors.iter_mut().zip(&placed) {
         (m.x, m.y) = match p {
             Some(at) => *at,
             None => {
                 let at = (x, 0);
-                x += m.size.0 as i32;
+                x += m.units().0;
                 at
             }
         };
@@ -504,8 +517,9 @@ fn give_sheets(monitors: &[Monitor], surfaces: &[Surface], to_render: &Sender<To
             }
             *next += 1;
             let id = *next;
-            let layer = screen::layer(id, k, s, m.size);
+            let layer = screen::layer(id, k, s, m.size, m.scale as f32);
             let size = (layer.rect[2] as u32, layer.rect[3] as u32);
+            let units = layer.units;
             if !s.name.is_empty() {
                 println!("session · the surface '{}' on {}: {}×{} at {},{}", s.name, m.name, size.0, size.1, layer.rect[0], layer.rect[1]);
             }
@@ -514,11 +528,11 @@ fn give_sheets(monitors: &[Monitor], surfaces: &[Surface], to_render: &Sender<To
                 id,
                 target: Target::Frames(Box::new(LayerFrames::new(m.screen.clone(), id, size, to_render.clone()))),
                 window: Box::new(LayerWindow { screen: m.screen.clone(), sheet: id, cursor: cursor_kind.clone() }),
-                scale: 1.0,
-                size,
+                scale: m.scale as f32,
+                size: units,
                 mhz: m.mhz,
                 name: m.name.clone(),
-                view: View { surface: k, popup: None, origin: s.origin, size: (size.0 as f32, size.1 as f32) },
+                view: View { surface: k, popup: None, origin: s.origin, size: (units.0 as f32, units.1 as f32) },
             })));
             given.push(id);
         }
@@ -603,7 +617,7 @@ impl State {
             st.dirty = true;
         }
         self.sheets = give_sheets(&self.monitors, &self.surfaces, &self.to_render, &self.cursor_kind, &mut self.next_sheet);
-        layers::register(self.monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz }, m.screen.clone())).collect());
+        layers::register(self.monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz, scale: m.scale }, m.screen.clone())).collect());
         layers::tell(ToLayers::Monitors);
         // The cursor on every monitor, and the pointer within them.
         self.shown = None;
@@ -619,7 +633,7 @@ impl State {
             px = px.clamp(r[0] as f64, (r[0] + r[2]).max(r[0] + 1) as f64 - 1.0);
             py = py.clamp(r[1] as f64, (r[1] + r[3]).max(r[1] + 1) as f64 - 1.0);
         }
-        let clamp = |m: &Monitor| (px.clamp(m.x as f64, (m.x + m.size.0 as i32) as f64 - 1.0), py.clamp(m.y as f64, (m.y + m.size.1 as i32) as f64 - 1.0));
+        let clamp = |m: &Monitor| (px.clamp(m.x as f64, (m.x + m.units().0) as f64 - 1.0), py.clamp(m.y as f64, (m.y + m.units().1) as f64 - 1.0));
         let Some((on, (px, py))) = self
             .monitors
             .iter()
@@ -634,13 +648,14 @@ impl State {
         };
         self.pointer = (px, py);
         let hot = self.shown.and_then(|c| self.cursors.iter().find(|x| x.0 == c)).map_or((0, 0), |x| x.2);
+        // The monitor is put together in its pixels: from units to them.
         for (k, m) in self.monitors.iter().enumerate() {
-            let (cx, cy) = if k == on { ((px - m.x as f64) as i32 - hot.0, (py - m.y as f64) as i32 - hot.1) } else { (-256, -256) };
+            let (cx, cy) = if k == on { (((px - m.x as f64) * m.scale) as i32 - hot.0, ((py - m.y as f64) * m.scale) as i32 - hot.1) } else { (-256, -256) };
             #[allow(deprecated)]
             let _ = self.drm.move_cursor(m.crtc, (cx, cy));
         }
         let m = &self.monitors[on];
-        let (mx, my) = (px - m.x as f64, py - m.y as f64);
+        let (mx, my) = ((px - m.x as f64) * m.scale, (py - m.y as f64) * m.scale);
         let hit = {
             let st = m.screen.0.lock().unwrap();
             match self.grab {
@@ -697,7 +712,9 @@ impl State {
             let text = std::fs::read_to_string(format!("{home}/.icons/default/index.theme")).ok()?;
             text.lines().find_map(|l| l.trim().strip_prefix("Inherits=")).map(|v| v.split(',').next().unwrap_or("").trim().to_owned())
         });
-        let size: u32 = std::env::var("XCURSOR_SIZE").ok().and_then(|v| v.parse().ok()).unwrap_or(24);
+        // As big as the monitors' scale asks (the plane holds up to 64).
+        let most = self.monitors.iter().map(|m| m.scale).fold(1.0, f64::max);
+        let size: u32 = (std::env::var("XCURSOR_SIZE").ok().and_then(|v| v.parse::<f64>().ok()).unwrap_or(24.0) * most).round() as u32;
         let names: [(Cursor, &[&str]); 5] = [
             (Cursor::Normal, &["default", "left_ptr", "arrow"]),
             (Cursor::Hand, &["pointer", "hand2", "pointing_hand", "hand1"]),
@@ -853,8 +870,8 @@ impl State {
                 // A tablet or a virtual machine's pointer: over all of the desktop.
                 let x0 = self.monitors.iter().map(|m| m.x).min().unwrap_or(0);
                 let y0 = self.monitors.iter().map(|m| m.y).min().unwrap_or(0);
-                let x1 = self.monitors.iter().map(|m| m.x + m.size.0 as i32).max().unwrap_or(1);
-                let y1 = self.monitors.iter().map(|m| m.y + m.size.1 as i32).max().unwrap_or(1);
+                let x1 = self.monitors.iter().map(|m| m.x + m.units().0).max().unwrap_or(1);
+                let y1 = self.monitors.iter().map(|m| m.y + m.units().1).max().unwrap_or(1);
                 let p = event.position_transformed((x1 - x0, y1 - y0).into());
                 let (dx, dy) = (p.x + x0 as f64 - self.pointer.0, p.y + y0 as f64 - self.pointer.1);
                 self.move_pointer(dx, dy);

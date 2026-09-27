@@ -23,7 +23,11 @@ pub struct MonitorInfo {
     pub x: i32,
     pub y: i32,
     pub mhz: i32,
+    /// How many pixels a unit of the desktop is (1, 1.5, 2): `size` is in
+    /// pixels, `x` and `y` in units.
+    pub scale: f64,
 }
+
 
 /// What the session and the monitors tell the compositor inside.
 #[derive(Debug)]
@@ -126,6 +130,8 @@ pub struct ClientPiece {
     pub key: u64,
     pub at: (i32, i32),
     pub size: (u32, u32),
+    /// Its own pixels (more than `size` if the program draws at the monitor's scale).
+    pub px: (u32, u32),
     /// What it shows, if it is new; the monitor takes it when it puts itself together.
     pub content: Option<PieceContent>,
     /// The buffer on the card it shows, if it is one.

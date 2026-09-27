@@ -29,6 +29,10 @@ use smithay::delegate_layer_shell;
 use smithay::input::pointer::RelativeMotionEvent;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
 use smithay::wayland::content_type::ContentTypeState;
+use smithay::wayland::compositor::send_surface_state;
+use smithay::wayland::fractional_scale::{with_fractional_scale, FractionalScaleHandler, FractionalScaleManagerState};
+use smithay::wayland::single_pixel_buffer::SinglePixelBufferState;
+use smithay::wayland::viewporter::{ViewportCachedState, ViewporterState};
 use smithay::wayland::foreign_toplevel_list::{ForeignToplevelHandle, ForeignToplevelListHandler, ForeignToplevelListState};
 use smithay::wayland::idle_inhibit::{IdleInhibitHandler, IdleInhibitManagerState};
 use smithay::wayland::idle_notify::{IdleNotifierHandler, IdleNotifierState};
@@ -128,7 +132,12 @@ use std::time::{Duration, Instant};
 #[derive(Default)]
 struct Content {
     key: u64,
+    /// Its size in the window's units, and its pixels: more than that if it
+    /// draws at a monitor's scale, or other if it is scaled (wp-viewporter);
+    /// `src`, which part of them it shows.
     size: (usize, usize),
+    px: (usize, usize),
+    src: [f32; 4],
     data: Vec<u8>,
     dmabuf: Option<(u64, Dmabuf)>,
     changed: bool,
@@ -409,6 +418,9 @@ struct State {
     toplevel_list: ForeignToplevelListState,
     _presentation: PresentationState,
     _content_type: ContentTypeState,
+    _viewporter: ViewporterState,
+    _fractional_scale: FractionalScaleManagerState,
+    _single_pixel: SinglePixelBufferState,
     /// Frames waiting to be said shown, and on which monitor.
     presented: Vec<(PresentationFeedbackCallback, usize)>,
     presented_seq: u64,
@@ -514,7 +526,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
             .map(|m| {
                 let output = Output::new(m.name.clone(), PhysicalProperties { size: (0, 0).into(), subpixel: Subpixel::Unknown, make: "pleamar".into(), model: m.name.clone() });
                 let mode = OutputMode { size: (m.size.0 as i32, m.size.1 as i32).into(), refresh: m.mhz };
-                output.change_current_state(Some(mode), Some(Transform::Normal), Some(Scale::Integer(1)), Some((m.x, m.y).into()));
+                output.change_current_state(Some(mode), Some(Transform::Normal), Some(output_scale(m.scale)), Some((m.x, m.y).into()));
                 output.set_preferred(mode);
                 output
             })
@@ -567,6 +579,9 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         toplevel_list: ForeignToplevelListState::new::<State>(&dh),
         _presentation: PresentationState::new::<State>(&dh, libc::CLOCK_MONOTONIC as u32),
         _content_type: ContentTypeState::new::<State>(&dh),
+        _viewporter: ViewporterState::new::<State>(&dh),
+        _fractional_scale: FractionalScaleManagerState::new::<State>(&dh),
+        _single_pixel: SinglePixelBufferState::new::<State>(&dh),
         presented: Vec::new(),
         presented_seq: 0,
         last_under: None,
@@ -1080,7 +1095,7 @@ impl State {
         }
         let mut text = String::new();
         for (k, m) in monitors.iter().enumerate() {
-            text.push_str(&format!("monitor {} {} {} {} {} {} {}\n", m.name, m.size.0, m.size.1, m.x, m.y, m.mhz, (k == self.on_screen) as u8));
+            text.push_str(&format!("monitor {} {} {} {} {} {} {} {}\n", m.name, m.size.0, m.size.1, m.x, m.y, m.mhz, (k == self.on_screen) as u8, m.scale));
         }
         if let Some(w) = self.focus.and_then(|s| self.slots.get(s)).and_then(Option::as_ref) {
             if let Some((name, r)) = &w.shown {
@@ -1113,7 +1128,7 @@ impl State {
                     (o, g)
                 }
             };
-            o.change_current_state(Some(mode), Some(Transform::Normal), Some(Scale::Integer(1)), Some((m.x, m.y).into()));
+            o.change_current_state(Some(mode), Some(Transform::Normal), Some(output_scale(m.scale)), Some((m.x, m.y).into()));
             o.set_preferred(mode);
             outputs.push(o);
             globals.push(g);
@@ -1221,8 +1236,9 @@ impl State {
         let time = self.time();
         match m {
             ToLayers::Pointer { id, x, y } => {
-                let Some(root) = self.panels.iter().find(|p| p.id == id).map(|p| p.shell.wl_surface().clone()) else { return };
-                let at: Point<f64, Logical> = (x, y).into();
+                let Some((root, monitor)) = self.panels.iter().find(|p| p.id == id).map(|p| (p.shell.wl_surface().clone(), p.monitor)) else { return };
+                let s = self.scale_of(monitor);
+                let at: Point<f64, Logical> = (x / s, y / s).into();
                 let under = self.surface_under(&root, [0, 0, 0, 0], at).map(|(s, o)| (s, o.to_f64()));
                 self.pointer_on = None;
                 self.panel_pointer = Some(id);
@@ -1347,8 +1363,21 @@ impl State {
         layers::set_pointer_hold(Some(if locked { layers::Hold::Locked } else { layers::Hold::Confined(rect) }));
     }
 
-    fn monitor_size(&self, k: usize) -> (i32, i32) {
+    /// How many pixels a unit is on that monitor.
+    fn scale_of(&self, k: usize) -> f64 {
+        self.outputs.get(k).map_or(1.0, |o| o.current_scale().fractional_scale())
+    }
+
+    /// A monitor's size in pixels (its mode).
+    fn monitor_pixels(&self, k: usize) -> (i32, i32) {
         self.outputs.get(k).and_then(|o| o.current_mode()).map_or((1280, 800), |m| (m.size.w, m.size.h))
+    }
+
+    /// A monitor's size in units: what programs lay themselves out in.
+    fn monitor_size(&self, k: usize) -> (i32, i32) {
+        let (w, h) = self.monitor_pixels(k);
+        let s = self.scale_of(k);
+        ((w as f64 / s).round() as i32, (h as f64 / s).round() as i32)
     }
 
     /// A program's surface is told its size whenever what it asks for changes:
@@ -1377,12 +1406,15 @@ impl State {
         let c = with_states(&root, |s| *s.cached_state.get::<LayerSurfaceCachedState>().current());
         let size = content_of(&root, |c| c.size).unwrap_or((0, 0));
         let sent = self.panels[k].sent.clone();
+        // What the monitor is given is in its pixels: the program's units, scaled.
+        let scale = self.scale_of(self.panels[k].monitor);
+        let px = |v: i32| (v as f64 * scale).round() as i32;
         let mut pieces = Vec::new();
         if size.0 > 0 && size.1 > 0 {
-            panel_pieces(&root, (0, 0), &sent, &mut pieces);
+            panel_pieces(&root, (0, 0), &sent, scale, &mut pieces);
             for (popup, offset) in PopupManager::popups_for_surface(&root) {
                 let origin = offset - popup.geometry().loc;
-                panel_pieces(popup.wl_surface(), (origin.x, origin.y), &sent, &mut pieces);
+                panel_pieces(popup.wl_surface(), (origin.x, origin.y), &sent, scale, &mut pieces);
             }
         }
         self.panels[k].sent = pieces.iter().map(|p| p.key).collect();
@@ -1390,7 +1422,7 @@ impl State {
         let id = self.panels[k].id;
         // A lock screen: all of its monitor, over everything, with the keyboard.
         if matches!(self.panels[k].shell, Shell::Lock(_)) {
-            layers::show(self.panels[k].monitor, ClientLayer { id, level: 4, rect: [0, 0, w, h], pieces, region: None, keyboard: 1, blur: Vec::new(), owner: owner_of(&root) });
+            layers::show(self.panels[k].monitor, ClientLayer { id, level: 4, rect: [0, 0, px(w), px(h)], pieces, region: None, keyboard: 1, blur: Vec::new(), owner: owner_of(&root) });
             return;
         }
         let m = c.margin;
@@ -1399,7 +1431,7 @@ impl State {
         let y = if t && !b { m.top } else if b && !t { mh - h - m.bottom } else if t && b { m.top + (mh - m.top - m.bottom - h) / 2 } else { (mh - h) / 2 };
         let region = with_states(&root, |s| {
             s.cached_state.get::<SurfaceAttributes>().current().input_region.as_ref().map(|r| {
-                r.rects.iter().map(|(kind, rect)| (matches!(kind, RectangleKind::Add), [rect.loc.x, rect.loc.y, rect.size.w, rect.size.h])).collect()
+                r.rects.iter().map(|(kind, rect)| (matches!(kind, RectangleKind::Add), [px(rect.loc.x), px(rect.loc.y), px(rect.size.w), px(rect.size.h)])).collect()
             })
         });
         let level = match c.layer {
@@ -1413,11 +1445,11 @@ impl State {
             KeyboardInteractivity::Exclusive => 1,
             KeyboardInteractivity::OnDemand => 2,
         };
-        let blur = with_states(&root, |s| s.data_map.get::<Blur>().map(|b| b.0.lock().unwrap().clone())).unwrap_or_default();
+        let blur: Vec<[i32; 4]> = with_states(&root, |s| s.data_map.get::<Blur>().map(|b| b.0.lock().unwrap().clone())).unwrap_or_default().iter().map(|b| [px(b[0]), px(b[1]), px(b[2]), px(b[3])]).collect();
         if std::env::var_os("PLEAMAR_DEBUG_WINDOWS").is_some() {
             eprintln!("windows · surface {id}: level {level}, keyboard {keyboard}, {}×{} at {x},{y}", w, h);
         }
-        layers::show(self.panels[k].monitor, ClientLayer { id, level, rect: [x, y, w, h], pieces, region, keyboard, blur, owner: owner_of(&root) });
+        layers::show(self.panels[k].monitor, ClientLayer { id, level, rect: [px(x), px(y), px(w), px(h)], pieces, region, keyboard, blur, owner: owner_of(&root) });
     }
 
     /// What the programs' bars keep at each edge of each monitor (their
@@ -1627,6 +1659,13 @@ fn unconstrained(popup: &PopupSurface, positioner: PositionerState) -> smithay::
     positioner.get_unconstrained_geometry(target)
 }
 
+/// A monitor's scale as the programs are told it: the whole number above it
+/// for the ones that only know those (they draw bigger and are scaled down),
+/// and the exact one for the ones that ask (fractional-scale).
+fn output_scale(s: f64) -> Scale {
+    if (s - s.round()).abs() < 0.001 { Scale::Integer(s.round().max(1.0) as i32) } else { Scale::Custom { advertised_integer: s.ceil() as i32, fractional: s } }
+}
+
 /// What a surface keeps of its last buffer.
 fn content_of<T>(s: &WlSurface, f: impl FnOnce(&Content) -> T) -> Option<T> {
     with_states(s, |st| st.data_map.get::<Mutex<Content>>().map(|p| f(&p.lock().unwrap())))
@@ -1671,7 +1710,7 @@ fn pieces_of(root: &WlSurface, at: (i32, i32), sent: &[u64], out: &mut Vec<Windo
             } else {
                 PieceContent::Kept
             };
-            out.push(WindowPiece { id: c.key, at: (x + dx, y + dy), size: (c.size.0 as u32, c.size.1 as u32), content });
+            out.push(WindowPiece { id: c.key, at: (x + dx, y + dy), size: (c.size.0 as u32, c.size.1 as u32), px: (c.px.0 as u32, c.px.1 as u32), src: c.src, content });
         },
         |_, _, _| true,
     );
@@ -1680,7 +1719,8 @@ fn pieces_of(root: &WlSurface, at: (i32, i32), sent: &[u64], out: &mut Vec<Windo
 /// A program's surface and its subsurfaces as pieces for its monitor, each at
 /// its place: what it shows if the monitor does not have it yet, and the
 /// buffer on the card it is, if it is one.
-fn panel_pieces(root: &WlSurface, at: (i32, i32), sent: &[u64], out: &mut Vec<ClientPiece>) {
+fn panel_pieces(root: &WlSurface, at: (i32, i32), sent: &[u64], scale: f64, out: &mut Vec<ClientPiece>) {
+    let px = |v: i32| (v as f64 * scale).round() as i32;
     with_surface_tree_downward(
         root,
         at,
@@ -1702,7 +1742,8 @@ fn panel_pieces(root: &WlSurface, at: (i32, i32), sent: &[u64], out: &mut Vec<Cl
                 None => Some(PieceContent::Pixels(c.data.clone())),
             });
             let opaque = c.dmabuf.as_ref().is_some_and(|(_, d)| d.format().code == Fourcc::Xrgb8888);
-            out.push(ClientPiece { key: c.key, at: (x + l.x, y + l.y), size: (c.size.0 as u32, c.size.1 as u32), content: content.flatten(), buffer: c.dmabuf.as_ref().map(|(n, _)| *n), opaque });
+            let size = (px(c.size.0 as i32).max(1) as u32, px(c.size.1 as i32).max(1) as u32);
+            out.push(ClientPiece { key: c.key, at: (px(x + l.x), px(y + l.y)), size, px: (c.px.0 as u32, c.px.1 as u32), content: content.flatten(), buffer: c.dmabuf.as_ref().map(|(n, _)| *n), opaque });
         },
         |_, _, _| true,
     );
@@ -1755,6 +1796,14 @@ fn hit_tree(root: &WlSurface, at: Point<f64, Logical>, origin: (i32, i32)) -> Op
         |_, _, _| true,
     );
     found
+}
+
+/// A buffer of one pixel (wp-single-pixel-buffer: a background, black bars
+/// under a video), scaled to its size by its viewport.
+fn single_pixel(buffer: &WlBuffer) -> Option<((usize, usize), Vec<u8>)> {
+    let p = smithay::wayland::single_pixel_buffer::get_single_pixel_buffer(buffer).ok()?;
+    let c = |v: u32| (v >> 24) as u8;
+    Some(((1, 1), vec![c(p.b), c(p.g), c(p.r), c(p.a)]))
 }
 
 /// A buffer's pixels, copied out of the program's memory so it can draw the next one.
@@ -1887,7 +1936,7 @@ impl CompositorHandler for State {
                         Some((size, Vec::new(), Some((number, d))))
                     }
                     None => {
-                        let p = read_buffer(&b);
+                        let p = read_buffer(&b).or_else(|| single_pixel(&b));
                         b.release();
                         p.map(|(size, data)| (size, data, None))
                     }
@@ -1898,12 +1947,12 @@ impl CompositorHandler for State {
                     let unsent = c.changed.then(|| c.dmabuf.as_ref().map(|(n, _)| *n)).flatten();
                     match fresh {
                         Some((size, data, dmabuf)) => {
-                            c.size = size;
+                            c.px = size;
                             c.data = data;
                             c.dmabuf = dmabuf;
                         }
                         None => {
-                            c.size = (0, 0);
+                            c.px = (0, 0);
                             c.data = Vec::new();
                             c.dmabuf = None;
                         }
@@ -1917,23 +1966,53 @@ impl CompositorHandler for State {
             }
             Some(BufferAssignment::Removed) => with_states(surface, |s| {
                 let mut c = s.data_map.get::<Mutex<Content>>().unwrap().lock().unwrap();
-                c.size = (0, 0);
+                c.px = (0, 0);
                 c.data = Vec::new();
                 c.dmabuf = None;
                 c.changed = true;
             }),
             None => {}
         }
+        // Its size in its own units, from its pixels: at the scale it drew at,
+        // or as its viewport says (which also may crop them). Every commit:
+        // the viewport can change without a new buffer.
+        with_states(surface, |s| {
+            let scale = s.cached_state.get::<SurfaceAttributes>().current().buffer_scale.max(1) as f64;
+            let vp = *s.cached_state.get::<ViewportCachedState>().current();
+            let mut c = s.data_map.get::<Mutex<Content>>().unwrap().lock().unwrap();
+            let (pw, ph) = (c.px.0 as f64, c.px.1 as f64);
+            let src = vp.src.map_or([0.0, 0.0, pw as f32, ph as f32], |r| [(r.loc.x * scale) as f32, (r.loc.y * scale) as f32, (r.size.w * scale) as f32, (r.size.h * scale) as f32]);
+            let size = if c.px == (0, 0) {
+                (0, 0)
+            } else if let Some(d) = vp.dst {
+                (d.w.max(1) as usize, d.h.max(1) as usize)
+            } else if let Some(r) = vp.src {
+                (r.size.w.round().max(1.0) as usize, r.size.h.round().max(1.0) as usize)
+            } else {
+                ((pw / scale).round().max(1.0) as usize, (ph / scale).round().max(1.0) as usize)
+            };
+            if c.size != size || c.src != src {
+                c.size = size;
+                c.src = src;
+                c.changed = true;
+            }
+        });
         self.popups.commit(surface);
         // Its root: the window it belongs to, or the menu.
         let mut root = surface.clone();
         while let Some(p) = get_parent(&root) {
             root = p;
         }
+        let monitor = self.panels.iter().find(|p| p.shell.wl_surface() == &root).map(|p| p.monitor).or_else(|| self.window_of(&root).and_then(|s| self.slots[s].as_ref()).map(|w| w.screen)).unwrap_or(self.on_screen);
         if !feedback.is_empty() {
-            let monitor = self.panels.iter().find(|p| p.shell.wl_surface() == &root).map(|p| p.monitor).or_else(|| self.window_of(&root).and_then(|s| self.slots[s].as_ref()).map(|w| w.screen)).unwrap_or(self.on_screen);
             self.presented.extend(feedback.into_iter().map(|f| (f, monitor)));
         }
+        // The scale to draw at: the one of the monitor it is on.
+        let scale = self.scale_of(monitor);
+        with_states(surface, |s| {
+            with_fractional_scale(s, |f| f.set_preferred_scale(scale));
+            send_surface_state(surface, s, scale.ceil() as i32, Transform::Normal);
+        });
         // A program's surface: told its size (again, if it asks for another or
         // it was hidden), and shown.
         if let Some(k) = self.panels.iter().position(|p| p.shell.wl_surface() == &root) {
@@ -2268,8 +2347,10 @@ impl Dispatch<ZwlrScreencopyManagerV1, ()> for State {
             frame.failed();
             return;
         };
-        let (mw, mh) = state.monitor_size(monitor);
-        let p = piece.unwrap_or([0, 0, mw, mh]);
+        // In the monitor's pixels; a piece is asked for in units.
+        let (mw, mh) = state.monitor_pixels(monitor);
+        let s = state.scale_of(monitor);
+        let p = piece.map_or([0, 0, mw, mh], |p| [(p[0] as f64 * s) as i32, (p[1] as f64 * s) as i32, (p[2] as f64 * s).round() as i32, (p[3] as f64 * s).round() as i32]);
         let (x0, y0) = (p[0].clamp(0, mw), p[1].clamp(0, mh));
         let (x1, y1) = ((p[0] + p[2]).clamp(x0, mw), (p[1] + p[3]).clamp(y0, mh));
         let piece = [x0, y0, x1 - x0, y1 - y0];
@@ -2512,6 +2593,10 @@ impl XdgForeignHandler for State {
 
 impl XdgDialogHandler for State {}
 
+/// A surface that asks for its exact scale is told it as soon as it commits
+/// (see `commit`).
+impl FractionalScaleHandler for State {}
+
 impl ForeignToplevelListHandler for State {
     fn foreign_toplevel_list_state(&mut self) -> &mut ForeignToplevelListState {
         &mut self.toplevel_list
@@ -2582,3 +2667,6 @@ impl Dispatch<ZwlrOutputPowerV1, usize> for State {
         }
     }
 }
+smithay::delegate_viewporter!(State);
+smithay::delegate_fractional_scale!(State);
+smithay::delegate_single_pixel_buffer!(State);

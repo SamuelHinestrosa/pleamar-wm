@@ -34,8 +34,12 @@ pub struct Layer {
     pub surface: usize,
     /// Where it looks from in the scene's plane.
     pub origin: (f32, f32),
-    /// Where it is on the monitor: x, y, width, height.
+    /// Where it is on the monitor: x, y, width, height, in its pixels.
     pub rect: [i32; 4],
+    /// Its size in the scene's units, and how many pixels each is (the
+    /// monitor's scale): the render paints `units` × `scale` pixels.
+    pub units: (u32, u32),
+    pub scale: f32,
     pub level: Level,
     pub main: bool,
     pub anchor: SurfaceAnchor,
@@ -116,11 +120,21 @@ pub fn level_rank(l: Level) -> u8 {
     }
 }
 
-/// A layer for a surface of the scene on a monitor.
-pub fn layer(sheet: u32, k: usize, s: &Surface, monitor: (u32, u32)) -> Layer {
+/// A layer for a surface of the scene on a monitor of that many pixels, at
+/// that scale: laid out in units, placed in pixels.
+pub fn layer(sheet: u32, k: usize, s: &Surface, monitor: (u32, u32), scale: f32) -> Layer {
     let main = s.name.is_empty();
-    let rect = place((s.width, s.height), s.anchor, s.margin, monitor);
-    Layer { sheet, surface: k, origin: s.origin, rect, level: s.level, main, anchor: s.anchor, margin: s.margin, latest: None, region: Vec::new() }
+    let (units, rect) = placed((s.width, s.height), s.anchor, s.margin, monitor, scale);
+    Layer { sheet, surface: k, origin: s.origin, rect, units, scale, level: s.level, main, anchor: s.anchor, margin: s.margin, latest: None, region: Vec::new() }
+}
+
+/// Where a surface goes, laid out in units on a monitor of that many pixels:
+/// its size in units, and its box in pixels.
+pub fn placed(s_size: (u32, u32), anchor: SurfaceAnchor, margin: [i32; 4], monitor: (u32, u32), scale: f32) -> ((u32, u32), [i32; 4]) {
+    let logical = ((monitor.0 as f32 / scale).round() as u32, (monitor.1 as f32 / scale).round() as u32);
+    let r = place(s_size, anchor, margin, logical);
+    let px = |v: i32| (v as f32 * scale).round() as i32;
+    ((r[2] as u32, r[3] as u32), [px(r[0]), px(r[1]), px(r[2]).max(1), px(r[3]).max(1)])
 }
 
 /// Who takes the pointer at a point of a monitor.
@@ -164,7 +178,7 @@ fn stacked(st: &ScreenState) -> Vec<Item> {
 /// input region says—; the scene's own takes whatever is left above it.
 pub fn pointer_at(st: &ScreenState, (x, y): (f64, f64)) -> Hit {
     let inside = |r: &[i32; 4], px: f64, py: f64| px >= r[0] as f64 && py >= r[1] as f64 && px < (r[0] + r[2]) as f64 && py < (r[1] + r[3]) as f64;
-    let scene = |l: &Layer| Hit::Scene(Some((l.origin.0 + (x - l.rect[0] as f64) as f32, l.origin.1 + (y - l.rect[1] as f64) as f32)));
+    let scene = |l: &Layer| Hit::Scene(Some((l.origin.0 + (x - l.rect[0] as f64) as f32 / l.scale, l.origin.1 + (y - l.rect[1] as f64) as f32 / l.scale)));
     for item in stacked(st).iter().rev() {
         match item {
             Item::Scene(k) => {
@@ -172,7 +186,7 @@ pub fn pointer_at(st: &ScreenState, (x, y): (f64, f64)) -> Hit {
                 if l.main {
                     return scene(l);
                 }
-                let (lx, ly) = (x - l.rect[0] as f64, y - l.rect[1] as f64);
+                let (lx, ly) = ((x - l.rect[0] as f64) / l.scale as f64, (y - l.rect[1] as f64) / l.scale as f64);
                 if l.latest.is_some() && inside(&l.rect, x, y) && l.region.iter().any(|b| lx >= b[0] as f64 && ly >= b[1] as f64 && lx < b[2] as f64 && ly < b[3] as f64) {
                     return scene(l);
                 }
@@ -510,7 +524,7 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
             for c in &mut st.clients {
                 for p in &mut c.pieces {
                     if let Some(content) = p.content.take() {
-                        arrived.push((p.key, p.buffer, p.size, content));
+                        arrived.push((p.key, p.buffer, p.px, content));
                     }
                     shows.extend(p.buffer);
                     surfaces.push(p.key);
