@@ -1061,6 +1061,12 @@ impl State {
         }
         // Nor Hyprland's: a program that asks it things would get another desktop's answers.
         c.env_remove("HYPRLAND_INSTANCE_SIGNATURE");
+        // In a session of its own, the scenes it starts (Marea) listen apart
+        // from the ones of another desktop of the same user that may be open.
+        if !layers::monitors().is_empty() {
+            let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+            c.env("PLEAMAR_SOCKETS", format!("{dir}/pleamar-{}", self.socket));
+        }
         // pleamar-wm itself by its name (`pleamar-wm hyprctl`, what Marea asks instead).
         if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.to_path_buf())) {
             let path = std::env::var("PATH").unwrap_or_default();
