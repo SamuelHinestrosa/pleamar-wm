@@ -116,6 +116,19 @@ static NEST: Mutex<Option<channel::Sender<ToLayers>>> = Mutex::new(None);
 /// The card the session drives, for the compositor inside to import the
 /// programs' sync points with (explicit sync).
 static CARD: Mutex<Option<smithay::backend::drm::DrmDeviceFd>> = Mutex::new(None);
+/// Where the cursor asked for goes: the session, which has the card's cursor
+/// plane. `true` when a program's surface asks, `false` when the scene does.
+static CURSOR: Mutex<Option<channel::Sender<(bool, pleamar::scene::Cursor)>>> = Mutex::new(None);
+
+pub fn set_cursor_sink(tx: channel::Sender<(bool, pleamar::scene::Cursor)>) {
+    *CURSOR.lock().unwrap() = Some(tx);
+}
+
+pub fn cursor(from_program: bool, c: pleamar::scene::Cursor) {
+    if let Some(tx) = CURSOR.lock().unwrap().as_ref() {
+        let _ = tx.send((from_program, c));
+    }
+}
 
 pub fn set_card(fd: smithay::backend::drm::DrmDeviceFd) {
     *CARD.lock().unwrap() = Some(fd);

@@ -1464,7 +1464,13 @@ impl SeatHandler for State {
             CursorImageStatus::Named(I::Grabbing | I::Move) => pleamar::scene::Cursor::Grabbing,
             _ => pleamar::scene::Cursor::Normal,
         };
-        self.tell(NestEvent::Cursor(kind));
+        // Over a program's surface of its own, the session shows it; over a
+        // window, the scene does (it may draw on top).
+        if self.panel_pointer.is_some() {
+            layers::cursor(true, kind);
+        } else {
+            self.tell(NestEvent::Cursor(kind));
+        }
     }
 }
 

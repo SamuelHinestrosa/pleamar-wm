@@ -182,7 +182,12 @@ struct State {
     to_render: Sender<ToRender>,
     keymap: xkb::State,
     pointer: (f64, f64),
-    cursor: Option<gbm::BufferObject<()>>,
+    /// The cursor's shapes on the card, each with its hot spot, and which is shown.
+    cursors: Vec<(Cursor, gbm::BufferObject<()>, (i32, i32))>,
+    shown: Option<Cursor>,
+    /// What the scene asks for, and what a program's surface under the pointer does.
+    scene_cursor: Cursor,
+    program_cursor: Cursor,
     scroll: f64,
     /// Who has the pointer: the scene, or a program's surface (layer-shell).
     hit: Hit,
@@ -356,8 +361,24 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     let first = monitors.first().map_or((0.0, 0.0), |m| (m.size.0 as f64 / 2.0, m.size.1 as f64 / 2.0));
     layers::set_card(drm.clone());
     layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, mhz: m.mhz }, m.screen.clone())).collect());
-    let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursor: None, scroll: 0.0, hit: Hit::Scene(None), grab: None, key_client: None, quit: false };
-    state.make_cursor(&gbm);
+    let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, hit: Hit::Scene(None), grab: None, key_client: None, quit: false };
+    state.make_cursors(&gbm);
+    // The cursor the scene and the programs ask for, whenever it changes.
+    let (cursor_tx, cursor_rx) = smithay::reexports::calloop::channel::channel::<(bool, Cursor)>();
+    layers::set_cursor_sink(cursor_tx);
+    event_loop
+        .handle()
+        .insert_source(cursor_rx, |event, _, state: &mut State| {
+            if let smithay::reexports::calloop::channel::Event::Msg((from_program, c)) = event {
+                if from_program {
+                    state.program_cursor = c;
+                } else {
+                    state.scene_cursor = c;
+                }
+                state.show_cursor();
+            }
+        })
+        .map_err(|e| e.to_string())?;
     state.move_pointer(0.0, 0.0);
     println!("session · running: Ctrl+Alt+Backspace leaves");
     while !state.quit {
@@ -401,8 +422,9 @@ impl State {
         let on = self.monitors.iter().position(|m| px >= m.x as f64 && px < (m.x + m.size.0 as i32) as f64).unwrap_or(0);
         let py = py.clamp(0.0, self.monitors[on].size.1 as f64 - 1.0);
         self.pointer = (px, py);
+        let hot = self.shown.and_then(|c| self.cursors.iter().find(|x| x.0 == c)).map_or((0, 0), |x| x.2);
         for (k, m) in self.monitors.iter().enumerate() {
-            let (cx, cy) = if k == on { ((px - m.x as f64) as i32, py as i32) } else { (-64, -64) };
+            let (cx, cy) = if k == on { ((px - m.x as f64) as i32 - hot.0, py as i32 - hot.1) } else { (-256, -256) };
             #[allow(deprecated)]
             let _ = self.drm.move_cursor(m.crtc, (cx, cy));
         }
@@ -438,7 +460,11 @@ impl State {
                 layers::tell(ToLayers::Pointer { id, x, y });
             }
         }
+        let was_program = matches!(self.hit, Hit::Client(..));
         self.hit = hit;
+        if was_program != matches!(hit, Hit::Client(..)) {
+            self.show_cursor();
+        }
     }
 
     /// Where the keys go: a program's surface that takes all of it; else the
@@ -450,40 +476,98 @@ impl State {
         all.or(self.key_client.filter(|id| alive(*id)))
     }
 
-    /// An arrow for the pointer, on the card's cursor plane: moving the mouse
-    /// does not repaint the scene.
-    fn make_cursor(&mut self, gbm: &Arc<Mutex<gbm::Device<DrmDeviceFd>>>) {
-        let Ok(mut bo) = gbm.lock().unwrap().create_buffer_object::<()>(64, 64, gbm::Format::Argb8888, gbm::BufferObjectFlags::CURSOR | gbm::BufferObjectFlags::WRITE) else {
-            eprintln!("session · no cursor on the card: the pointer will not be seen");
-            return;
-        };
-        let mut px = vec![0u8; 64 * 64 * 4];
-        // The usual arrow: white, with a dark edge.
-        let arrow: [&str; 19] = [
-            "X", "XX", "X.X", "X..X", "X...X", "X....X", "X.....X", "X......X", "X.......X", "X........X", "X.........X", "X..........X", "X......XXXXX", "X...X..X", "X..XX..X",
-            "X.X  X..X", "XX   X..X", "X     X..X", "      XXX",
+    /// The cursor's shapes, on the card's cursor plane: moving the mouse does
+    /// not repaint anything. From the system's cursor theme (XCURSOR_THEME, or
+    /// what ~/.icons/default inherits), at XCURSOR_SIZE (24); an arrow of its
+    /// own if there is none.
+    fn make_cursors(&mut self, gbm: &Arc<Mutex<gbm::Device<DrmDeviceFd>>>) {
+        let theme = std::env::var("XCURSOR_THEME").ok().filter(|t| !t.is_empty()).or_else(|| {
+            let home = std::env::var("HOME").ok()?;
+            let text = std::fs::read_to_string(format!("{home}/.icons/default/index.theme")).ok()?;
+            text.lines().find_map(|l| l.trim().strip_prefix("Inherits=")).map(|v| v.split(',').next().unwrap_or("").trim().to_owned())
+        });
+        let size: u32 = std::env::var("XCURSOR_SIZE").ok().and_then(|v| v.parse().ok()).unwrap_or(24);
+        let names: [(Cursor, &[&str]); 5] = [
+            (Cursor::Normal, &["default", "left_ptr", "arrow"]),
+            (Cursor::Hand, &["pointer", "hand2", "pointing_hand", "hand1"]),
+            (Cursor::Text, &["text", "xterm", "ibeam"]),
+            (Cursor::Grab, &["grab", "openhand", "hand1"]),
+            (Cursor::Grabbing, &["grabbing", "closedhand", "fleur"]),
         ];
-        for (y, row) in arrow.iter().enumerate() {
-            for (x, c) in row.chars().enumerate() {
-                let v: [u8; 4] = match c {
-                    'X' => [20, 20, 20, 255],
-                    '.' => [255, 255, 255, 255],
-                    _ => continue,
-                };
-                let i = (y * 64 + x) * 4;
-                px[i..i + 4].copy_from_slice(&v);
+        let loaded = theme.as_deref().map(xcursor::CursorTheme::load);
+        for (kind, candidates) in names {
+            let image = loaded.as_ref().and_then(|t| {
+                candidates.iter().find_map(|n| {
+                    let path = t.load_icon(n)?;
+                    let data = std::fs::read(path).ok()?;
+                    let images = xcursor::parser::parse_xcursor(&data)?;
+                    // The size closest to the one asked for, that fits the plane.
+                    images.into_iter().filter(|i| i.width <= 64 && i.height <= 64).min_by_key(|i| (i.size as i64 - size as i64).abs())
+                })
+            });
+            let Ok(mut bo) = gbm.lock().unwrap().create_buffer_object::<()>(64, 64, gbm::Format::Argb8888, gbm::BufferObjectFlags::CURSOR | gbm::BufferObjectFlags::WRITE) else {
+                eprintln!("session · no cursor on the card: the pointer will not be seen");
+                return;
+            };
+            let mut px = vec![0u8; 64 * 64 * 4];
+            let hot = match &image {
+                Some(i) => {
+                    for y in 0..i.height as usize {
+                        let row = &i.pixels_rgba[y * i.width as usize * 4..(y + 1) * i.width as usize * 4];
+                        px[y * 64 * 4..y * 64 * 4 + row.len()].copy_from_slice(row);
+                    }
+                    (i.xhot as i32, i.yhot as i32)
+                }
+                None => {
+                    if kind != Cursor::Normal {
+                        continue;
+                    }
+                    // The usual arrow: white, with a dark edge.
+                    let arrow: [&str; 19] = [
+                        "X", "XX", "X.X", "X..X", "X...X", "X....X", "X.....X", "X......X", "X.......X", "X........X", "X.........X", "X..........X", "X......XXXXX", "X...X..X", "X..XX..X",
+                        "X.X  X..X", "XX   X..X", "X     X..X", "      XXX",
+                    ];
+                    for (y, row) in arrow.iter().enumerate() {
+                        for (x, c) in row.chars().enumerate() {
+                            let v: [u8; 4] = match c {
+                                'X' => [20, 20, 20, 255],
+                                '.' => [255, 255, 255, 255],
+                                _ => continue,
+                            };
+                            let i = (y * 64 + x) * 4;
+                            px[i..i + 4].copy_from_slice(&v);
+                        }
+                    }
+                    (0, 0)
+                }
+            };
+            if bo.write(&px).is_err() {
+                continue;
             }
+            self.cursors.push((kind, bo, hot));
         }
-        if bo.write(&px).is_err() {
+        println!("session · cursor: {} ({} shapes)", theme.as_deref().unwrap_or("its own arrow"), self.cursors.len());
+        self.show_cursor();
+    }
+
+    /// The cursor of whoever has the pointer, if it is not the one shown.
+    fn show_cursor(&mut self) {
+        let want = if matches!(self.hit, Hit::Client(..)) { self.program_cursor } else { self.scene_cursor };
+        // A shape the theme lacks is shown as the arrow.
+        let want = if self.cursors.iter().any(|c| c.0 == want) { want } else { Cursor::Normal };
+        if self.shown == Some(want) {
             return;
         }
+        let Some((_, bo, hot)) = self.cursors.iter().find(|c| c.0 == want) else { return };
         for m in &self.monitors {
             #[allow(deprecated)]
-            if let Err(e) = self.drm.set_cursor2(m.crtc, Some(&bo), (0, 0)) {
+            if let Err(e) = self.drm.set_cursor2(m.crtc, Some(bo), *hot) {
                 eprintln!("session · {}: no cursor ({e})", m.name);
             }
         }
-        self.cursor = Some(bo);
+        self.shown = Some(want);
+        // Its tip where the pointer is.
+        self.move_pointer(0.0, 0.0);
     }
 
     /// Page flips done: the frame on its way is on screen, and the monitor can
@@ -531,13 +615,9 @@ impl State {
                     st.changed_all = true;
                     m.screen.1.notify_all();
                 }
-                if let Some(bo) = self.cursor.take() {
-                    for m in &self.monitors {
-                        #[allow(deprecated)]
-                        let _ = self.drm.set_cursor2(m.crtc, Some(&bo), (0, 0));
-                    }
-                    self.cursor = Some(bo);
-                }
+                // The cursor again: another TTY may have left its own.
+                self.shown = None;
+                self.show_cursor();
                 let _ = self.to_render.send(ToRender::Repaint);
             }
         }

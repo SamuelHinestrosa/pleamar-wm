@@ -1694,6 +1694,7 @@ dependencies = [
  "libc",
  "pleamar",
  "smithay",
+ "xcursor",
  "xkbcommon",
 ]
 

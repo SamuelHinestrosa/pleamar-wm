@@ -283,6 +283,7 @@ impl PlatformWindow for LayerWindow {
     }
     fn cursor(&self, c: Cursor) {
         *self.cursor.lock().unwrap() = c;
+        layers::cursor(false, c);
     }
     fn keyboard(&self, _: Keyboard) {}
 }

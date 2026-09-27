@@ -13,3 +13,5 @@ image = { version = "0.25", default-features = false, features = ["png"] }
 # renderer of smithay's.
 smithay = { version = "0.7", default-features = false, features = ["wayland_frontend", "desktop", "backend_drm", "backend_gbm", "backend_libinput", "backend_session_libseat", "backend_udev"] }
 xkbcommon = "0.8"
+# The cursor theme the system has (Xcursor files), for the card's cursor plane.
+xcursor = "0.3"
