@@ -46,7 +46,10 @@ fn main() {
         let scene = if args.first().is_some_and(|a| !a.starts_with("--")) { args.remove(0) } else { "examples/session.plm".into() };
         nest::set_scene_name(&scene);
         layers::expect_monitors();
-        pleamar::provide_before_quit(Box::new(layers::stop_all));
+        pleamar::provide_before_quit(Box::new(|| {
+            layers::stop_all();
+            nest::stop_launched();
+        }));
         pleamar::provide_platform(Box::new(headless::Headless));
         let mut options = vec!["--scene".to_owned(), scene, "--no-hud".to_owned()];
         options.extend(args);
@@ -58,7 +61,10 @@ fn main() {
         let scene = if args.first().is_some_and(|a| !a.starts_with("--")) { args.remove(0) } else { "examples/session.plm".into() };
         nest::set_scene_name(&scene);
         layers::expect_monitors();
-        pleamar::provide_before_quit(Box::new(layers::stop_all));
+        pleamar::provide_before_quit(Box::new(|| {
+            layers::stop_all();
+            nest::stop_launched();
+        }));
         pleamar::provide_platform(Box::new(session::Session));
         let mut options = vec!["--scene".to_owned(), scene, "--no-hud".to_owned()];
         options.extend(args);

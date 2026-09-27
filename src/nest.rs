@@ -1169,8 +1169,12 @@ impl State {
             }
         }
         c.stdin(std::process::Stdio::null());
+        // A group of its own (with whatever it starts: a browser's content
+        // processes), to be closed with the session.
+        std::os::unix::process::CommandExt::process_group(&mut c, 0);
         match c.spawn() {
             Ok(mut child) => {
+                LAUNCHED.lock().unwrap().push(child.id() as i32);
                 // Reaped when it ends, so it does not linger as a zombie.
                 std::thread::spawn(move || {
                     let _ = child.wait();
@@ -1979,6 +1983,29 @@ fn unconstrained(state: &State, popup: &PopupSurface, positioner: PositionerStat
     let Some(window) = window else { return positioner.get_geometry() };
     let target = smithay::utils::Rectangle::new((-parent.x, -parent.y).into(), window.size);
     positioner.get_unconstrained_geometry(target)
+}
+
+/// What the session started (each a process group): the programs go with it.
+static LAUNCHED: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+
+/// Closes what the session started, as it leaves: without their compositor
+/// they have nowhere to show themselves, and some do not notice —a browser
+/// went on animating a page for nobody, at a quarter of a core, long after—.
+/// Asked first; whatever is still there a moment later, made to.
+pub fn stop_launched() {
+    let groups = std::mem::take(&mut *LAUNCHED.lock().unwrap());
+    // SAFETY: kill with a negative pid signals that process group; nothing else is touched.
+    let alive = |g: i32| unsafe { libc::kill(-g, 0) == 0 };
+    for &g in &groups {
+        unsafe { libc::kill(-g, libc::SIGTERM) };
+    }
+    let until = std::time::Instant::now() + Duration::from_millis(1500);
+    while groups.iter().any(|g| alive(*g)) && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    for &g in groups.iter().filter(|g| alive(**g)) {
+        unsafe { libc::kill(-g, libc::SIGKILL) };
+    }
 }
 
 /// A surface and every subsurface in it enter a monitor (leaving another):
