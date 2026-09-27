@@ -43,6 +43,7 @@ scene Session {
     let mint = #9ed6bd
     let coral = #ef7a66
     let amber = #e8c26a
+    let marea = #151616                  // Marea's skin (her palette's coal)
     // Windows start this far from the top (under what other programs' bars keep).
     let bar = 12
     let gap = 12
@@ -275,6 +276,9 @@ scene Session {
             mh.$i = h.$i
             last_min = i
         }
+        // Back to tiled, what was put away comes out of the island to its
+        // place: tiled, every window has one.
+        on change F while F < 0.5 and win.$i.minimized { restore win.$i }
         let goal.x = if(win.$i.minimized, mx.$i, if(fr, fgx, txv))
         let goal.y = if(win.$i.minimized, my.$i, if(fr, fgy, tyv))
         let goal.w = if(win.$i.minimized, mw.$i, if(fr, fgw, twv))
@@ -397,7 +401,7 @@ scene Session {
             z: stamp.$i
             // Carried, it is drawn over the others, further down; flying into
             // the island or out of it, too.
-            show: seen.$i > 0.01 and sc == screen.index and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog and mini.$i < 0.001
+            show: seen.$i > 0.01 and sc == screen.index and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog and mini.$i <= 0.02
             opacity: seen.$i
             pivot: x + w / 2, y + h / 2
             scale: (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F)) * (1 + 0.012 * sin(180 * wave.$i))
@@ -761,7 +765,7 @@ scene Session {
         let tx = screen.0.width * (isl - screen.index) + pick(isl, screen.0.width, screen.1.width) / 2 - 97
         let ty = 46
         // On its way it melts into water: its corners round off, it turns
-        // the colour of the sea and draws out along its path like a falling
+        // Marea's colour and draws out along its path like a falling
         // drop; halfway a real drop takes over, with two droplets behind it,
         // and where it lands the island ripples. Brought back, the same
         // backwards: the drop leaves the ripple and swells into the window.
@@ -772,7 +776,9 @@ scene Session {
         let cy = y + h / 2 + (ty - y - h / 2) * (2 * m - m * m)
         let round = 12 + q * min(w, h) * 0.5
         group {
-            show: m > 0.001 and m < 0.75 and win.$i.open and (screen.index == sc or screen.index == isl)
+            // (Hands over to the window at the same point it takes over: never
+            // a frame with neither, which a spring's long tail made a second.)
+            show: mini.$i > 0.02 and m < 0.75 and win.$i.open and (screen.index == sc or screen.index == isl)
             opacity: 1 - smooth(0.5, 0.68, m)
             pivot: x + w / 2, y + h / 2
             move: (tx - x - w / 2) * m, (ty - y - h / 2) * (2 * m - m * m)
@@ -788,12 +794,12 @@ scene Session {
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink }
                 window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: w, h - tb }
                 body {
-                    gradient: x, y to x, y + h, #c9f1e4, mint 35%, #2c7684
-                    opacity: 88% * q
+                    gradient: x, y to x, y + h, #2b3030, marea 55%, #0e0f0f
+                    opacity: 96% * q
                     box { from: x, y; size: w, h }
                 }
             }
-            box { from: x, y; size: w, h; corner: round; stroke: 1.5 + 2 * q; color: #dffaf0; opacity: 60% }
+            box { from: x, y; size: w, h; corner: round; stroke: 1.5 + 2 * q; color: ink; opacity: 18% + 10% * q }
         }
         let drop = smooth(0.45, 0.62, m) * (1 - smooth(0.9, 0.995, m))
         let c1 = max(m - 0.07, 0)
@@ -801,15 +807,16 @@ scene Session {
         group {
             show: drop > 0.01 and win.$i.open and (screen.index == sc or screen.index == isl)
             opacity: drop
+            // Marea's own skin, and its tail melted into it.
             body {
-                gradient: radial cx - 3, cy - 4 radius 14, #effffa, mint 40%, #2c7684
-                rim: 40%
-                shadow: 0, 4, 10, 35%
-                ellipse { at: cx, cy; radius: 9; scale: 1 - 0.2 * sin(180 * m), 1 + 0.3 * sin(180 * m) }
+                color: marea
+                rim: 22%
+                shadow: 0, 4, 12, 40%
+                ellipse { at: cx, cy; radius: 11; scale: 1 - 0.2 * sin(180 * m), 1 + 0.3 * sin(180 * m) }
+                ellipse { at: x + w / 2 + (tx - x - w / 2) * c1, y + h / 2 + (ty - y - h / 2) * (2 * c1 - c1 * c1); radius: 5.5; blend: 9 }
+                ellipse { at: x + w / 2 + (tx - x - w / 2) * c2, y + h / 2 + (ty - y - h / 2) * (2 * c2 - c2 * c2); radius: 3.2; blend: 7 }
             }
-            ellipse { at: cx - 3, cy - 4; radius: 2.2; color: #fff; opacity: 80% }
-            ellipse { at: x + w / 2 + (tx - x - w / 2) * c1, y + h / 2 + (ty - y - h / 2) * (2 * c1 - c1 * c1); radius: 4.5; color: mint; opacity: 70% }
-            ellipse { at: x + w / 2 + (tx - x - w / 2) * c2, y + h / 2 + (ty - y - h / 2) * (2 * c2 - c2 * c2); radius: 2.8; color: mint; opacity: 45% }
+            ellipse { at: cx - 3.5, cy - 4.5; radius: 2.4; scale: 1.3, 0.8; color: ink; opacity: 35% }
         }
         // The ripple where it lands (or leaves from).
         prop splash.$i = 1 ~900ms
@@ -823,9 +830,9 @@ scene Session {
         }
         group {
             show: splash.$i > 0.001 and splash.$i < 0.995 and screen.index == isl and win.$i.open
-            ellipse { at: tx, ty; radius: 4 + 30 * splash.$i; scale: 1, 0.45; stroke: 2.5 * (1 - splash.$i) + 0.6; color: mint; opacity: 80% * (1 - splash.$i) }
-            ellipse { at: tx, ty; radius: 2 + 20 * max(splash.$i - 0.15, 0); scale: 1, 0.45; stroke: 2 * (1 - splash.$i) + 0.5; color: #dffaf0; opacity: 60% * (1 - splash.$i) }
-            ellipse { at: tx, ty - 10 * sin(180 * splash.$i); radius: 2.4 * (1 - splash.$i); color: mint; opacity: 90% * (1 - splash.$i) }
+            ellipse { at: tx, ty; radius: 4 + 30 * splash.$i; scale: 1, 0.45; stroke: 2.5 * (1 - splash.$i) + 0.6; color: ink; opacity: 45% * (1 - splash.$i) }
+            ellipse { at: tx, ty; radius: 2 + 20 * max(splash.$i - 0.15, 0); scale: 1, 0.45; stroke: 2 * (1 - splash.$i) + 0.5; color: ink; opacity: 28% * (1 - splash.$i) }
+            ellipse { at: tx, ty - 10 * sin(180 * splash.$i); radius: 2.4 * (1 - splash.$i); color: ink; opacity: 50% * (1 - splash.$i) }
         }
     }
 
