@@ -325,6 +325,18 @@ struct Panel {
     sent: Vec<u64>,
 }
 
+/// A window's menu in a session of its own: not a piece of the window, which
+/// the scene draws inside its box, but a surface of the monitor over
+/// everything, where the window is seen —so it can go past the window's edge—.
+struct Menu {
+    id: u64,
+    surface: WlSurface,
+    /// The window's surface it hangs from.
+    root: WlSurface,
+    monitor: usize,
+    sent: Vec<u64>,
+}
+
 /// What a program's surface of its own is: a layer (layer-shell), or the
 /// lock screen of one monitor (ext-session-lock).
 enum Shell {
@@ -372,6 +384,7 @@ struct State {
     _output_manager: OutputManagerState,
     layer_shell: WlrLayerShellState,
     panels: Vec<Panel>,
+    menus: Vec<Menu>,
     /// What the programs' bars keep on each monitor, last told to the scene.
     reserved: Vec<[f32; 4]>,
     /// Pictures of a monitor a program asked for (wlr-screencopy: grim, a
@@ -620,6 +633,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         outputs,
         output_globals,
         panels: Vec::new(),
+        menus: Vec::new(),
         reserved: Vec::new(),
         pictures: HashMap::new(),
         panel_pointer: None,
@@ -686,6 +700,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
     while !state.quit {
         event_loop.dispatch(Some(Duration::from_millis(100)), &mut state).map_err(|e| e.to_string())?;
         state.popups.cleanup();
+        state.prune_menus();
         state.compose_dirty();
         let x_ready = !state.x_starting || state.start.elapsed() > Duration::from_secs(5);
         if !state.autostart.is_empty() && x_ready && (state.dmabuf_global.is_some() || state.start.elapsed() > Duration::from_secs(3)) {
@@ -853,6 +868,11 @@ impl State {
                 }
                 if let Some(Some(w)) = self.slots.get_mut(slot) {
                     w.shown = Some((monitor, rect));
+                    // Its menus go where it is now.
+                    let root = w.surface.clone();
+                    if self.menus.iter().any(|m| m.root == root) {
+                        self.dirty.push(root);
+                    }
                 }
                 if self.focus == Some(slot) {
                     self.write_desktop();
@@ -1276,7 +1296,8 @@ impl State {
         let time = self.time();
         match m {
             ToLayers::Pointer { id, x, y } => {
-                let Some((root, monitor)) = self.panels.iter().find(|p| p.id == id).map(|p| (p.shell.wl_surface().clone(), p.monitor)) else { return };
+                let panel = self.panels.iter().find(|p| p.id == id).map(|p| (p.shell.wl_surface().clone(), p.monitor));
+                let Some((root, monitor)) = panel.or_else(|| self.menus.iter().find(|m| m.id == id).map(|m| (m.surface.clone(), m.monitor))) else { return };
                 let s = self.scale_of(monitor);
                 let at: Point<f64, Logical> = (x / s, y / s).into();
                 let under = self.surface_under(&root, [0, 0, 0, 0], at).map(|(s, o)| (s, o.to_f64()));
@@ -1301,6 +1322,10 @@ impl State {
                 if down {
                     if let Some(root) = self.panel_pointer.and_then(|id| self.panels.iter().find(|p| p.id == id)).map(|p| p.shell.wl_surface().clone()) {
                         self.dismiss_popups_not_under(&root);
+                    }
+                    // On another program's surface, not on a menu: the windows' menus close.
+                    if !self.panel_pointer.is_some_and(|id| self.menus.iter().any(|m| m.id == id)) {
+                        self.dismiss_all_popups();
                     }
                 }
                 let p = self.pointer.clone();
@@ -1345,6 +1370,7 @@ impl State {
                 }
             }
             ToLayers::Activity => self.activity(),
+            ToLayers::ScenePress => self.dismiss_all_popups(),
             ToLayers::Power => {
                 self.powers.retain(|(p, _)| p.is_alive());
                 for (p, k) in &self.powers {
@@ -1645,6 +1671,85 @@ impl State {
         }
     }
 
+    /// Whether windows' menus are surfaces of the monitor (a session of its
+    /// own, with monitors) or pieces of their window (nested).
+    fn menus_apart(&self) -> bool {
+        !layers::monitors().is_empty()
+    }
+
+    /// A window's menus, over everything on the monitor it is seen on, where
+    /// the scene shows it; the ones that closed, taken away.
+    fn show_menus(&mut self, slot: usize, root: &WlSurface, g: [i32; 4]) {
+        let monitors = layers::monitors();
+        let place = self.slots.get(slot).and_then(Option::as_ref).and_then(|w| w.shown.clone()).and_then(|(name, r)| monitors.iter().position(|m| m.name == name).map(|k| (k, r)));
+        let mut now = Vec::new();
+        if let Some((k, r)) = place {
+            let scale = self.scale_of(k);
+            let px = |v: f64| (v * scale).round() as i32;
+            // As much as the scene scales the window (at a glance, while it glides).
+            let sx = if g[2] > 0 { r[2] as f64 / g[2] as f64 } else { 1.0 };
+            let sy = if g[3] > 0 { r[3] as f64 / g[3] as f64 } else { 1.0 };
+            // Its menus: Wayland ones (xdg popups) and X11 ones (override-redirect),
+            // each from the window's corner.
+            let mut all: Vec<(WlSurface, Point<i32, Logical>)> = PopupManager::popups_for_surface(root).map(|(p, offset)| (p.wl_surface().clone(), offset - p.geometry().loc)).collect();
+            all.extend(self.unmanaged_of(slot).into_iter().map(|(s, at)| (s, Point::from(at))));
+            for (surface, at) in all {
+                let Some((w, h)) = content_of(&surface, |c| c.size).filter(|s| s.0 > 0 && s.1 > 0) else { continue };
+                let (x, y) = (r[0] as f64 + at.x as f64 * sx, r[1] as f64 + at.y as f64 * sy);
+                let i = match self.menus.iter().position(|m| m.surface == surface) {
+                    Some(i) => i,
+                    None => {
+                        self.next_number += 1;
+                        self.menus.push(Menu { id: self.next_number, surface: surface.clone(), root: root.clone(), monitor: k, sent: Vec::new() });
+                        self.menus.len() - 1
+                    }
+                };
+                // Moved to another monitor: gone from the one it was on.
+                if self.menus[i].monitor != k {
+                    layers::hide(self.menus[i].id);
+                    self.menus[i].monitor = k;
+                    self.menus[i].sent.clear();
+                }
+                let mut pieces = Vec::new();
+                panel_pieces(&surface, (0, 0), &self.menus[i].sent, scale, &mut pieces);
+                self.menus[i].sent = pieces.iter().map(|p| p.key).collect();
+                let blur: Vec<[i32; 4]> = with_states(&surface, |s| s.data_map.get::<Blur>().map(|b| b.0.lock().unwrap().clone())).unwrap_or_default().iter().map(|b| [px(b[0] as f64), px(b[1] as f64), px(b[2] as f64), px(b[3] as f64)]).collect();
+                let id = self.menus[i].id;
+                layers::show(k, ClientLayer { id, level: 3, rect: [px(x), px(y), px(w as f64), px(h as f64)], pieces, region: None, keyboard: 0, blur, owner: owner_of(&surface) });
+                now.push(id);
+            }
+        }
+        self.menus.retain(|m| {
+            let keep = &m.root != root || now.contains(&m.id);
+            if !keep {
+                layers::hide(m.id);
+            }
+            keep
+        });
+    }
+
+    /// Menus whose surface or window went: off their monitor.
+    fn prune_menus(&mut self) {
+        self.menus.retain(|m| {
+            let keep = m.surface.alive()
+                && m.root.alive()
+                && (PopupManager::popups_for_surface(&m.root).any(|(p, _)| p.wl_surface() == &m.surface) || self.unmanaged.iter().any(|x| x.wl_surface().as_ref() == Some(&m.surface)));
+            if !keep {
+                layers::hide(m.id);
+            }
+            keep
+        });
+    }
+
+    /// Every window's menus close unless the pointer is in them: a press
+    /// somewhere else (the scene, another program's surface).
+    fn dismiss_all_popups(&mut self) {
+        let roots: Vec<WlSurface> = self.slots.iter().flatten().map(|w| w.surface.clone()).collect();
+        for root in roots {
+            self.dismiss_popups_not_under(&root);
+        }
+    }
+
     /// What every window touched in this round shows: its surface, its
     /// subsurfaces and its menus, each one a piece of its own, in order.
     fn compose_dirty(&mut self) {
@@ -1674,12 +1779,18 @@ impl State {
             let sent = self.slots[slot].as_ref().map(|w| w.sent.clone()).unwrap_or_default();
             let mut pieces = Vec::new();
             pieces_of(&root, (0, 0), &sent, &mut pieces);
-            for (popup, offset) in PopupManager::popups_for_surface(&root) {
-                let origin = Point::<i32, Logical>::from((g[0], g[1])) + offset - popup.geometry().loc;
-                pieces_of(popup.wl_surface(), (origin.x, origin.y), &sent, &mut pieces);
+            if self.menus_apart() {
+                self.show_menus(slot, &root, g);
+            } else {
+                for (popup, offset) in PopupManager::popups_for_surface(&root) {
+                    let origin = Point::<i32, Logical>::from((g[0], g[1])) + offset - popup.geometry().loc;
+                    pieces_of(popup.wl_surface(), (origin.x, origin.y), &sent, &mut pieces);
+                }
             }
-            for (surface, at) in self.unmanaged_of(slot) {
-                pieces_of(&surface, at, &sent, &mut pieces);
+            if !self.menus_apart() {
+                for (surface, at) in self.unmanaged_of(slot) {
+                    pieces_of(&surface, at, &sent, &mut pieces);
+                }
             }
             if let Some(Some(win)) = self.slots.get_mut(slot) {
                 win.geometry = g;
@@ -1690,15 +1801,26 @@ impl State {
     }
 }
 
-/// Where a menu goes so that it fits inside its window, which is all of the
-/// screen it can be seen on: flipped, slid or shrunk, as the program allows.
-fn unconstrained(popup: &PopupSurface, positioner: PositionerState) -> smithay::utils::Rectangle<i32, Logical> {
+/// Where a menu goes so that it fits where it can be seen: flipped, slid or
+/// shrunk, as the program allows. In a session of its own, the monitor its
+/// window is on (menus are drawn over everything there); nested, the window
+/// itself (they are drawn inside it).
+fn unconstrained(state: &State, popup: &PopupSurface, positioner: PositionerState) -> smithay::utils::Rectangle<i32, Logical> {
     let kind = PopupKind::Xdg(popup.clone());
     let Ok(root) = smithay::desktop::find_popup_root_surface(&kind) else { return positioner.get_geometry() };
     let window = with_states(&root, |s| s.cached_state.get::<SurfaceCachedState>().current().geometry);
-    let Some(window) = window else { return positioner.get_geometry() };
-    // In the coordinates of the popup's parent: the window, seen from it.
+    // In the coordinates of the popup's parent.
     let parent = smithay::desktop::get_popup_toplevel_coords(&kind);
+    if state.menus_apart() {
+        let monitors = layers::monitors();
+        let shown = state.window_of(&root).and_then(|s| state.slots[s].as_ref()).and_then(|w| w.shown.clone());
+        if let Some((k, r)) = shown.and_then(|(name, r)| monitors.iter().position(|m| m.name == name).map(|k| (k, r))) {
+            let (mw, mh) = state.monitor_size(k);
+            let target = smithay::utils::Rectangle::new((-r[0] - parent.x, -r[1] - parent.y).into(), (mw, mh).into());
+            return positioner.get_unconstrained_geometry(target);
+        }
+    }
+    let Some(window) = window else { return positioner.get_geometry() };
     let target = smithay::utils::Rectangle::new((-parent.x, -parent.y).into(), window.size);
     positioner.get_unconstrained_geometry(target)
 }
@@ -2159,7 +2281,7 @@ impl XdgShellHandler for State {
     }
 
     fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
-        let geometry = unconstrained(&surface, positioner);
+        let geometry = unconstrained(self, &surface, positioner);
         surface.with_pending_state(|s| s.geometry = geometry);
         if let Err(e) = self.popups.track_popup(PopupKind::Xdg(surface)) {
             eprintln!("windows · a menu could not be tracked: {e:?}");
@@ -2210,7 +2332,7 @@ impl XdgShellHandler for State {
     }
 
     fn reposition_request(&mut self, surface: PopupSurface, positioner: PositionerState, token: u32) {
-        let geometry = unconstrained(&surface, positioner);
+        let geometry = unconstrained(self, &surface, positioner);
         surface.with_pending_state(|s| {
             s.geometry = geometry;
             s.positioner = positioner;

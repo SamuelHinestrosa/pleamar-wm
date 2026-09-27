@@ -57,6 +57,9 @@ pub enum ToLayers {
     Relative { dx: f64, dy: f64, ux: f64, uy: f64, utime: u64 },
     /// Someone touched something: not idle.
     Activity,
+    /// A button went down on the scene (not on a program's surface): menus
+    /// that are not under the pointer close.
+    ScenePress,
     /// Monitors went on or off (see `powered`).
     Power,
 }

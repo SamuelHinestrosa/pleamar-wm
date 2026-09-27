@@ -895,6 +895,7 @@ impl State {
                 }
                 if down {
                     self.set_key_client(None);
+                    layers::tell(ToLayers::ScenePress);
                 }
                 let b = match event.button_code() {
                     0x110 => 0,
