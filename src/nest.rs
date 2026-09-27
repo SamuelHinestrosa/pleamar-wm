@@ -337,6 +337,16 @@ struct Menu {
     sent: Vec<u64>,
 }
 
+/// A program dragging something: its icon (one surface per monitor, at the
+/// pointer), and, read as soon as it starts, what it drags as text —paths,
+/// words—, for the scene if it is dropped there (by the time of the drop the
+/// program has been told it went nowhere).
+struct Drag {
+    icon: Option<WlSurface>,
+    ids: Vec<(usize, u64, Vec<u64>)>,
+    text: Arc<Mutex<Option<(String, String)>>>,
+}
+
 /// What a program's surface of its own is: a layer (layer-shell), or the
 /// lock screen of one monitor (ext-session-lock).
 enum Shell {
@@ -385,6 +395,7 @@ struct State {
     layer_shell: WlrLayerShellState,
     panels: Vec<Panel>,
     menus: Vec<Menu>,
+    drag: Option<Drag>,
     /// What the programs' bars keep on each monitor, last told to the scene.
     reserved: Vec<[f32; 4]>,
     /// Pictures of a monitor a program asked for (wlr-screencopy: grim, a
@@ -634,6 +645,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         output_globals,
         panels: Vec::new(),
         menus: Vec::new(),
+        drag: None,
         reserved: Vec::new(),
         pictures: HashMap::new(),
         panel_pointer: None,
@@ -1741,6 +1753,28 @@ impl State {
         });
     }
 
+    /// The drag icon, on each monitor (only the one with the pointer shows it
+    /// where it can be seen): it takes no pointer, so what is under it does.
+    fn show_drag_icon(&mut self) {
+        let Some(icon) = self.drag.as_ref().and_then(|d| d.icon.clone()) else { return };
+        let size = content_of(&icon, |c| c.size);
+        if std::env::var_os("PLEAMAR_DEBUG_WINDOWS").is_some() {
+            eprintln!("windows · the drag icon: {size:?}");
+        }
+        let Some((w, h)) = size.filter(|s| s.0 > 0 && s.1 > 0) else { return };
+        let scales: Vec<f64> = (0..self.outputs.len()).map(|k| self.scale_of(k)).collect();
+        let owner = owner_of(&icon);
+        let Some(d) = self.drag.as_mut() else { return };
+        for (k, id, sent) in d.ids.iter_mut() {
+            let s = scales.get(*k).copied().unwrap_or(1.0);
+            let mut pieces = Vec::new();
+            panel_pieces(&icon, (0, 0), sent, s, &mut pieces);
+            *sent = pieces.iter().map(|p| p.key).collect();
+            let rect = layers::drag_rect(*k, (w as f64 * s) as i32, (h as f64 * s) as i32);
+            layers::show(*k, ClientLayer { id: *id, level: 3, rect, pieces, region: Some(Vec::new()), keyboard: 0, blur: Vec::new(), owner });
+        }
+    }
+
     /// Every window's menus close unless the pointer is in them: a press
     /// somewhere else (the scene, another program's surface).
     fn dismiss_all_popups(&mut self) {
@@ -2206,6 +2240,8 @@ impl CompositorHandler for State {
             if let Ok(owner) = smithay::desktop::find_popup_root_surface(&popup) {
                 self.dirty.push(owner);
             }
+        } else if self.drag.as_ref().is_some_and(|d| d.icon.as_ref() == Some(&root)) {
+            self.show_drag_icon();
         } else if let Some(x) = self.unmanaged.iter().find(|x| x.wl_surface().as_ref() == Some(&root)).cloned() {
             // An X11 menu or tooltip: drawn with its window.
             if let Some(s) = self.unmanaged_owner(&x).and_then(|k| self.slots[k].as_ref()).map(|w| w.surface.clone()) {
@@ -2412,7 +2448,67 @@ impl DataDeviceHandler for State {
     }
 }
 
-impl ClientDndGrabHandler for State {}
+/// A program starts dragging (a file, some text): the pointer goes to
+/// whatever window it is over, its icon follows it, and what it drags is
+/// read as text in case it is dropped on the scene.
+impl ClientDndGrabHandler for State {
+    fn started(&mut self, source: Option<smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource>, icon: Option<WlSurface>, _: Seat<Self>) {
+        self.tell(NestEvent::Dragging(true));
+        println!("windows · a program drags something");
+        let text = Arc::new(Mutex::new(None));
+        if let Some(source) = source {
+            read_dragged(&source, text.clone());
+        }
+        let mut ids = Vec::new();
+        for k in 0..layers::monitors().len() {
+            self.next_number += 1;
+            ids.push((k, self.next_number, Vec::new()));
+        }
+        layers::set_drag_icon(ids.iter().map(|(k, id, _)| (*k, *id)).collect());
+        self.drag = Some(Drag { icon, ids, text });
+        self.show_drag_icon();
+    }
+
+    fn dropped(&mut self, target: Option<WlSurface>, validated: bool, _: Seat<Self>) {
+        self.tell(NestEvent::Dragging(false));
+        println!("windows · dropped {} ({})", if target.is_some() { "on a program" } else { "on nothing of a program's" }, if validated { "taken" } else { "not taken" });
+        let Some(d) = self.drag.take() else { return };
+        for (_, id, _) in &d.ids {
+            layers::hide(*id);
+        }
+        layers::set_drag_icon(Vec::new());
+        // On the scene —no window, no program's surface under it—: to its `drop` zones.
+        if target.is_none() && self.pointer_on.is_none() && self.panel_pointer.is_none() {
+            if let Some((kind, text)) = d.text.lock().unwrap().take() {
+                let _ = self.to_render.send(ToRender::Dropped(kind, text));
+            }
+        }
+    }
+}
+
+/// What is dragged, asked for as text (the first of the kinds it offers that
+/// is), read on a thread of its own: a program answers when it can.
+fn read_dragged(source: &smithay::reexports::wayland_server::protocol::wl_data_source::WlDataSource, into: Arc<Mutex<Option<(String, String)>>>) {
+    use std::io::Read;
+    use std::os::fd::{AsFd, FromRawFd};
+    let Ok(kinds) = smithay::wayland::selection::data_device::with_source_metadata(source, |m| m.mime_types.clone()) else { return };
+    let Some(kind) = ["text/uri-list", "text/plain;charset=utf-8", "UTF8_STRING", "text/plain"].iter().find(|k| kinds.iter().any(|m| m == *k)) else { return };
+    let mut fds = [0i32; 2];
+    // SAFETY: a pipe into two fds that are ours from here on.
+    if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC) } != 0 {
+        return;
+    }
+    // SAFETY: both were just made by pipe2 and are owned by nothing else.
+    let (reading, writing) = unsafe { (std::fs::File::from(std::os::fd::OwnedFd::from_raw_fd(fds[0])), std::os::fd::OwnedFd::from_raw_fd(fds[1])) };
+    source.send(kind.to_string(), writing.as_fd());
+    drop(writing);
+    let kind = kind.to_string();
+    std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = reading.take(1 << 20).read_to_string(&mut text);
+        *into.lock().unwrap() = Some((kind, text));
+    });
+}
 impl ServerDndGrabHandler for State {}
 
 impl DrmSyncobjHandler for State {

@@ -74,6 +74,53 @@ pub enum Hold {
 
 static HOLD: Mutex<Option<Hold>> = Mutex::new(None);
 
+/// A program dragging something: its icon, one surface per monitor (which
+/// one, and its id there), and where the pointer is on the desktop, in units.
+static DRAG: Mutex<(Vec<(usize, u64)>, (f64, f64))> = Mutex::new((Vec::new(), (0.0, 0.0)));
+
+pub fn set_drag_icon(ids: Vec<(usize, u64)>) {
+    DRAG.lock().unwrap().0 = ids;
+}
+
+/// Where the drag icon goes on that monitor, in its pixels: at the pointer
+/// if the pointer is on it, far away if not.
+pub fn drag_rect(monitor: usize, w: i32, h: i32) -> [i32; 4] {
+    let pos = DRAG.lock().unwrap().1;
+    let monitors = MONITORS.lock().unwrap();
+    let Some((m, _)) = monitors.get(monitor) else { return [-100_000, -100_000, w, h] };
+    let (lw, lh) = (m.size.0 as f64 / m.scale, m.size.1 as f64 / m.scale);
+    let (x, y) = (pos.0 - m.x as f64, pos.1 - m.y as f64);
+    if x >= 0.0 && y >= 0.0 && x < lw && y < lh { [(x * m.scale) as i32, (y * m.scale) as i32, w, h] } else { [-100_000, -100_000, w, h] }
+}
+
+/// The pointer moved on the desktop (units): a drag icon goes with it.
+pub fn move_drag(pos: (f64, f64)) {
+    let ids = {
+        let mut d = DRAG.lock().unwrap();
+        d.1 = pos;
+        if d.0.is_empty() {
+            return;
+        }
+        d.0.clone()
+    };
+    let monitors: Vec<Screen> = MONITORS.lock().unwrap().iter().map(|(_, s)| s.clone()).collect();
+    for (k, id) in ids {
+        let Some(sc) = monitors.get(k) else { continue };
+        let (lock, cv) = &**sc;
+        let mut st = lock.lock().unwrap();
+        let Some(i) = st.clients.iter().position(|c| c.id == id) else { continue };
+        let old = st.clients[i].rect;
+        let new = drag_rect(k, old[2], old[3]);
+        if new != old {
+            st.clients[i].rect = new;
+            st.changed.push((old, 0));
+            st.changed.push((new, 0));
+            st.dirty = true;
+            cv.notify_all();
+        }
+    }
+}
+
 /// Which monitors have a fullscreen window: there, other programs' bars step aside.
 pub fn set_fullscreen(on: &[bool]) {
     for (k, (_, sc)) in MONITORS.lock().unwrap().iter().enumerate() {

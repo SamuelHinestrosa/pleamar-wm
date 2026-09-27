@@ -647,6 +647,7 @@ impl State {
             return;
         };
         self.pointer = (px, py);
+        layers::move_drag((px, py));
         let hot = self.shown.and_then(|c| self.cursors.iter().find(|x| x.0 == c)).map_or((0, 0), |x| x.2);
         // The monitor is put together in its pixels: from units to them.
         for (k, m) in self.monitors.iter().enumerate() {
