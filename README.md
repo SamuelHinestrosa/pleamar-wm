@@ -103,6 +103,22 @@ cargo build --release
 ./target/release/pleamar-wm --scene examples/windows.plm   # nested, as a window of your compositor
 ```
 
+### NixOS
+
+pleamar-wm, pleamar and Marea, with «pleamar-wm» in your login screen:
+
+```nix
+# flake.nix
+inputs.pleamar-wm.url = "github:k4ditano/pleamar-wm";
+
+# your configuration
+imports = [ inputs.pleamar-wm.nixosModules.default ];
+programs.pleamar-wm.enable = true;   # withMarea = false; to leave her out
+```
+
+It also sets up what a desktop of its own needs: the GPU, polkit, XWayland and
+the portals. Just the package: `nix run github:k4ditano/pleamar-wm`.
+
 # Configure
 
 Everything of yours is in one folder, `~/.config/pleamar/` —the one for your
