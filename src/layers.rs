@@ -113,6 +113,17 @@ pub fn wait_monitors(most: std::time::Duration) -> Vec<MonitorInfo> {
     monitors()
 }
 static NEST: Mutex<Option<channel::Sender<ToLayers>>> = Mutex::new(None);
+/// The card the session drives, for the compositor inside to import the
+/// programs' sync points with (explicit sync).
+static CARD: Mutex<Option<smithay::backend::drm::DrmDeviceFd>> = Mutex::new(None);
+
+pub fn set_card(fd: smithay::backend::drm::DrmDeviceFd) {
+    *CARD.lock().unwrap() = Some(fd);
+}
+
+pub fn card() -> Option<smithay::backend::drm::DrmDeviceFd> {
+    CARD.lock().unwrap().clone()
+}
 /// Whether a lock screen holds the session (ext-session-lock).
 static LOCKED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 

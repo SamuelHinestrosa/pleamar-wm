@@ -22,6 +22,8 @@ use crate::layers::{self, ClientLayer, ClientPiece, ToLayers};
 use pleamar::scene::{DmabufPiece, NestEvent, PieceContent, ToNest, ToRender, WindowPiece};
 use smithay::delegate_layer_shell;
 use smithay::delegate_session_lock;
+use smithay::delegate_drm_syncobj;
+use smithay::wayland::drm_syncobj::{supports_syncobj_eventfd, DrmSyncPoint, DrmSyncobjCachedState, DrmSyncobjHandler, DrmSyncobjState};
 use smithay::wayland::session_lock::{LockSurface, SessionLockHandler, SessionLockManagerState, SessionLocker};
 use smithay::reexports::wayland_protocols_wlr::foreign_toplevel::v1::server::{
     zwlr_foreign_toplevel_handle_v1::{self as toplevel_handle, ZwlrForeignToplevelHandleV1},
@@ -112,6 +114,24 @@ struct Window {
     sent: Vec<u64>,
     /// The monitor it is on: which copy of the scene lays it out.
     screen: usize,
+}
+
+/// A program's buffer on loan: given back with `release`, and, with
+/// explicit sync, its release point signalled.
+struct Lent {
+    buffer: WlBuffer,
+    release: Option<DrmSyncPoint>,
+}
+
+impl Lent {
+    fn give_back(self) {
+        self.buffer.release();
+        if let Some(p) = self.release {
+            if let Err(e) = p.signal() {
+                eprintln!("windows · a release point could not be signalled: {e}");
+            }
+        }
+    }
 }
 
 /// A program's layer-shell surface (Marea, a bar, a wallpaper): not the
@@ -208,7 +228,10 @@ struct State {
     dmabuf_global: Option<DmabufGlobal>,
     /// Each program buffer by number, and the ones lent to the render until it has copied them.
     buffers: HashMap<ObjectId, u64>,
-    lent: HashMap<u64, WlBuffer>,
+    lent: HashMap<u64, Lent>,
+    /// Explicit sync (linux-drm-syncobj), if the card can: programs say when
+    /// their frame is ready and are told when it is no longer read.
+    syncobj: Option<DrmSyncobjState>,
     next_number: u64,
     socket: String,
     start: Instant,
@@ -353,6 +376,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         dmabuf_global: None,
         buffers: HashMap::new(),
         lent: HashMap::new(),
+        syncobj: None,
         next_number: 0,
         socket: socket.clone(),
         start: Instant::now(),
@@ -578,6 +602,16 @@ impl State {
                     Ok(feedback) => {
                         self.dmabuf_global = Some(self.dmabuf.create_global_with_default_feedback::<State>(&self.dh, &feedback));
                         println!("windows · programs hand over their frames on the card");
+                        // Explicit sync, with the session's card or that card's render node.
+                        let card = layers::card().or_else(|| render_node(device));
+                        match card {
+                            Some(card) if supports_syncobj_eventfd(&card) => {
+                                self.syncobj = Some(DrmSyncobjState::new::<State>(&self.dh, card));
+                                println!("windows · programs sync with the card explicitly (linux-drm-syncobj)");
+                            }
+                            Some(_) => println!("windows · the card cannot wait on sync points: implicit sync only"),
+                            None => println!("windows · no card to import sync points with: implicit sync only"),
+                        }
                     }
                     Err(e) => eprintln!("windows · no frames on the card: {e}"),
                 }
@@ -686,7 +720,7 @@ impl State {
     fn release(&mut self, numbers: Vec<u64>) {
         for n in numbers {
             if let Some(b) = self.lent.remove(&n) {
-                b.release();
+                b.give_back();
             }
         }
     }
@@ -1137,6 +1171,24 @@ impl CompositorHandler for State {
     /// drawing it: the commit waits for the buffer to be ready to read.
     fn new_surface(&mut self, surface: &WlSurface) {
         add_pre_commit_hook::<Self, _>(surface, |state, _, surface| {
+            // With explicit sync the program says when its frame is ready: its
+            // acquire point. Waited for without spinning, and nothing else is needed.
+            let acquire = with_states(surface, |s| s.cached_state.get::<DrmSyncobjCachedState>().pending().acquire_point.clone());
+            if let Some(point) = acquire {
+                if let Ok((blocker, source)) = point.generate_blocker() {
+                    if let Some(client) = surface.client() {
+                        let waiting = state.handle.insert_source(source, move |_, _, state: &mut State| {
+                            let dh = state.dh.clone();
+                            state.client_compositor_state(&client).blocker_cleared(state, &dh);
+                            Ok(())
+                        });
+                        if waiting.is_ok() {
+                            add_blocker(surface, blocker);
+                        }
+                    }
+                }
+                return;
+            }
             let pending = with_states(surface, |s| {
                 s.cached_state.get::<SurfaceAttributes>().pending().buffer.as_ref().and_then(|a| match a {
                     BufferAssignment::NewBuffer(b) => get_dmabuf(b).cloned().ok(),
@@ -1188,7 +1240,15 @@ impl CompositorHandler for State {
                             }
                         };
                         let size = (d.width() as usize, d.height() as usize);
-                        self.lent.insert(number, b);
+                        // With explicit sync, where to say it is no longer read.
+                        let release = with_states(surface, |s| s.cached_state.get::<DrmSyncobjCachedState>().current().release_point.take());
+                        // The same buffer again while still lent is the program's
+                        // mistake; its earlier point is signalled so nobody waits for ever.
+                        if let Some(old) = self.lent.insert(number, Lent { buffer: b, release }) {
+                            if let Some(p) = old.release {
+                                let _ = p.signal();
+                            }
+                        }
                         Some((size, Vec::new(), Some((number, d))))
                     }
                     None => {
@@ -1217,7 +1277,7 @@ impl CompositorHandler for State {
                     unsent.filter(|n| c.dmabuf.as_ref().is_none_or(|(now, _)| now != n))
                 });
                 if let Some(b) = before.and_then(|n| self.lent.remove(&n)) {
-                    b.release();
+                    b.give_back();
                 }
             }
             Some(BufferAssignment::Removed) => with_states(surface, |s| {
@@ -1270,7 +1330,10 @@ impl BufferHandler for State {
     /// A program's buffer is gone: what the render kept of it goes too.
     fn buffer_destroyed(&mut self, buffer: &WlBuffer) {
         if let Some(n) = self.buffers.remove(&buffer.id()) {
-            self.lent.remove(&n);
+            // Gone, it cannot be released; its sync point is signalled all the same.
+            if let Some(p) = self.lent.remove(&n).and_then(|l| l.release) {
+                let _ = p.signal();
+            }
             self.tell(NestEvent::Forget(vec![n]));
             layers::forget(&[n]);
         }
@@ -1417,6 +1480,23 @@ impl DataDeviceHandler for State {
 
 impl ClientDndGrabHandler for State {}
 impl ServerDndGrabHandler for State {}
+
+impl DrmSyncobjHandler for State {
+    fn drm_syncobj_state(&mut self) -> Option<&mut DrmSyncobjState> {
+        self.syncobj.as_mut()
+    }
+}
+
+/// The render node of that card (by its device number), opened: what sync
+/// points are imported with when there is no session's card.
+fn render_node(device: u64) -> Option<smithay::backend::drm::DrmDeviceFd> {
+    use std::os::unix::fs::MetadataExt;
+    let path = std::fs::read_dir("/dev/dri").ok()?.filter_map(Result::ok).map(|e| e.path()).find(|p| {
+        p.file_name().and_then(|n| n.to_str()).is_some_and(|n| n.starts_with("renderD")) && std::fs::metadata(p).is_ok_and(|m| m.rdev() == device)
+    })?;
+    let file = std::fs::OpenOptions::new().read(true).write(true).open(path).ok()?;
+    Some(smithay::backend::drm::DrmDeviceFd::new(smithay::utils::DeviceFd::from(std::os::fd::OwnedFd::from(file))))
+}
 
 impl OutputHandler for State {
     /// A program that lists the windows may bind a monitor after it was told
@@ -1599,3 +1679,4 @@ delegate_cursor_shape!(State);
 delegate_dmabuf!(State);
 delegate_layer_shell!(State);
 delegate_session_lock!(State);
+delegate_drm_syncobj!(State);

@@ -352,6 +352,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     .map_err(|e| e.to_string())?;
 
     let first = monitors.first().map_or((0.0, 0.0), |m| (m.size.0 as f64 / 2.0, m.size.1 as f64 / 2.0));
+    layers::set_card(drm.clone());
     layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, mhz: m.mhz }, m.screen.clone())).collect());
     let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursor: None, scroll: 0.0, hit: Hit::Scene(None), grab: None, key_client: None, quit: false };
     state.make_cursor(&gbm);

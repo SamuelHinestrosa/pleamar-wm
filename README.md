@@ -92,6 +92,10 @@ Glass: what is behind a program's surface is blurred where it asks
 (`ext-session-lock`, Super+L for Marea's) leaves nothing else seen or touched
 on any monitor until it lets go.
 
-Not yet: explicit sync, multi-plane buffers, menus beyond their window,
+Programs sync with the card explicitly when they can (`linux-drm-syncobj`):
+they say when a frame is ready and are told when it is no longer read, instead
+of the driver guessing it (with NVIDIA, a terminal spent a third less).
+
+Not yet: multi-plane buffers, menus beyond their window,
 XWayland, more than one scale, exclusive zones, screencopy (Marea's lens skin
 and her screenshots), plugging monitors in while it runs, and the portals.
