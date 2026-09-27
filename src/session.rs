@@ -192,6 +192,8 @@ impl Output for DrmOutput {
 
 /// Everything the loop holds.
 struct State {
+    /// Where the cursor plane goes, moved by a thread of its own.
+    mover: CursorMover,
     session: LibSeatSession,
     drm: DrmDeviceFd,
     monitors: Vec<Monitor>,
@@ -335,7 +337,8 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     let first = monitors.first().map_or((0.0, 0.0), |m| (m.x as f64 + m.units().0 as f64 / 2.0, m.y as f64 + m.units().1 as f64 / 2.0));
     layers::set_card(drm.clone());
     layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz, scale: m.scale }, m.screen.clone())).collect());
-    let mut state = State { session, drm, monitors, libinput, to_render: to_render.clone(), keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, route: Route::new(to_render), gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
+    let mover = CursorMover::new(drm.clone());
+    let mut state = State { mover, session, drm, monitors, libinput, to_render: to_render.clone(), keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, route: Route::new(to_render), gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
     state.make_cursors(&gbm);
     // The cursor the scene and the programs ask for, whenever it changes.
     let (cursor_tx, cursor_rx) = smithay::reexports::calloop::channel::channel::<(bool, Cursor)>();
@@ -649,8 +652,7 @@ impl State {
         // The monitor is put together in its pixels: from units to them.
         for (k, m) in self.monitors.iter().enumerate() {
             let (cx, cy) = if k == on { (((px - m.x as f64) * m.scale) as i32 - hot.0, ((py - m.y as f64) * m.scale) as i32 - hot.1) } else { (-256, -256) };
-            #[allow(deprecated)]
-            let _ = self.drm.move_cursor(m.crtc, (cx, cy));
+            self.mover.to(m.crtc, (cx, cy));
         }
         let m = &self.monitors[on];
         let (mx, my) = ((px - m.x as f64) * m.scale, (py - m.y as f64) * m.scale);
@@ -757,7 +759,9 @@ impl State {
             }
         }
         self.shown = Some(want);
-        // Its tip where the pointer is.
+        // Its tip where the pointer is (told again: a new shape may have
+        // put the plane back anywhere).
+        self.mover.sent.clear();
         self.move_pointer(0.0, 0.0);
     }
 
@@ -1033,4 +1037,52 @@ fn set_up_device(device: &mut smithay::reexports::input::Device) {
         }
     }
     println!("session · {}: {}", device.name(), if touchpad { "a touchpad" } else { "a pointer" });
+}
+
+/// The cursor plane, moved from a thread of its own. Moving it is a call to
+/// the card's driver that may wait for the monitor's next refresh (NVIDIA's
+/// does): made from the loop that reads the mouse, a mouse that speaks a
+/// thousand times a second kept it behind —libinput said «lagging behind by
+/// 30 ms»— and with it everything the loop does. Here the loop only leaves
+/// where it goes; the thread takes the latest and moves it, and what the
+/// mouse said in between is simply skipped.
+struct CursorMover {
+    wanted: Arc<(Mutex<std::collections::HashMap<crtc::Handle, (i32, i32)>>, std::sync::Condvar)>,
+    /// Where each was last left, so a monitor the pointer is not on is not
+    /// told again and again to hide it.
+    sent: std::collections::HashMap<crtc::Handle, (i32, i32)>,
+}
+
+impl CursorMover {
+    fn new(drm: DrmDeviceFd) -> CursorMover {
+        let wanted: Arc<(Mutex<std::collections::HashMap<crtc::Handle, (i32, i32)>>, std::sync::Condvar)> = Arc::default();
+        let shared = wanted.clone();
+        let _ = std::thread::Builder::new().name("cursor".into()).spawn(move || {
+            let (lock, cv) = &*shared;
+            loop {
+                let batch: Vec<(crtc::Handle, (i32, i32))> = {
+                    let mut w = lock.lock().unwrap();
+                    while w.is_empty() {
+                        w = cv.wait(w).unwrap();
+                    }
+                    w.drain().collect()
+                };
+                for (crtc, at) in batch {
+                    #[allow(deprecated)]
+                    let _ = drm.move_cursor(crtc, at);
+                }
+            }
+        });
+        CursorMover { wanted, sent: Default::default() }
+    }
+
+    fn to(&mut self, crtc: crtc::Handle, at: (i32, i32)) {
+        if self.sent.get(&crtc) == Some(&at) {
+            return;
+        }
+        self.sent.insert(crtc, at);
+        let (lock, cv) = &*self.wanted;
+        lock.lock().unwrap().insert(crtc, at);
+        cv.notify_one();
+    }
 }

@@ -915,8 +915,7 @@ impl State {
                         w.screen = screen;
                         let surface = w.surface.clone();
                         if let (Some(from), Some(to)) = (from, to) {
-                            from.leave(&surface);
-                            to.enter(&surface);
+                            enter_tree(&to, Some(&from), &surface);
                             for (_, h) in self.toplevel_handles.iter().filter(|(s, _)| *s == slot) {
                                 let Some(client) = h.client() else { continue };
                                 for o in from.client_outputs(&client) {
@@ -1982,6 +1981,24 @@ fn unconstrained(state: &State, popup: &PopupSurface, positioner: PositionerStat
     positioner.get_unconstrained_geometry(target)
 }
 
+/// A surface and every subsurface in it enter a monitor (leaving another):
+/// a browser draws its page in a subsurface and paces it by the monitor that
+/// one is on. Told nothing, with two monitors Zen fell to a few frames a second.
+fn enter_tree(to: &Output, from: Option<&Output>, root: &WlSurface) {
+    with_surface_tree_downward(
+        root,
+        (),
+        |_, _, _| TraversalAction::DoChildren(()),
+        |s, _, _| {
+            if let Some(f) = from {
+                f.leave(s);
+            }
+            to.enter(s);
+        },
+        |_, _, _| true,
+    );
+}
+
 /// A monitor's scale as the programs are told it: the whole number above it
 /// for the ones that only know those (they draw bigger and are scaled down),
 /// and the exact one for the ones that ask (fractional-scale).
@@ -2224,6 +2241,18 @@ impl CompositorHandler for State {
     }
 
     fn commit(&mut self, surface: &WlSurface) {
+        // A window's subsurface is on the monitor its window is on.
+        if get_parent(surface).is_some() {
+            let mut root = surface.clone();
+            while let Some(p) = get_parent(&root) {
+                root = p;
+            }
+            if let Some(w) = self.slots.iter().flatten().find(|w| w.surface == root) {
+                if let Some(o) = self.outputs.get(w.screen) {
+                    o.enter(surface);
+                }
+            }
+        }
         let (buffer, callbacks) = with_states(surface, |states| {
             let mut guard = states.cached_state.get::<SurfaceAttributes>();
             let attrs = guard.current();

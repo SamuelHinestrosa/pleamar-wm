@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 
 pub struct Headless;
 
-/// A monitor with no screen: three textures, "flipped" at 60 Hz, and a picture.
+/// A monitor with no screen: three textures, "flipped" at its refresh, and a picture.
 struct Offscreen {
     size: (u32, u32),
     textures: Vec<wgpu::Texture>,
@@ -31,6 +31,8 @@ struct Offscreen {
     /// Its monitor, once made: what it tells when a flip "lands".
     screen: Arc<std::sync::OnceLock<Screen>>,
     to_render: Sender<ToRender>,
+    /// How long a refresh lasts on it.
+    period: Duration,
 }
 
 impl Output for Offscreen {
@@ -57,7 +59,7 @@ impl Output for Offscreen {
         done.wait(device, Duration::from_millis(200));
         self.shown = Some(which);
         if std::env::var_os("PLEAMAR_DEBUG_SCREEN").is_some() {
-            eprintln!("headless · shown {which} at {:.2} s", self.started.elapsed().as_secs_f32());
+            eprintln!("headless · {} shown {which} at {:.3} s", self.path, self.started.elapsed().as_secs_f32());
         }
         // `PLEAMAR_HEADLESS_FRAMES=n`: n frames in a row from then on, -f0, -f1…
         let frames = std::env::var("PLEAMAR_HEADLESS_FRAMES").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(1);
@@ -70,11 +72,11 @@ impl Output for Offscreen {
                 Err(e) => eprintln!("headless · {e}"),
             }
         }
-        // The flip "lands" on the next refresh of a monitor at 60 Hz.
+        // The flip "lands" on the monitor's next refresh.
         if let Some(sc) = self.screen.get().cloned() {
-            let tx = self.to_render.clone();
+            let (tx, period) = (self.to_render.clone(), self.period);
             std::thread::spawn(move || {
-                std::thread::sleep(Duration::from_micros(16_667));
+                std::thread::sleep(period);
                 screen::landed(&sc, &tx);
             });
             return true;
@@ -122,17 +124,21 @@ impl pleamar::Platform for Headless {
         let count = std::env::var("PLEAMAR_HEADLESS_SCREENS").ok().and_then(|v| v.parse::<usize>().ok()).unwrap_or(1);
         let png = std::env::var("PLEAMAR_HEADLESS_PNG").unwrap_or_else(|_| "/tmp/pleamar-headless.png".into());
         let at = std::env::var("PLEAMAR_HEADLESS_AT").ok().and_then(|v| v.parse::<f32>().ok()).unwrap_or(8.0);
+        // `PLEAMAR_HEADLESS_HZ=165,60`: each monitor's refresh (60 by default),
+        // to see a fast one beside a slow one, as on a real desk.
+        let hz: std::sync::Arc<Vec<f64>> = std::env::var("PLEAMAR_HEADLESS_HZ").unwrap_or_default().split(',').filter_map(|v| v.trim().parse::<f64>().ok()).filter(|v| *v > 1.0).collect::<Vec<f64>>().into();
+        let mhz_of = move |m: usize| (hz.get(m).copied().unwrap_or(60.0) * 1000.0).round() as i32;
         let screens: Vec<Screen> = (0..count)
             .map(|m| {
                 let path = if m == 0 { png.clone() } else { png.replace(".png", &format!("-{m}.png")) };
                 let own = Arc::new(std::sync::OnceLock::new());
-                let output = Offscreen { size, textures: Vec::new(), shown: None, started: Instant::now(), at, written: false, taken: 0, path, screen: own.clone(), to_render: to_render.clone() };
+                let output = Offscreen { size, textures: Vec::new(), shown: None, started: Instant::now(), at, written: false, taken: 0, path, screen: own.clone(), to_render: to_render.clone(), period: Duration::from_secs_f64(1000.0 / mhz_of(m) as f64) };
                 let sc = screen::screen(format!("HEADLESS-{}", m + 1), size, Box::new(output));
                 let _ = own.set(sc.clone());
                 sc
             })
             .collect();
-        crate::layers::register(screens.iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * unit_w, y: 0, mhz: 60_000, scale }, sc.clone())).collect());
+        crate::layers::register(screens.iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * unit_w, y: 0, mhz: mhz_of(m), scale }, sc.clone())).collect());
         let cursor = Arc::new(Mutex::new(Cursor::Normal));
         let mut id = 7000;
         // Which sheets are on each monitor: to take one away, as if unplugged.
@@ -161,7 +167,7 @@ impl pleamar::Platform for Headless {
                     window: Box::new(LayerWindow { screen: sc.clone(), sheet: id, cursor: cursor.clone() }),
                     scale: scale as f32,
                     size: units,
-                    mhz: 60_000,
+                    mhz: mhz_of(which),
                     name: format!("HEADLESS-{}", which + 1),
                     view: View { surface: k, popup: None, origin: s.origin, size: (units.0 as f32, units.1 as f32) },
                 })));
@@ -184,7 +190,7 @@ impl pleamar::Platform for Headless {
                     lock.lock().unwrap().quit = true;
                     cv.notify_all();
                 }
-                crate::layers::register(screens[..last].iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * unit_w, y: 0, mhz: 60_000, scale }, sc.clone())).collect());
+                crate::layers::register(screens[..last].iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * unit_w, y: 0, mhz: mhz_of(m), scale }, sc.clone())).collect());
                 crate::layers::tell(crate::layers::ToLayers::Monitors);
             });
         }
