@@ -118,7 +118,8 @@ scene Session {
     let lay.here = pick(mon, lay.0, lay.1)
     let strip.x = pick(mon, screen.0.width, screen.1.width) / 2 - 5 * 60 / 2
     let strip.y = pick(mon, win.reserved.0.top, win.reserved.1.top) + 6
-    let on.strip = dragging >= 0 and mouse.y >= strip.y and mouse.y < strip.y + 44 and mouse.x >= strip.x and mouse.x < strip.x + 5 * 60
+    // (Only over a tiled monitor: a free one has no layout to pick.)
+    let on.strip = dragging >= 0 and pick(mon, free.0, free.1) < 0.5 and mouse.y >= strip.y and mouse.y < strip.y + 44 and mouse.x >= strip.x and mouse.x < strip.x + 5 * 60
     let picked = if(on.strip, floor((mouse.x - strip.x) / 60), -1)
     let leads = picked == 0 or picked == 4
     // What it is over, kept: let go, `picked` is already gone (it needs the
@@ -648,37 +649,11 @@ scene Session {
         }
     }
 
-    // ── which mode a monitor has just taken: a pill at its top, for a moment ──
-    prop told.0 = 0 ~200ms
-    prop told.1 = 0 ~200ms
-    on change free.0 {
-        told.0: 1
-        told.0: 0 after 1300ms
-    }
-    on change free.1 {
-        told.1: 1
-        told.1: 0 after 1300ms
-    }
-    let told.here = pick(screen.index, told.0, told.1)
-    let free.now = pick(screen.index, free.0, free.1)
-    group {
-        show: told.here > 0.01
-        opacity: told.here
-        move: 0, -10 * (1 - told.here)
-        body {
-            color: #0d1013
-            shadow: 0, 10, 28, 45%
-            box { from: W / 2 - 90, pick(screen.index, win.reserved.0.top, win.reserved.1.top) + 8; size: 180, 36; corner: 18; opacity: 92% }
-        }
-        box { from: W / 2 - 90, pick(screen.index, win.reserved.0.top, win.reserved.1.top) + 8; size: 180, 36; corner: 18; stroke: 1; color: mint; opacity: 40% }
-        text "Free windows" { at: W / 2, pick(screen.index, win.reserved.0.top, win.reserved.1.top) + 26; anchor: center; size: 13; weight: 600; color: ink; opacity: free.now }
-        text "Tiled" { at: W / 2, pick(screen.index, win.reserved.0.top, win.reserved.1.top) + 26; anchor: center; size: 13; weight: 600; color: ink; opacity: 1 - free.now }
-    }
-
     // ── the layouts strip: while a window is carried, at the top of the
-    // monitor under the mouse. Over one, everything shows how it would be ──
+    // monitor under the mouse, if that one is tiled. Over one, everything
+    // shows how it would be ──
     prop strip = 0 ~160ms
-    follow strip = if(dragging >= 0, 1, 0)
+    follow strip = if(dragging >= 0 and pick(mon, free.0, free.1) < 0.5, 1, 0)
     let ico = #f5f7f5
     group {
         show: strip > 0.01 and screen.index == mon
