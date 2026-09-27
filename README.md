@@ -37,7 +37,7 @@ the open windows without closing anything.
 # Features
 
 - **The window manager is a scene**: layouts, decorations, animations and drag
-  behaviour are a `.plm` file — copy it (`pleamar-wm scene`) and make it yours.
+  behaviour are a `.plm` file — copy it (`pleamar-wm scene ~/.config/pleamar/wm`, with its shaders) and make it yours.
 - **Tiled or free, per monitor, in one key**: five tiled layouts (leader left or
   right, columns, rows, grid), or free windows as on KDE/Windows — edges,
   corner, maximize, the one clicked on top. `Super+W` switches with an animation.

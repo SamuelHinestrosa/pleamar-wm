@@ -35,8 +35,12 @@ fn main() {
         std::process::exit(init());
     }
     // `pleamar-wm scene`: the window manager that comes with it, to start one's own from.
+    // With a folder (`pleamar-wm scene ~/.config/pleamar/wm`), written there with its shaders.
     if args.first().map(String::as_str) == Some("scene") {
-        print!("{DEFAULT_SCENE}");
+        match args.get(1) {
+            Some(dir) => std::process::exit(write_scene(dir, false)),
+            None => print!("{DEFAULT_SCENE}"),
+        }
         return;
     }
     // `pleamar-wm keys`: the bindings that come with it, to copy from.
@@ -162,6 +166,36 @@ fn init() -> i32 {
 /// The window manager that comes with pleamar-wm, inside it: an installed
 /// pleamar-wm has no source folder next to it.
 const DEFAULT_SCENE: &str = include_str!("../examples/session.plm");
+/// And the shaders it reads, relative to it.
+const DEFAULT_SHADERS: &[(&str, &str)] = &[("shaders/rain.wgsl", include_str!("../examples/shaders/rain.wgsl"))];
+
+/// The scene and its shaders into `dir`. `refresh`: the runtime copy, kept the
+/// same as the one inside; otherwise someone's folder, where nothing is overwritten.
+fn write_scene(dir: &str, refresh: bool) -> i32 {
+    let mut failed = 0;
+    for (name, text) in std::iter::once(("session.plm", DEFAULT_SCENE)).chain(DEFAULT_SHADERS.iter().copied()) {
+        let path = std::path::Path::new(dir).join(name);
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+        let same = std::fs::read_to_string(&path).ok().as_deref() == Some(text);
+        if same || (!refresh && path.exists()) {
+            if !refresh {
+                println!("scene · {} is already there: left as it is", path.display());
+            }
+            continue;
+        }
+        match std::fs::write(&path, text) {
+            Ok(()) if !refresh => println!("scene · {}", path.display()),
+            Ok(()) => {}
+            Err(e) => {
+                eprintln!("scene · {}: {e}", path.display());
+                failed = 1;
+            }
+        }
+    }
+    failed
+}
 
 /// The scene when none is said: the user's own (~/.config/pleamar/wm/session.plm),
 /// or the one that comes with it, written where it can be read.
@@ -172,9 +206,6 @@ fn default_scene() -> String {
     // (Named session.plm: a scene answers by its file's name, `--say session`.)
     let dir = format!("{}/pleamar-wm", std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into()));
     let _ = std::fs::create_dir_all(&dir);
-    let path = format!("{dir}/session.plm");
-    if std::fs::read_to_string(&path).ok().as_deref() != Some(DEFAULT_SCENE) {
-        let _ = std::fs::write(&path, DEFAULT_SCENE);
-    }
-    path
+    write_scene(&dir, true);
+    format!("{dir}/session.plm")
 }

@@ -84,6 +84,16 @@ scene Session {
     prop ov = 0 ~calm
     follow ov = if(overview, 1, 0)
 
+    // ── rain: on the windows, as if they were glass, and falling in front of
+    // everything. Marea turns it on and off (`emit toggle_rain`); it comes
+    // and goes slowly ──
+    shader rain = file "shaders/rain.wgsl"
+    fact rain = false
+    event toggle_rain
+    on toggle_rain { toggle rain }
+    prop wet = 0 ~2500ms
+    follow wet = if(rain, 1, 0)
+
     // ── the desk ──
     // Nothing: the wallpaper is a program's (swaybg, below everything). Only
     // a light that follows the keyboard: where you are typing is a little warmer.
@@ -422,12 +432,24 @@ scene Session {
             }
             // Without the keyboard, grey and a step back.
             group {
+                show: wet <= 0.001
                 saturation: 0.3 + 0.7 * lit.$i
                 brightness: 0.72 + 0.28 * lit.$i
                 clip box { from: x, y; size: w, h; corner: 12 }
                 box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: goal.w, goal.h - tb; show: drawn and not win.$i.fullscreen }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: goal.w, goal.h - tb; show: drawn and not win.$i.fullscreen and wet <= 0.001 }
+            }
+            // The same, in the rain: the window seen through wet glass.
+            group {
+                show: wet > 0.001
+                saturation: 0.3 + 0.7 * lit.$i
+                brightness: 0.72 + 0.28 * lit.$i
+                shader: rain, wet
+                clip box { from: x, y; size: w, h; corner: 12 }
+                box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
+                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: goal.w, goal.h - tb; show: drawn and not win.$i.fullscreen and wet > 0.001 }
             }
             // (The wave: two soft crests of light, the second behind the first.)
             group {
@@ -896,6 +918,19 @@ scene Session {
             opacity: fs.$i
             box { from: 0, 0; size: W, H; color: #000 }
             window win.$i { at: 0, 0; size: W, H; ask: W, H; show: fs.here }
+        }
+    }
+    // The rain itself, in front of everything: streaks, slanted a little.
+    group {
+        z: 100000
+        show: wet > 0.001
+        opacity: wet
+        particles {
+            at: W / 2, -40; area: W + 300, 1; count: 380
+            life: 0.55s .. 0.9s; speed: 1600 .. 2100
+            direction: 100deg; spread: 3deg; gravity: 0, 0
+            size: 1.2, 0.9; colors: #e4f0ff, #c8dcf0; opacity: 24%, 12%
+            shape: spark; emit: rain
         }
     }
     // Marea follows the mouse from monitor to monitor: she is told which.
