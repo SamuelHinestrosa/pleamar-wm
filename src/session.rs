@@ -752,11 +752,10 @@ impl State {
             return;
         }
         let Some((_, bo, hot)) = self.cursors.iter().find(|c| c.0 == want) else { return };
+        use smithay::reexports::drm::buffer::Buffer;
+        let image = CursorImage { size: Buffer::size(bo), format: Buffer::format(bo), pitch: Buffer::pitch(bo), handle: Buffer::handle(bo) };
         for m in &self.monitors {
-            #[allow(deprecated)]
-            if let Err(e) = self.drm.set_cursor2(m.crtc, Some(bo), *hot) {
-                eprintln!("session · {}: no cursor ({e})", m.name);
-            }
+            self.mover.shape(m.crtc, image, *hot);
         }
         self.shown = Some(want);
         // Its tip where the pointer is (told again: a new shape may have
@@ -1039,15 +1038,47 @@ fn set_up_device(device: &mut smithay::reexports::input::Device) {
     println!("session · {}: {}", device.name(), if touchpad { "a touchpad" } else { "a pointer" });
 }
 
-/// The cursor plane, moved from a thread of its own. Moving it is a call to
-/// the card's driver that may wait for the monitor's next refresh (NVIDIA's
-/// does): made from the loop that reads the mouse, a mouse that speaks a
-/// thousand times a second kept it behind —libinput said «lagging behind by
-/// 30 ms»— and with it everything the loop does. Here the loop only leaves
-/// where it goes; the thread takes the latest and moves it, and what the
-/// mouse said in between is simply skipped.
+/// A cursor's picture as the card knows it: the buffer itself stays with the
+/// session (`cursors`), which keeps it alive; this goes to the cursor thread.
+#[derive(Clone, Copy)]
+struct CursorImage {
+    size: (u32, u32),
+    format: smithay::reexports::drm::buffer::DrmFourcc,
+    pitch: u32,
+    handle: smithay::reexports::drm::buffer::Handle,
+}
+
+impl smithay::reexports::drm::buffer::Buffer for CursorImage {
+    fn size(&self) -> (u32, u32) {
+        self.size
+    }
+    fn format(&self) -> smithay::reexports::drm::buffer::DrmFourcc {
+        self.format
+    }
+    fn pitch(&self) -> u32 {
+        self.pitch
+    }
+    fn handle(&self) -> smithay::reexports::drm::buffer::Handle {
+        self.handle
+    }
+}
+
+/// What a monitor's cursor plane is to become: a new picture (with its tip), a new place.
+#[derive(Default)]
+struct CursorWant {
+    image: Option<(CursorImage, (i32, i32))>,
+    at: Option<(i32, i32)>,
+}
+
+/// The cursor plane, moved and changed from a thread of its own. Both are
+/// calls to the card's driver that may wait for the monitor's next refresh
+/// (NVIDIA's do): made from the loop that reads the mouse, a mouse that
+/// speaks a thousand times a second —and a browser whose cursor changes on
+/// every link— kept it behind (libinput: «lagging behind by 30 ms»), and with
+/// it everything the loop does. Here the loop only leaves what it wants; the
+/// thread takes the latest and does it, and what came in between is skipped.
 struct CursorMover {
-    wanted: Arc<(Mutex<std::collections::HashMap<crtc::Handle, (i32, i32)>>, std::sync::Condvar)>,
+    wanted: Arc<(Mutex<std::collections::HashMap<crtc::Handle, CursorWant>>, std::sync::Condvar)>,
     /// Where each was last left, so a monitor the pointer is not on is not
     /// told again and again to hide it.
     sent: std::collections::HashMap<crtc::Handle, (i32, i32)>,
@@ -1055,21 +1086,29 @@ struct CursorMover {
 
 impl CursorMover {
     fn new(drm: DrmDeviceFd) -> CursorMover {
-        let wanted: Arc<(Mutex<std::collections::HashMap<crtc::Handle, (i32, i32)>>, std::sync::Condvar)> = Arc::default();
+        let wanted: Arc<(Mutex<std::collections::HashMap<crtc::Handle, CursorWant>>, std::sync::Condvar)> = Arc::default();
         let shared = wanted.clone();
         let _ = std::thread::Builder::new().name("cursor".into()).spawn(move || {
             let (lock, cv) = &*shared;
             loop {
-                let batch: Vec<(crtc::Handle, (i32, i32))> = {
+                let batch: Vec<(crtc::Handle, CursorWant)> = {
                     let mut w = lock.lock().unwrap();
                     while w.is_empty() {
                         w = cv.wait(w).unwrap();
                     }
                     w.drain().collect()
                 };
-                for (crtc, at) in batch {
-                    #[allow(deprecated)]
-                    let _ = drm.move_cursor(crtc, at);
+                for (crtc, want) in batch {
+                    if let Some((image, hot)) = want.image {
+                        #[allow(deprecated)]
+                        if let Err(e) = drm.set_cursor2(crtc, Some(&image), hot) {
+                            eprintln!("session · no cursor ({e})");
+                        }
+                    }
+                    if let Some(at) = want.at {
+                        #[allow(deprecated)]
+                        let _ = drm.move_cursor(crtc, at);
+                    }
                 }
             }
         });
@@ -1082,7 +1121,13 @@ impl CursorMover {
         }
         self.sent.insert(crtc, at);
         let (lock, cv) = &*self.wanted;
-        lock.lock().unwrap().insert(crtc, at);
+        lock.lock().unwrap().entry(crtc).or_default().at = Some(at);
+        cv.notify_one();
+    }
+
+    fn shape(&mut self, crtc: crtc::Handle, image: CursorImage, hot: (i32, i32)) {
+        let (lock, cv) = &*self.wanted;
+        lock.lock().unwrap().entry(crtc).or_default().image = Some((image, hot));
         cv.notify_one();
     }
 }
