@@ -62,6 +62,9 @@ struct Flips {
 struct Monitor {
     name: String,
     crtc: crtc::Handle,
+    connector: connector::Handle,
+    /// Lit, or dark (idle, or a program turned it off).
+    on: bool,
     size: (u32, u32),
     /// Where it is on the desktop: its top left corner.
     x: i32,
@@ -155,6 +158,9 @@ impl Output for DrmOutput {
                 Ok(()) => {
                     f.set = true;
                     f.on_screen = Some(which);
+                    if config::get().monitor(&self.name).is_some_and(|r| r.vrr) {
+                        set_vrr(&self.drm, self.connector, self.crtc, &self.name);
+                    }
                 }
                 Err(e) => eprintln!("session · {}: the monitor did not take its first frame: {e}", self.name),
             }
@@ -195,6 +201,9 @@ struct State {
     swipe: Option<(u32, f64, f64)>,
     pinch: Option<(u32, f64)>,
     last_touch: std::time::Instant,
+    /// The last input, and whether the monitors went dark for lack of it.
+    last_input: std::time::Instant,
+    dark_for_idle: bool,
     /// Who has the pointer: the scene, or a program's surface (layer-shell).
     hit: Hit,
     /// The program's surface a button was pressed on: it keeps the pointer until it is let go.
@@ -320,7 +329,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     let first = monitors.first().map_or((0.0, 0.0), |m| (m.x as f64 + m.size.0 as f64 / 2.0, m.y as f64 + m.size.1 as f64 / 2.0));
     layers::set_card(drm.clone());
     layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz }, m.screen.clone())).collect());
-    let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), hit: Hit::Scene(None), grab: None, key_client: None, gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
+    let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, hit: Hit::Scene(None), grab: None, key_client: None, gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
     state.make_cursors(&gbm);
     // The cursor the scene and the programs ask for, whenever it changes.
     let (cursor_tx, cursor_rx) = smithay::reexports::calloop::channel::channel::<(bool, Cursor)>();
@@ -338,6 +347,26 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
             }
         })
         .map_err(|e| e.to_string())?;
+    // Monitors on and off as a program asks (hypridle, wlopm).
+    let (power_tx, power_rx) = smithay::reexports::calloop::channel::channel::<(Option<usize>, bool)>();
+    layers::set_power_sink(power_tx);
+    event_loop
+        .handle()
+        .insert_source(power_rx, |event, _, state: &mut State| {
+            if let smithay::reexports::calloop::channel::Event::Msg((which, on)) = event {
+                state.power(which, on);
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    // Idleness, looked at once a second.
+    event_loop
+        .handle()
+        .insert_source(smithay::reexports::calloop::timer::Timer::from_duration(Duration::from_secs(1)), |_, _, state: &mut State| {
+            state.idle_check();
+            smithay::reexports::calloop::timer::TimeoutAction::ToDuration(Duration::from_secs(1))
+        })
+        .map_err(|e| e.to_string())?;
+    layers::set_powered(state.monitors.iter().map(|_| true).collect());
     state.move_pointer(0.0, 0.0);
     println!("session · running: Ctrl+Alt+Backspace leaves");
     while !state.quit {
@@ -379,6 +408,26 @@ fn refresh_mhz(m: &Mode) -> i32 {
     (m.clock() as i64 * 1_000_000 / (h * v)) as i32
 }
 
+/// A property of a connector or a controller by its name: its handle and value.
+fn property(drm: &DrmDeviceFd, object: impl smithay::reexports::drm::control::ResourceHandle, name: &str) -> Option<(smithay::reexports::drm::control::property::Handle, u64)> {
+    let props = drm.get_properties(object).ok()?;
+    let (handles, values) = props.as_props_and_values();
+    handles.iter().zip(values).find_map(|(h, v)| drm.get_property(*h).ok().filter(|p| p.name().to_str() == Ok(name)).map(|_| (*h, *v)))
+}
+
+/// Variable refresh, if the monitor can: the screen waits for the frame
+/// instead of the frame for the screen (a game that does not reach 165).
+fn set_vrr(drm: &DrmDeviceFd, conn: connector::Handle, crtc: crtc::Handle, name: &str) {
+    if property(drm, conn, "vrr_capable").is_none_or(|(_, v)| v == 0) {
+        println!("session · {name}: it cannot vary its refresh (vrr)");
+        return;
+    }
+    match property(drm, crtc, "VRR_ENABLED").map(|(h, _)| drm.set_property(crtc, h, 1)) {
+        Some(Ok(())) => println!("session · {name}: variable refresh on"),
+        _ => eprintln!("session · {name}: variable refresh could not be turned on"),
+    }
+}
+
 /// The mode asked for, among the ones the monitor has: that size at the
 /// refresh closest to the one asked (the most it has, if none is asked), or
 /// its biggest at its most, or the one it prefers.
@@ -406,7 +455,7 @@ fn make_monitor(drm: &DrmDeviceFd, gbm: &Arc<Mutex<gbm::Device<DrmDeviceFd>>>, n
     let flips: Arc<Mutex<Flips>> = Default::default();
     let output = DrmOutput { drm: drm.clone(), gbm: gbm.clone(), connector: conn, crtc, mode, size, name: name.clone(), buffers: Vec::new(), failed: false, flips: flips.clone() };
     let screen = screen::screen(name.clone(), size, Box::new(output));
-    Monitor { name, crtc, size, x: 0, y: 0, screen, flips, mhz: refresh_mhz(&mode) }
+    Monitor { name, crtc, connector: conn, on: true, size, x: 0, y: 0, screen, flips, mhz: refresh_mhz(&mode) }
 }
 
 /// Where the configuration puts them; the ones it does not place, left to
@@ -945,9 +994,64 @@ impl State {
     /// Someone is there: the compositor tells whoever watches for idleness
     /// (not more than a few times a second).
     fn touched(&mut self) {
+        self.last_input = std::time::Instant::now();
+        // Dark for lack of input: any input lights them again.
+        if self.dark_for_idle {
+            self.dark_for_idle = false;
+            self.power(None, true);
+        }
         if self.last_touch.elapsed() > Duration::from_millis(200) {
             self.last_touch = std::time::Instant::now();
             layers::tell(ToLayers::Activity);
+        }
+    }
+
+    /// Monitors on or off (all, if none is said): off, dark (DPMS) and not
+    /// put together; on, lit and put together again from the start.
+    fn power(&mut self, which: Option<usize>, on: bool) {
+        for (k, m) in self.monitors.iter_mut().enumerate() {
+            if which.is_some_and(|w| w != k) || m.on == on {
+                continue;
+            }
+            m.on = on;
+            if let Some((h, _)) = property(&self.drm, m.connector, "DPMS") {
+                // 0 on, 3 off.
+                if let Err(e) = self.drm.set_property(m.connector, h, if on { 0 } else { 3 }) {
+                    eprintln!("session · {}: could not turn it {}: {e}", m.name, if on { "on" } else { "off" });
+                }
+            }
+            println!("session · {} {}", m.name, if on { "on" } else { "off" });
+            let mut st = m.screen.0.lock().unwrap();
+            if on {
+                st.paused = false;
+                st.anew = true;
+                st.dirty = true;
+                st.changed_all = true;
+            } else {
+                st.paused = true;
+                st.idle = true;
+                m.flips.lock().unwrap().pending = None;
+            }
+            drop(st);
+            m.screen.1.notify_all();
+        }
+        layers::set_powered(self.monitors.iter().map(|m| m.on).collect());
+        layers::tell(ToLayers::Power);
+        if on {
+            self.shown = None;
+            self.show_cursor();
+            let _ = self.to_render.send(ToRender::Repaint);
+        }
+    }
+
+    /// Once a second: dark after `idle off-after` seconds without input,
+    /// unless a program keeps the screen awake.
+    fn idle_check(&mut self) {
+        let Some(secs) = config::get().off_after else { return };
+        if !self.dark_for_idle && !layers::inhibited() && self.last_input.elapsed() > Duration::from_secs(secs) && self.monitors.iter().any(|m| m.on) {
+            println!("session · {secs} s without input: the monitors go dark");
+            self.dark_for_idle = true;
+            self.power(None, false);
         }
     }
 

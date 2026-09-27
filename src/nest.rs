@@ -48,6 +48,10 @@ use smithay::reexports::wayland_protocols_wlr::foreign_toplevel::v1::server::{
     zwlr_foreign_toplevel_manager_v1::{self as toplevel_manager, ZwlrForeignToplevelManagerV1},
 };
 use smithay::reexports::wayland_server::{DataInit, Dispatch, GlobalDispatch, New};
+use smithay::reexports::wayland_protocols_wlr::output_power_management::v1::server::{
+    zwlr_output_power_manager_v1::{self as power_manager, ZwlrOutputPowerManagerV1},
+    zwlr_output_power_v1::{self as output_power, ZwlrOutputPowerV1},
+};
 use smithay::reexports::wayland_protocols_wlr::screencopy::v1::server::{
     zwlr_screencopy_frame_v1::{self as copy_frame, ZwlrScreencopyFrameV1},
     zwlr_screencopy_manager_v1::{self as copy_manager, ZwlrScreencopyManagerV1},
@@ -326,6 +330,8 @@ struct State {
     last_under: Option<(WlSurface, Point<f64, Logical>)>,
     /// The surface that holds the pointer (locked or confined), if any.
     constrained: Option<WlSurface>,
+    /// Who watches a monitor's power (wlr-output-power-management), and which.
+    powers: Vec<(ZwlrOutputPowerV1, usize)>,
     socket: String,
     /// XWayland's display (`:1`), once it is ready.
     x_display: Option<String>,
@@ -424,6 +430,8 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
     // recorder): only in a session of its own, which has monitors.
     if !monitors.is_empty() {
         dh.create_global::<State, ZwlrScreencopyManagerV1, _>(3, ());
+        // And their power, for what turns them off when idle (hypridle, wlopm).
+        dh.create_global::<State, ZwlrOutputPowerManagerV1, _>(1, ());
     }
     // What the session and the monitors tell about the programs' surfaces.
     let (layers_tx, layers_rx) = channel::channel::<ToLayers>();
@@ -468,6 +476,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         presented_seq: 0,
         last_under: None,
         constrained: None,
+        powers: Vec::new(),
         seats,
         seat,
         keyboard,
@@ -1149,6 +1158,12 @@ impl State {
                 }
             }
             ToLayers::Activity => self.activity(),
+            ToLayers::Power => {
+                self.powers.retain(|(p, _)| p.is_alive());
+                for (p, k) in &self.powers {
+                    p.mode(if layers::powered(*k) { output_power::Mode::On } else { output_power::Mode::Off });
+                }
+            }
         }
     }
 
@@ -2387,3 +2402,39 @@ smithay::delegate_xdg_dialog!(State);
 smithay::delegate_foreign_toplevel_list!(State);
 smithay::delegate_presentation!(State);
 smithay::delegate_content_type!(State);
+
+impl GlobalDispatch<ZwlrOutputPowerManagerV1, ()> for State {
+    fn bind(_: &mut Self, _: &DisplayHandle, _: &Client, resource: New<ZwlrOutputPowerManagerV1>, _: &(), init: &mut DataInit<'_, Self>) {
+        init.init(resource, ());
+    }
+}
+
+/// A monitor's power, for a program to watch and set.
+impl Dispatch<ZwlrOutputPowerManagerV1, ()> for State {
+    fn request(state: &mut Self, _: &Client, _: &ZwlrOutputPowerManagerV1, request: power_manager::Request, _: &(), _: &DisplayHandle, init: &mut DataInit<'_, Self>) {
+        if let power_manager::Request::GetOutputPower { id, output } = request {
+            let monitor = state.outputs.iter().position(|o| o.owns(&output));
+            let power = init.init(id, monitor.unwrap_or(usize::MAX));
+            match monitor {
+                Some(k) => {
+                    power.mode(if layers::powered(k) { output_power::Mode::On } else { output_power::Mode::Off });
+                    state.powers.push((power, k));
+                }
+                None => power.failed(),
+            }
+        }
+    }
+}
+
+impl Dispatch<ZwlrOutputPowerV1, usize> for State {
+    fn request(state: &mut Self, _: &Client, power: &ZwlrOutputPowerV1, request: output_power::Request, monitor: &usize, _: &DisplayHandle, _: &mut DataInit<'_, Self>) {
+        match request {
+            output_power::Request::SetMode { mode } => {
+                let on = matches!(mode.into_result(), Ok(output_power::Mode::On));
+                layers::request_power(Some(*monitor), on);
+            }
+            output_power::Request::Destroy => state.powers.retain(|(p, _)| p != power),
+            _ => {}
+        }
+    }
+}

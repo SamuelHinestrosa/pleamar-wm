@@ -53,6 +53,8 @@ pub enum ToLayers {
     Relative { dx: f64, dy: f64, ux: f64, uy: f64, utime: u64 },
     /// Someone touched something: not idle.
     Activity,
+    /// Monitors went on or off (see `powered`).
+    Power,
 }
 
 /// What a program holding the pointer asks of it: that it stays where it is
@@ -185,6 +187,31 @@ pub fn cursor(from_program: bool, c: pleamar::scene::Cursor) {
     if let Some(tx) = CURSOR.lock().unwrap().as_ref() {
         let _ = tx.send((from_program, c));
     }
+}
+
+/// Monitors turned on or off, as a program asks (wlr-output-power-management:
+/// hypridle, swayidle, wlopm): which one (all, if none), and on or off.
+static POWER: Mutex<Option<channel::Sender<(Option<usize>, bool)>>> = Mutex::new(None);
+
+pub fn set_power_sink(tx: channel::Sender<(Option<usize>, bool)>) {
+    *POWER.lock().unwrap() = Some(tx);
+}
+
+pub fn request_power(monitor: Option<usize>, on: bool) {
+    if let Some(tx) = POWER.lock().unwrap().as_ref() {
+        let _ = tx.send((monitor, on));
+    }
+}
+
+/// Which monitors are on, as the session last said.
+static POWERED: Mutex<Vec<bool>> = Mutex::new(Vec::new());
+
+pub fn set_powered(on: Vec<bool>) {
+    *POWERED.lock().unwrap() = on;
+}
+
+pub fn powered(monitor: usize) -> bool {
+    POWERED.lock().unwrap().get(monitor).copied().unwrap_or(true)
 }
 
 pub fn set_card(fd: smithay::backend::drm::DrmDeviceFd) {
