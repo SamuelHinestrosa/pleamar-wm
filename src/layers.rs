@@ -136,7 +136,10 @@ pub fn locked() -> bool {
 pub fn set_locked(yes: bool) {
     LOCKED.store(yes, std::sync::atomic::Ordering::Relaxed);
     for (_, sc) in MONITORS.lock().unwrap().iter() {
-        sc.0.lock().unwrap().dirty = true;
+        let mut st = sc.0.lock().unwrap();
+        st.dirty = true;
+        st.changed_all = true;
+        drop(st);
         sc.1.notify_all();
     }
 }
@@ -178,6 +181,26 @@ pub fn show(monitor: usize, layer: ClientLayer) {
         if old.is_none() && new.is_none() {
             continue;
         }
+        // What changes on the monitor: where it was and where it is, if it
+        // moved, grew, changed level or came or went; else only the pieces
+        // with something new.
+        let same_place = match (&old, &new) {
+            (Some(o), Some(n)) => o.rect == n.rect && o.level == n.level && o.pieces.len() == n.pieces.len() && o.pieces.iter().zip(&n.pieces).all(|(a, b)| a.at == b.at && a.size == b.size),
+            _ => false,
+        };
+        if same_place {
+            if let Some(n) = &new {
+                for p in n.pieces.iter().filter(|p| p.content.is_some()) {
+                    st.changed.push([n.rect[0] + p.at.0, n.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32]);
+                }
+            }
+        } else {
+            for l in old.iter().chain(new.iter()) {
+                for p in &l.pieces {
+                    st.changed.push([l.rect[0] + p.at.0, l.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32]);
+                }
+            }
+        }
         for p in old.into_iter().flat_map(|o| o.pieces) {
             let Some(content) = p.content else { continue };
             if let Some(n) = new.as_mut().and_then(|n| n.pieces.iter_mut().find(|n| n.key == p.key && n.buffer == p.buffer && n.content.is_none())) {
@@ -210,6 +233,9 @@ pub fn hide(id: u64) {
         let mut st = lock.lock().unwrap();
         if let Some(i) = st.clients.iter().position(|c| c.id == id) {
             let old = st.clients.remove(i);
+            for p in &old.pieces {
+                st.changed.push([old.rect[0] + p.at.0, old.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32]);
+            }
             for p in old.pieces {
                 if let (Some(PieceContent::Dmabuf(_)), Some(b)) = (&p.content, p.buffer) {
                     if !st.held.contains(&b) {

@@ -308,6 +308,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
                     }
                     if any {
                         st.dirty = true;
+                        st.changed_all = true;
                         sc.1.notify_all();
                     }
                 }
@@ -324,6 +325,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
                     }
                     if any {
                         st.dirty = true;
+                        st.changed_all = true;
                         sc.1.notify_all();
                     }
                 }
@@ -526,6 +528,7 @@ impl State {
                     st.paused = false;
                     st.anew = true;
                     st.dirty = true;
+                    st.changed_all = true;
                     m.screen.1.notify_all();
                 }
                 if let Some(bo) = self.cursor.take() {

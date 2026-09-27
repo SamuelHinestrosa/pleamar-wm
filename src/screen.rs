@@ -69,6 +69,10 @@ pub struct ScreenState {
     pub held: Vec<u64>,
     /// Buffers the programs destroyed, to drop what was kept of them.
     pub forget: Vec<u64>,
+    /// What has changed on it since it was last put together, on the monitor
+    /// (x, y, w, h); `changed_all` when all of it may have.
+    pub changed: Vec<[i32; 4]>,
+    pub changed_all: bool,
     output: Option<Box<dyn Output>>,
     pub quit: bool,
 }
@@ -77,7 +81,7 @@ pub type Screen = Arc<(Mutex<ScreenState>, Condvar)>;
 
 pub fn screen(name: String, size: (u32, u32), output: Box<dyn Output>) -> Screen {
     Arc::new((
-        Mutex::new(ScreenState { name, size, layers: Vec::new(), dirty: false, idle: true, paused: false, anew: true, fresh: Vec::new(), on_flip: Vec::new(), modifiers: Vec::new(), clients: Vec::new(), held: Vec::new(), forget: Vec::new(), output: Some(output), quit: false }),
+        Mutex::new(ScreenState { name, size, layers: Vec::new(), dirty: false, idle: true, paused: false, anew: true, fresh: Vec::new(), on_flip: Vec::new(), modifiers: Vec::new(), clients: Vec::new(), held: Vec::new(), forget: Vec::new(), changed: Vec::new(), changed_all: true, output: Some(output), quit: false }),
         Condvar::new(),
     ))
 }
@@ -231,12 +235,24 @@ impl Frames for LayerFrames {
         Some((k, self.textures[k].clone()))
     }
 
-    fn present(&mut self, which: usize, _done: wgpu::SubmissionIndex, device: &wgpu::Device, queue: &wgpu::Queue) {
+    fn present(&mut self, which: usize, _done: wgpu::SubmissionIndex, device: &wgpu::Device, queue: &wgpu::Queue, changed: Option<[u32; 4]>) {
         self.latest = Some(which);
         let (lock, cv) = &*self.screen;
         let mut st = lock.lock().unwrap();
+        let mut piece = None;
         if let Some(l) = st.layers.iter_mut().find(|l| l.sheet == self.sheet) {
+            // Its first frame changes all it covers.
+            let first = l.latest.is_none();
             l.latest = Some(self.textures[which].clone());
+            piece = match changed {
+                Some(c) if !first => Some([l.rect[0] + c[0] as i32, l.rect[1] + c[1] as i32, c[2] as i32, c[3] as i32]),
+                _ => Some(l.rect),
+            };
+        }
+        match piece {
+            Some(p) if p[2] > 0 && p[3] > 0 => st.changed.push(p),
+            Some(_) => {}
+            None => st.changed_all = true,
         }
         st.fresh.push(self.sheet);
         st.dirty = true;
@@ -389,6 +405,33 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
     let mut blur_room: Option<[wgpu::Texture; 2]> = None;
     let mut bound: Vec<Bound> = Vec::new();
     let mut round = 0u64;
+    // What changed in each of the last times it was put together, and when
+    // each of the output's buffers was last put together: each is only put
+    // together again where something changed since then.
+    let mut changes: std::collections::VecDeque<(u64, Option<[i32; 4]>)> = Default::default();
+    let mut last_in: Vec<Option<u64>> = Vec::new();
+    let mut time_no = 0u64;
+    // Black, to empty the piece put together again.
+    let black = client_texture(&device, (1, 1));
+    queue.write_texture(
+        wgpu::TexelCopyTextureInfo { texture: &black, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+        &[0, 0, 0, 255],
+        wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(4), rows_per_image: None },
+        wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+    );
+    let black_group = {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: 32, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+        queue.write_buffer(&buffer, 0, as_bytes(&[0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0]));
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&black.create_view(&Default::default())) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&sampler) },
+                wgpu::BindGroupEntry { binding: 2, resource: buffer.as_entire_binding() },
+            ],
+        })
+    };
     // `PLEAMAR_TIMING=1`: how many times a second it is put together, how long
     // it waits for the card, and the CPU each time costs.
     let timing = std::env::var_os("PLEAMAR_TIMING").is_some();
@@ -410,7 +453,7 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
     let debug = std::env::var_os("PLEAMAR_DEBUG_SCREEN").is_some();
     let (lock, cv) = &*screen;
     loop {
-        let (quads, blurs, size, modifiers, fresh, anew, arrived, forget, shows, drew_clients, surfaces) = {
+        let (quads, blurs, size, modifiers, fresh, anew, arrived, forget, shows, drew_clients, surfaces, changed) = {
             let mut st = lock.lock().unwrap();
             while !st.quit && !(st.dirty && st.idle && !st.paused) {
                 st = cv.wait_timeout(st, Duration::from_millis(500)).unwrap().0;
@@ -466,7 +509,16 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
             }
             let anew = std::mem::take(&mut st.anew);
             let drew_clients = !st.clients.is_empty();
-            (quads, blurs, st.size, st.modifiers.clone(), std::mem::take(&mut st.fresh), anew, arrived, std::mem::take(&mut st.forget), shows, drew_clients, surfaces)
+            // What changed, as one box (none: all of it).
+            // `PLEAMAR_FULL_COMPOSE=1`: all of it every time, to compare.
+            let changed = if std::mem::take(&mut st.changed_all) || anew || std::env::var_os("PLEAMAR_FULL_COMPOSE").is_some() {
+                st.changed.clear();
+                None
+            } else {
+                let b = st.changed.drain(..).fold([i32::MAX, i32::MAX, i32::MIN, i32::MIN], |a, r| [a[0].min(r[0]), a[1].min(r[1]), a[2].max(r[0] + r[2]), a[3].max(r[1] + r[3])]);
+                Some(b)
+            };
+            (quads, blurs, st.size, st.modifiers.clone(), std::mem::take(&mut st.fresh), anew, arrived, std::mem::take(&mut st.forget), shows, drew_clients, surfaces, changed)
         };
         part(0, &mut parts);
         for b in forget {
@@ -518,6 +570,35 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
         };
         let view = target.create_view(&Default::default());
         let mut encoder = device.create_command_encoder(&Default::default());
+        // The piece of this buffer to put together again: what changed since it
+        // was last put together, if that is known; all of it with glass (the
+        // blur reads around it) or the first time.
+        time_no += 1;
+        changes.push_back((time_no, changed));
+        while changes.len() > 8 {
+            changes.pop_front();
+        }
+        if last_in.len() <= which {
+            last_in.resize(which + 1, None);
+        }
+        let since = last_in[which].replace(time_no);
+        let piece: Option<[i32; 4]> = if !blurs.is_empty() {
+            None
+        } else {
+            since.and_then(|p| {
+                let complete = changes.front().is_some_and(|(n, _)| *n <= p + 1);
+                complete.then(|| changes.iter().filter(|(n, _)| *n > p).try_fold([i32::MAX, i32::MAX, i32::MIN, i32::MIN], |a, (_, b)| b.map(|b| [a[0].min(b[0]), a[1].min(b[1]), a[2].max(b[2]), a[3].max(b[3])])))?
+            })
+        };
+        // In pixels of the monitor, within it; empty if nothing changed.
+        let scissor: Option<[u32; 4]> = piece.map(|b| {
+            let x0 = b[0].clamp(0, size.0 as i32);
+            let y0 = b[1].clamp(0, size.1 as i32);
+            let x1 = b[2].clamp(x0, size.0 as i32);
+            let y1 = b[3].clamp(y0, size.1 as i32);
+            [x0 as u32, y0 as u32, (x1 - x0) as u32, (y1 - y0) as u32]
+        });
+        let touches = |r: &[i32; 4]| scissor.is_none_or(|s| r[0] < (s[0] + s[2]) as i32 && r[0] + r[2] > s[0] as i32 && r[1] < (s[1] + s[3]) as i32 && r[1] + r[3] > s[1] as i32);
         round += 1;
         // Each quad's bind group, if what it shows is there.
         let mut groups: Vec<Option<usize>> = Vec::new();
@@ -527,7 +608,8 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
                 Source::Buffer(b) => buffers.get(b),
                 Source::Pixels(k) => pixels.get(k),
             };
-            let Some(texture) = texture else {
+            // Nothing of it falls where it is put together again: not drawn.
+            let Some(texture) = texture.filter(|_| touches(r)) else {
                 groups.push(None);
                 continue;
             };
@@ -559,7 +641,12 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
         // that is blurred where the glass asks, and the rest goes on top.
         let (w, h) = (size.0 as f32, size.1 as f32);
         let mut from = 0;
-        let mut load = wgpu::LoadOp::Clear(wgpu::Color::BLACK);
+        // Put together again only in a piece: what is there stays, and the
+        // piece is emptied to black first (a clear would empty all of it).
+        let mut load = if scissor.is_some() { wgpu::LoadOp::Load } else { wgpu::LoadOp::Clear(wgpu::Color::BLACK) };
+        let mut empty_first = scissor.is_some();
+        let blank = scissor.is_some_and(|s| s[2] == 0 || s[3] == 0);
+        let black_group = empty_first.then_some(&black_group);
         for (upto, glass) in blurs.iter().map(|(at, r)| (*at, Some(r))).chain(std::iter::once((quads.len(), None))) {
             {
                 let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -571,6 +658,19 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
                     multiview_mask: None,
                 });
                 pass.set_pipeline(&pipeline);
+                if blank {
+                    from = upto;
+                    continue;
+                }
+                if let Some(sc) = scissor {
+                    pass.set_scissor_rect(sc[0], sc[1], sc[2], sc[3]);
+                    if std::mem::take(&mut empty_first) {
+                        if let Some(g) = &black_group {
+                            pass.set_bind_group(0, *g, &[]);
+                            pass.draw(0..4, 0..1);
+                        }
+                    }
+                }
                 for k in groups[from..upto].iter().flatten() {
                     pass.set_bind_group(0, &bound[*k].group, &[]);
                     pass.draw(0..4, 0..1);
