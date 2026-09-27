@@ -114,6 +114,8 @@ session)
     {
         echo "the scene's rounds:"
         grep "timing · .*rounds\|CPU per round" "$state/bench-session.log" | tail -2
+        echo "the monitors:"
+        for m in $(grep -o "screen · [A-Za-z0-9-]*:" "$state/bench-session.log" | sort -u | cut -d' ' -f3); do grep "screen · $m put together" "$state/bench-session.log" | tail -1; done
     } >> "$state/bench-session.txt"
     wait
     # Marea back on Hyprland, once the one inside has gone.

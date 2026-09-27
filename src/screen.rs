@@ -389,6 +389,10 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
     let mut blur_room: Option<[wgpu::Texture; 2]> = None;
     let mut bound: Vec<Bound> = Vec::new();
     let mut round = 0u64;
+    // `PLEAMAR_TIMING=1`: how many times a second it is put together, how long
+    // it waits for the card, and the CPU each time costs.
+    let timing = std::env::var_os("PLEAMAR_TIMING").is_some();
+    let mut tally = (std::time::Instant::now(), 0u32, 0f64, 0f64);
     // The programs' buffers read so far, and each surface's copied pixels.
     let mut buffers: std::collections::HashMap<u64, wgpu::Texture> = Default::default();
     let mut pixels: std::collections::HashMap<u64, wgpu::Texture> = Default::default();
@@ -671,7 +675,20 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
         bound.retain(|b| round - b.used < 8);
         queue.submit(Some(encoder.finish()));
         let done = pleamar::Sent::after(&queue);
+        let shown_at = std::time::Instant::now();
         let flying = output.show(which, done, &device, &queue, anew);
+        if timing {
+            tally.1 += 1;
+            tally.2 += shown_at.elapsed().as_secs_f64() * 1000.0;
+            tally.3 = thread_cpu_ms();
+            if tally.1 >= 300 {
+                let secs = tally.0.elapsed().as_secs_f64();
+                let name = lock.lock().unwrap().name.clone();
+                println!("screen · {name}: put together {:.0} times a second, {:.2} ms waiting for the card each, {:.2} ms of CPU each", tally.1 as f64 / secs, tally.2 / tally.1 as f64, (tally.3 - CPU_AT.with(|c| c.get())) / tally.1 as f64);
+                CPU_AT.with(|c| c.set(tally.3));
+                tally = (std::time::Instant::now(), 0, 0.0, tally.3);
+            }
+        }
         // The buffers read before and no longer shown go back to their programs
         // (`show` waited for the card to finish with them).
         let released: Vec<u64> = {
@@ -680,11 +697,14 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
             st.held = shows;
             if flying {
                 st.idle = false;
-                st.on_flip.extend(fresh);
-            } else {
-                for id in fresh {
-                    let _ = to_render.send(ToRender::Frame(id));
-                }
+            }
+            // The surfaces whose frame went into this may paint the next one now,
+            // not when the flip lands: the card has read their texture already
+            // (`show` waited for it), and the next goes into their other one.
+            // Waiting for the flip too put a whole refresh into each frame's
+            // way, and a terminal that asked for 50 got 32.
+            for id in fresh {
+                let _ = to_render.send(ToRender::Frame(id));
             }
             gone
         };
@@ -727,4 +747,19 @@ pub fn landed(screen: &Screen, to_render: &Sender<ToRender>) {
 fn as_bytes(v: &[f32; 8]) -> &[u8] {
     // SAFETY: eight f32 are thirty-two bytes, laid out as the uniform wants them.
     unsafe { std::slice::from_raw_parts(v.as_ptr() as *const u8, 32) }
+}
+
+thread_local! {
+    /// The thread's CPU when the last tally was written.
+    static CPU_AT: std::cell::Cell<f64> = const { std::cell::Cell::new(0.0) };
+}
+
+/// The CPU this thread has used, in milliseconds.
+fn thread_cpu_ms() -> f64 {
+    let mut t = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    // SAFETY: a valid clock and a timespec of our own to fill.
+    if unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut t) } == 0 {
+        return t.tv_sec as f64 * 1000.0 + t.tv_nsec as f64 / 1e6;
+    }
+    0.0
 }
