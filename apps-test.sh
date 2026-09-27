@@ -38,7 +38,8 @@ run() {
         timeout $((wait + 6)) "$wm" headless "$here/examples/session.plm" --seconds $((wait + 3)) > "$out/log.txt" 2>&1 &
     pid=$!
     sleep "$wait"
-    count=$("$say" --say session "get win.count" 2> /dev/null)
+    open=$("$say" --say session "get win.0.open" 2> /dev/null)
+    dialog=$("$say" --say session "get win.0.dialog" 2> /dev/null)
     title=$("$say" --say session "get win.0.title" 2> /dev/null)
     app=$("$say" --say session "get win.0.app" 2> /dev/null)
     w=$("$say" --say session "get win.0.width" 2> /dev/null)
@@ -80,7 +81,8 @@ echo "$list" | while IFS='|' read -r name wait cmd; do
     run "$name" "$wait" "$cmd" "$png"
     drew="-"
     [ -f "$png" ] && drew="$(differs "$out/nothing.png" "$png") %"
-    ok=$([ "${count:-0}" -ge 1 ] 2> /dev/null && echo yes || echo NO)
+    ok=$([ "$open" = true ] && echo yes || echo NO)
+    [ "$ok" = yes ] && [ "$dialog" = true ] && ok="dialog"
     [ "$panics" -gt 0 ] && ok="PANIC"
     printf '%-20s %-7s %-10s %-26.26s %-18.18s %s\n' "$name" "$ok" "${w}×${h}" "$title" "$app" "$drew" >> "$report"
 done
