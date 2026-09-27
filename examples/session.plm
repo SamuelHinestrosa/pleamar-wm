@@ -13,7 +13,7 @@
 //   Super+Shift+Up/Down change places with the one before / after it
 //   Super+Tab  everything at a glance       Super+-/+  the leader narrower / wider
 //   Super+F    fullscreen, and back
-//   Super+W    tiled or free windows on this monitor (also the bar's button):
+//   Super+W    tiled or free windows on this monitor (also from Marea's menu):
 //              free, each window stays where it is left and as big as it is
 //              made —edges and corner—, the green button maximizes it, and
 //              the one clicked comes over the rest. Back to tiled, each goes
@@ -43,7 +43,8 @@ scene Session {
     let mint = #9ed6bd
     let coral = #ef7a66
     let amber = #e8c26a
-    let bar = 52
+    // Windows start this far from the top (under what other programs' bars keep).
+    let bar = 12
     let gap = 12
     let tb = 30                          // each window's title bar
     let W = screen.width
@@ -532,47 +533,6 @@ scene Session {
         }
     }
 
-    // ── the bar ──
-    // Under what other programs' bars keep at the top of this monitor.
-    box { from: 0, pick(screen.index, win.reserved.0.top, win.reserved.1.top); size: W, bar - 6; color: #0d1013; opacity: 80% }
-    row {
-        at: 16, 8 + pick(screen.index, win.reserved.0.top, win.reserved.1.top)
-        gap: 8
-        repeat a in 0..3 {
-            group {
-                size: 124, 30
-                box { from: 0, 0; size: 124, 30; corner: 15; color: mix(#1b2024, #22302b, app.$a.hover) }
-                text pick(a, "+  Terminal", "+  Calculator", "+  Text") { at: 62, 15; anchor: center; size: 12; weight: 500; color: ink; opacity: 70% + 30% * app.$a.hover }
-                zone box app.$a { from: 0, 0; size: 124, 30; corner: 15; cursor: pointer }
-            }
-        }
-        group {
-            size: 124, 30
-            box { from: 0, 0; size: 124, 30; corner: 15; color: mix(mix(#1b2024, #22302b, glance.hover), #2b4a40, ov) }
-            text "At a glance" { at: 62, 15; anchor: center; size: 12; weight: 500; color: ink; opacity: 70% + 30% * glance.hover }
-            zone box glance { from: 0, 0; size: 124, 30; corner: 15; cursor: pointer }
-        }
-        // Tiled or free: what this monitor is, and the other it can be.
-        group {
-            size: 124, 30
-            let free.here = pick(screen.index, free.0, free.1)
-            box { from: 0, 0; size: 124, 30; corner: 15; color: mix(mix(#1b2024, #22302b, freeb.hover), #2b4a40, free.here) }
-            text "Free windows" { at: 62, 15; anchor: center; size: 12; weight: 500; color: ink; opacity: (70% + 30% * freeb.hover) * (1 - free.here) }
-            text "Tiled" { at: 62, 15; anchor: center; size: 12; weight: 500; color: ink; opacity: (70% + 30% * freeb.hover) * free.here }
-            zone box freeb { from: 0, 0; size: 124, 30; corner: 15; cursor: pointer }
-        }
-    }
-    on press app.0 { launch "kitty" }
-    on press app.1 { launch "gnome-calculator" }
-    on press app.2 { launch "gnome-text-editor" }
-    on press glance { toggle overview }
-    on press freeb while screen.index == 0 { free.0 = 1 - free.0 }
-    on press freeb while screen.index == 1 { free.1 = 1 - free.1 }
-    text "{win.count} of 6 · drag a title bar to move it · Super+T terminal · Super+Q close · Super+arrows keyboard · Super+Shift+arrows move · Super+Tab at a glance · Super+Space search · Super+L lock · Ctrl+Alt+Backspace leaves" {
-        // Down in the corner: the top middle is Marea's.
-        at: W - 18, H - 16 - pick(screen.index, win.reserved.0.bottom, win.reserved.1.bottom); anchor: right center; size: 11; color: ink; opacity: 55%
-    }
-    text "Nothing open here yet: Super+T, or a button above." { at: W / 2, H / 2; anchor: center; size: 15; color: ink; opacity: if(pick(screen.index, win.on.0, win.on.1) < 0.5, 45%, 0) }
 
     // The window being carried, over all the others: lifted, a little smaller
     // and see-through, so that where it will land shows below it. It goes with
@@ -807,6 +767,9 @@ scene Session {
     // Tiled or free, on the monitor under the mouse.
     on key Super+w while mon == 0 { free.0 = 1 - free.0 }
     on key Super+w while mon == 1 { free.1 = 1 - free.1 }
+    // Marea follows the mouse from monitor to monitor: she is told which.
+    on change mon while mon == 0 { launch "pleamar-wm --say marea 'emit pointer_monitor 0'" }
+    on change mon while mon == 1 { launch "pleamar-wm --say marea 'emit pointer_monitor 1'" }
     // The same, from outside: Marea's menu (`pleamar --say wm "emit toggle_free"`).
     event toggle_free
     on toggle_free while mon == 0 { free.0 = 1 - free.0 }
