@@ -70,6 +70,14 @@ kitty_pid() { pgrep -n -f "^kitty --class pleamar-bench"; }
 case "$1" in
 hyprland)
     [ -n "$HYPRLAND_INSTANCE_SIGNATURE" ] || { echo "run it from inside Hyprland"; exit 1; }
+    # Marea started again, so that she runs the pleamar built last.
+    if "$pleamar" --say marea "get open" > /dev/null 2>&1; then
+        echo "bench · Marea starts again (the last pleamar built)"
+        "$pleamar" --say marea quit > /dev/null 2>&1
+        sleep 1.5
+        (cd "$marea" && setsid nohup ./marea start > /dev/null 2>&1 &)
+        sleep 5
+    fi
     echo "bench · Hyprland: a terminal opens now; ~$((settle + span)) s"
     sh -c "$load" > /dev/null 2>&1 &
     sleep "$settle"
