@@ -12,6 +12,7 @@ use pleamar::scene::{Cursor, Mods, Screens, Surface, ToRender};
 use pleamar::wgpu;
 use crate::config;
 use crate::layers::{self, MonitorInfo, ToLayers};
+use crate::route::Route;
 use crate::screen::{self, Hit, LayerFrames, LayerWindow, Output, Screen};
 use pleamar::{NewSheet, Target, View};
 use smithay::backend::drm::DrmDeviceFd;
@@ -213,12 +214,8 @@ struct State {
     /// The last input, and whether the monitors went dark for lack of it.
     last_input: std::time::Instant,
     dark_for_idle: bool,
-    /// Who has the pointer: the scene, or a program's surface (layer-shell).
-    hit: Hit,
-    /// The program's surface a button was pressed on: it keeps the pointer until it is let go.
-    grab: Option<u64>,
-    /// The program's surface that took the keyboard when clicked.
-    key_client: Option<u64>,
+    /// Where the pointer and the keys go: the scene or a program's surface.
+    route: Route,
     /// What is needed to put monitors up when they are plugged in: the card's
     /// buffers, the scene's surfaces, and the sheets given to the render.
     gbm: Arc<Mutex<gbm::Device<DrmDeviceFd>>>,
@@ -338,7 +335,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     let first = monitors.first().map_or((0.0, 0.0), |m| (m.x as f64 + m.units().0 as f64 / 2.0, m.y as f64 + m.units().1 as f64 / 2.0));
     layers::set_card(drm.clone());
     layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz, scale: m.scale }, m.screen.clone())).collect());
-    let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, hit: Hit::Scene(None), grab: None, key_client: None, gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
+    let mut state = State { session, drm, monitors, libinput, to_render: to_render.clone(), keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, route: Route::new(to_render), gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
     state.make_cursors(&gbm);
     // The cursor the scene and the programs ask for, whenever it changes.
     let (cursor_tx, cursor_rx) = smithay::reexports::calloop::channel::channel::<(bool, Cursor)>();
@@ -657,50 +654,15 @@ impl State {
         }
         let m = &self.monitors[on];
         let (mx, my) = ((px - m.x as f64) * m.scale, (py - m.y as f64) * m.scale);
-        let hit = {
-            let st = m.screen.0.lock().unwrap();
-            match self.grab {
-                // Held: the one it was pressed on keeps it, wherever it goes.
-                Some(id) => match st.clients.iter().find(|c| c.id == id) {
-                    Some(c) => Hit::Client(id, (mx - c.rect[0] as f64, my - c.rect[1] as f64)),
-                    None => self.hit,
-                },
-                None => screen::pointer_at(&st, (mx, my)),
-            }
-        };
-        self.point(hit);
-    }
-
-    /// The pointer goes to whoever takes it now, and leaves whoever had it.
-    fn point(&mut self, hit: Hit) {
-        match hit {
-            Hit::Scene(at) => {
-                if matches!(self.hit, Hit::Client(..)) {
-                    layers::tell(ToLayers::PointerOut);
-                }
-                let _ = self.to_render.send(ToRender::Pointer(at));
-            }
-            Hit::Client(id, (x, y)) => {
-                if matches!(self.hit, Hit::Scene(Some(_))) {
-                    let _ = self.to_render.send(ToRender::Pointer(None));
-                }
-                layers::tell(ToLayers::Pointer { id, x, y });
-            }
-        }
-        let was_program = matches!(self.hit, Hit::Client(..));
-        self.hit = hit;
-        if was_program != matches!(hit, Hit::Client(..)) {
+        let screen = m.screen.clone();
+        if self.route.pointer(&screen, (mx, my)) {
             self.show_cursor();
         }
     }
 
-    /// Where the keys go: a program's surface that takes all of it; else the
-    /// one clicked that takes it on demand; else the scene.
-    fn key_owner(&self) -> Option<u64> {
-        let all = self.monitors.iter().find_map(|m| screen::keyboard_taker(&m.screen.0.lock().unwrap()));
-        // Only while it still asks for it: a card that closes gives it back.
-        let alive = |id: u64| self.monitors.iter().any(|m| m.screen.0.lock().unwrap().clients.iter().any(|c| c.id == id && c.keyboard != 0 && !c.pieces.is_empty()));
-        all.or(self.key_client.filter(|id| alive(*id)))
+    /// Every monitor's picture, for the route to look at.
+    fn screens(&self) -> Vec<Screen> {
+        self.monitors.iter().map(|m| m.screen.clone()).collect()
     }
 
     /// The cursor's shapes, on the card's cursor plane: moving the mouse does
@@ -781,7 +743,7 @@ impl State {
 
     /// The cursor of whoever has the pointer, if it is not the one shown.
     fn show_cursor(&mut self) {
-        let want = if matches!(self.hit, Hit::Client(..)) { self.program_cursor } else { self.scene_cursor };
+        let want = if matches!(self.route.hit, Hit::Client(..)) { self.program_cursor } else { self.scene_cursor };
         // A shape the theme lacks is shown as the arrow.
         let want = if self.cursors.iter().any(|c| c.0 == want) { want } else { Cursor::Normal };
         if self.shown == Some(want) {
@@ -880,31 +842,10 @@ impl State {
             InputEvent::DeviceAdded { mut device } => set_up_device(&mut device),
             InputEvent::PointerButton { event } => {
                 let down = event.state() == ButtonState::Pressed;
-                if let Hit::Client(id, _) = self.hit {
-                    if down {
-                        self.grab = Some(id);
-                        let takes = self.monitors.iter().any(|m| screen::takes_keyboard_on_click(&m.screen.0.lock().unwrap(), id));
-                        self.set_key_client(if takes { Some(id) } else { None });
-                    } else {
-                        self.grab = None;
-                    }
-                    layers::tell(ToLayers::Button { code: event.button_code(), down });
-                    if !down {
-                        self.move_pointer(0.0, 0.0);
-                    }
-                    return;
+                let screens = self.screens();
+                if self.route.button(&screens, event.button_code(), down) && !down {
+                    self.move_pointer(0.0, 0.0);
                 }
-                if down {
-                    self.set_key_client(None);
-                    layers::tell(ToLayers::ScenePress);
-                }
-                let b = match event.button_code() {
-                    0x110 => 0,
-                    0x111 => 1,
-                    0x112 => 2,
-                    _ => return,
-                };
-                let _ = self.to_render.send(ToRender::Button(b, event.state() == ButtonState::Pressed));
             }
             InputEvent::PointerAxis { event } => {
                 // A wheel in notches; a touchpad, a notch every 15 px of finger.
@@ -919,11 +860,7 @@ impl State {
                     _ => 0.0,
                 };
                 if notches != 0.0 {
-                    if matches!(self.hit, Hit::Client(..)) {
-                        layers::tell(ToLayers::Wheel(notches as f32));
-                    } else {
-                        let _ = self.to_render.send(ToRender::Wheel(notches as f32));
-                    }
+                    self.route.wheel(notches as f32);
                 }
             }
             InputEvent::Keyboard { event } => self.key(event.key_code(), event.state() == KeyState::Pressed),
@@ -983,31 +920,9 @@ impl State {
                 }
                 return;
             }
-            let owner = self.key_owner();
-            // Locked, a key goes to the lock screen or nowhere: never to the
-            // scene or its windows behind it.
-            if owner.is_none() && layers::locked() {
-                return;
-            }
-            // Shortcuts (never what is typed): where each went, to find out why one does nothing.
-            if mods.ctrl || mods.alt || mods.logo {
-                println!("session · key {}{}{}{name} → {}", if mods.ctrl { "Ctrl+" } else { "" }, if mods.alt { "Alt+" } else { "" }, if mods.logo { "Super+" } else { "" }, owner.map_or("the scene".to_owned(), |id| format!("the program's surface {id}")));
-            }
-            if let Some(id) = owner {
-                layers::tell(ToLayers::Key { id, code: evdev, down: true });
-                return;
-            }
-            let _ = self.to_render.send(ToRender::Key(name, typed, mods, evdev));
-        } else {
-            // A key let go goes where it went down; to both, if that is not known.
-            if let Some(id) = self.key_owner() {
-                layers::tell(ToLayers::Key { id, code: evdev, down: false });
-            }
-            if layers::locked() {
-                return;
-            }
-            let _ = self.to_render.send(ToRender::KeyReleased(name, evdev));
         }
+        let screens = self.screens();
+        self.route.key(&screens, &name, typed, mods, evdev, down);
     }
 
     /// Someone is there: the compositor tells whoever watches for idleness
@@ -1081,13 +996,6 @@ impl State {
         }
         println!("session · gesture {name}");
         let _ = self.to_render.send(ToRender::ExternalSignal(pleamar::scene::intern(&name), None));
-    }
-
-    fn set_key_client(&mut self, id: Option<u64>) {
-        if self.key_client.is_some() && id.is_none() {
-            layers::tell(ToLayers::KeyboardBack);
-        }
-        self.key_client = id;
     }
 }
 

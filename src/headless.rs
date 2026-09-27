@@ -4,7 +4,9 @@
 //! default) what each monitor shows goes to a PNG (`PLEAMAR_HEADLESS_PNG`, by
 //! default /tmp/pleamar-headless.png; `-1`, `-2`… for the others).
 //! `PLEAMAR_HEADLESS_SCREENS=2` makes two monitors. It is how the session is
-//! checked without a TTY.
+//! checked without a TTY. `PLEAMAR_HEADLESS_INPUT` is a mouse and a keyboard
+//! that go where the session's real ones would (`route.rs`): to the scene, or
+//! to a program's surface —Marea's finder, her catcher—.
 
 use crate::screen::{self, LayerFrames, LayerWindow, Output, Screen};
 use pleamar::scene::{Cursor, Screens, Surface, ToRender};
@@ -184,6 +186,54 @@ impl pleamar::Platform for Headless {
                 }
                 crate::layers::register(screens[..last].iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * unit_w, y: 0, mhz: 60_000, scale }, sc.clone())).collect());
                 crate::layers::tell(crate::layers::ToLayers::Monitors);
+            });
+        }
+        // `PLEAMAR_HEADLESS_INPUT="900,40@3000 down@3500 up@3600 key:Escape:1@4000"`:
+        // a mouse and a keyboard, through the same road as the session's
+        // (`route.rs`): to the scene or to a program's surface —a bar, Marea—
+        // as the real ones would go. Points in units of the whole desktop; a
+        // key by its keysym's name and evdev code (it types itself if the name
+        // is one character).
+        if let Ok(script) = std::env::var("PLEAMAR_HEADLESS_INPUT") {
+            let (tx, screens) = (to_render.clone(), screens.clone());
+            std::thread::spawn(move || {
+                let start = Instant::now();
+                let mut route = crate::route::Route::new(tx);
+                for step in script.split_whitespace() {
+                    let Some((what, ms)) = step.rsplit_once('@') else { continue };
+                    let Ok(ms) = ms.parse::<u64>() else { continue };
+                    if let Some(wait) = Duration::from_millis(ms).checked_sub(start.elapsed()) {
+                        std::thread::sleep(wait);
+                    }
+                    match what {
+                        "down" | "up" => {
+                            route.button(&screens, 0x110, what == "down");
+                        }
+                        _ if what.starts_with("key:") => {
+                            let mut parts = what[4..].splitn(2, ':');
+                            let name = parts.next().unwrap_or("");
+                            let Some(code) = parts.next().and_then(|c| c.parse::<u32>().ok()) else { continue };
+                            let typed = Some(name.to_owned()).filter(|n| n.chars().count() == 1);
+                            println!("headless · key {name} → {:?}", route.key_owner(&screens));
+                            if std::env::var_os("PLEAMAR_DEBUG_WINDOWS").is_some() {
+                                for (m, s) in screens.iter().enumerate() {
+                                    for c in &s.0.lock().unwrap().clients {
+                                        println!("headless ·   monitor {m}: surface {} level {} keyboard {} pieces {}", c.id, c.level, c.keyboard, c.pieces.len());
+                                    }
+                                }
+                            }
+                            route.key(&screens, name, typed, Default::default(), code, true);
+                            route.key(&screens, name, None, Default::default(), code, false);
+                        }
+                        _ => {
+                            let Some((x, y)) = what.split_once(',').and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?))) else { continue };
+                            let m = ((x / unit_w as f64).floor().max(0.0) as usize).min(screens.len() - 1);
+                            let (mx, my) = ((x - (m as i32 * unit_w) as f64) * scale, y * scale);
+                            route.pointer(&screens[m], (mx, my));
+                            println!("headless · pointer {x},{y} → {:?}", route.hit);
+                        }
+                    }
+                }
             });
         }
         // At the hour of the picture everything is painted, so that a monitor
