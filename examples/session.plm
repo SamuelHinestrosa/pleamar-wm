@@ -369,18 +369,14 @@ scene Session {
             zone box corner.$i { from: ex + ew - 14, ey + eh - 14; size: 20, 20; cursor: grab; active: here and fr and not maxed.$i and not overview }
         }
         group {
-            // Over the others as it was last touched (free, they overlap);
-            // flying into the island or out of it, over all of them.
-            z: if(mini.$i > 0.001 and mini.$i < 0.995, 1000000, stamp.$i)
-            // Carried, it is drawn over the others, further down.
-            show: seen.$i > 0.01 and sc == screen.index and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog and mini.$i < 0.995
-            // Put away, it is sucked into the island: up first, shrinking
-            // and fading as it goes; back, it comes out of it the same way.
-            opacity: seen.$i * (1 - mini.$i * mini.$i)
+            // Over the others as it was last touched (free, they overlap).
+            z: stamp.$i
+            // Carried, it is drawn over the others, further down; flying into
+            // the island or out of it, too.
+            show: seen.$i > 0.01 and sc == screen.index and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog and mini.$i < 0.001
+            opacity: seen.$i
             pivot: x + w / 2, y + h / 2
-            // (To where Marea puts its stone: at her left, at her height.)
-            move: (W / 2 - 97 - x - w / 2) * mini.$i, (46 - y - h / 2) * (2 * mini.$i - mini.$i * mini.$i)
-            scale: (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F)) * (1 - 0.95 * mini.$i)
+            scale: (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F))
             body {
                 color: #0c0e10
                 shadow: 0, 14 + 8 * lit.$i + 10 * lift.$i, 34 + 18 * lift.$i, 45% + 20% * lit.$i + 10% * lift.$i
@@ -725,6 +721,46 @@ scene Session {
     // The leader narrower or wider.
     on key Super+minus { ratio = clamp(ratio - 0.05, 0.25, 0.8) }
     on key Super+plus { ratio = clamp(ratio + 0.05, 0.25, 0.8) }
+    // ── into Marea's island, and out of it ──
+    // A window put away is sucked into the island where Marea lives —on its
+    // monitor, or on the other one: Marea says which (`island.screen`)—, up
+    // first, shrinking and fading as it goes, over everything; brought back,
+    // it comes out of it the same way. Drawn on every monitor it crosses, as
+    // a carried one is: monitor 1 starts where monitor 0 ends.
+    fact island.screen = -1
+    repeat i in 0..6 {
+        let sc = win.$i.screen
+        let isl = if(island.screen >= 0, island.screen, sc)
+        let m = mini.$i
+        let off = screen.0.width * (sc - screen.index)
+        let x = x.$i + off
+        let y = y.$i
+        let w = w.$i
+        let h = h.$i
+        // Where it goes, from this monitor's corner: at Marea's left, at her height.
+        let tx = screen.0.width * (isl - screen.index) + pick(isl, screen.0.width, screen.1.width) / 2 - 97
+        let ty = 46
+        group {
+            show: m > 0.001 and m < 0.995 and win.$i.open and (screen.index == sc or screen.index == isl)
+            opacity: 1 - m * m
+            pivot: x + w / 2, y + h / 2
+            move: (tx - x - w / 2) * m, (ty - y - h / 2) * (2 * m - m * m)
+            scale: 1 - 0.95 * m
+            body {
+                color: #0c0e10
+                shadow: 0, 18, 44, 55%
+                box { from: x, y; size: w, h; corner: 12 }
+            }
+            group {
+                clip box { from: x, y; size: w, h; corner: 12 }
+                box { from: x, y; size: w, tb; color: #1d2b27 }
+                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: w, h - tb }
+            }
+            box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: 60% }
+        }
+    }
+
     // ── dialogs: a message, a file chooser, a window of another's: over the
     // rest, at the size it chooses, in the middle of its monitor ──
     repeat i in 0..6 {
