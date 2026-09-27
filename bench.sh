@@ -41,7 +41,12 @@ measure() {
         nvidia-smi --query-gpu=utilization.gpu,power.draw --format=csv,noheader,nounits -lms 500 > "$state/bench.gpu" 2> /dev/null &
         gpu=$!
     fi
+    # How fast the processor goes meanwhile: a % of a core at 1.5 GHz is not
+    # a % at 4 GHz, and with less going on it slows down (schedutil).
+    ( i=0; while [ "$i" -lt $((span * 2)) ]; do awk '/cpu MHz/ { s += $4; n++ } END { if (n) printf "%.0f\n", s / n }' /proc/cpuinfo; sleep 0.5; i=$((i + 1)); done ) > "$state/bench.mhz" &
+    mhz=$!
     sleep "$span"
+    wait "$mhz" 2> /dev/null
     [ -n "$gpu" ] && kill "$gpu" 2> /dev/null
     for p in comp term mar wall; do eval "b_$p=\$(cpu \"\$$p\")"; done
     threads "$comp" > "$state/bench.c1"; threads "$term" > "$state/bench.t1"
@@ -55,12 +60,13 @@ measure() {
         if [ -s "$state/bench.gpu" ]; then
             awk -F', *' '{ u += $1; w += $2; n++ } END { if (n) printf "card:       %.0f %% busy, %.1f W (average of %d samples)\n", u / n, w / n, n }' "$state/bench.gpu"
         fi
+        [ -s "$state/bench.mhz" ] && awk '{ s += $1; n++ } END { if (n) printf "processor:  %.0f MHz on average\n", s / n }' "$state/bench.mhz"
         echo "compositor by thread:"
         join "$state/bench.c0" "$state/bench.c1" | awk -v t="$ticks" -v s="$span" '{ d = $5 - $3; if (d > 0) printf "  %-24s %5.1f %%\n", $2, d * 100 / t / s }' | sort -k2 -rn | head -12
         echo "terminal by thread:"
         join "$state/bench.t0" "$state/bench.t1" | awk -v t="$ticks" -v s="$span" '{ d = $5 - $3; if (d > 0) printf "  %-24s %5.1f %%\n", $2, d * 100 / t / s }' | sort -k2 -rn | head -6
     } > "$out"
-    rm -f "$state/bench.c0" "$state/bench.c1" "$state/bench.t0" "$state/bench.t1" "$state/bench.gpu"
+    rm -f "$state/bench.c0" "$state/bench.c1" "$state/bench.t0" "$state/bench.t1" "$state/bench.gpu" "$state/bench.mhz"
 }
 
 # The newest process whose command line says that.
