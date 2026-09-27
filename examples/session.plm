@@ -763,7 +763,8 @@ scene Session {
         let h = h.$i
         // Where it goes, from this monitor's corner: at Marea's left, at her height.
         let tx = screen.0.width * (isl - screen.index) + pick(isl, screen.0.width, screen.1.width) / 2 - 97
-        let ty = 46
+        // (Her height tucked in, as she usually is while a window is being used.)
+        let ty = 30
         // On its way it melts into water: its corners round off, it turns
         // Marea's colour and draws out along its path like a falling
         // drop; halfway a real drop takes over, with two droplets behind it,
