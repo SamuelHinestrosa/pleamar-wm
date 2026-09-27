@@ -13,6 +13,11 @@
 //   Super+Shift+Up/Down change places with the one before / after it
 //   Super+Tab  everything at a glance       Super+-/+  the leader narrower / wider
 //   Super+F    fullscreen, and back
+//   Super+W    tiled or free windows on this monitor (also the bar's button):
+//              free, each window stays where it is left and as big as it is
+//              made —edges and corner—, the green button maximizes it, and
+//              the one clicked comes over the rest. Back to tiled, each goes
+//              to its place; free again, each to where it was.
 //   Super+Space  Marea's search (the wallpaper and Marea start with it: autostart)
 //   Touchpad: three fingers down close, up fullscreen; four
 //   sideways, the keyboard to the next / previous window
@@ -93,6 +98,18 @@ scene Session {
     // be; let go there, and it is so (with a leader, the one carried leads).
     fact lay.0 = 0
     fact lay.1 = 0
+    // ── or free, as on Windows or KDE: each window where it is left and as big
+    // as it is made, the one touched on top. Per monitor; Super+W or the
+    // button in the bar. Each window remembers where it was free.
+    fact free.0 = 0
+    fact free.1 = 0
+    fact stamp.top = 0
+    // Where a window being resized was when it was taken.
+    fact g.x = 0
+    fact g.y = 0
+    fact g.w = 0
+    fact g.h = 0
+    fact sizing = -1
     let lay.here = pick(mon, lay.0, lay.1)
     let strip.x = pick(mon, screen.0.width, screen.1.width) / 2 - 5 * 60 / 2
     let strip.y = pick(mon, win.reserved.0.top, win.reserved.1.top) + 6
@@ -155,7 +172,7 @@ scene Session {
         let th = pick(L, if(p < 0.5, ah, sh), ah, rh, gh, if(p < 0.5, ah, sh))
         // Under the mouse while another is carried —measured on where it is,
         // not where it is shown moving aside—: it would change places with it.
-        let under = dragging >= 0 and dragging != i and win.$i.open and sc == mon and not on.strip and mouse.x >= tx and mouse.x < tx + tw and mouse.y >= ty and mouse.y < ty + th
+        let under = dragging >= 0 and dragging != i and win.$i.open and sc == mon and not on.strip and pick(sc, free.0, free.1) < 0.5 and mouse.x >= tx and mouse.x < tx + tw and mouse.y >= ty and mouse.y < ty + th
         on change under {
             over = if(under, i, if(over == i, -1, over))
         }
@@ -214,14 +231,57 @@ scene Session {
         let ox = pick(sc, win.reserved.0.left, win.reserved.1.left) + 40 + mod(p, cols) * (cell.w + 30) + (cell.w - tw * s) / 2
         let oy = pick(sc, win.reserved.0.top, win.reserved.1.top) + bar + 20 + floor(p / cols) * (cell.h + 30) + (cell.h - th * s) / 2
 
+        // ── free: where it was left, as big as it was made (all of the
+        // monitor, maximized) ──
+        fact fx.$i = 0
+        fact fy.$i = 0
+        fact fw.$i = 0
+        fact fh.$i = 0
+        fact maxed.$i = 0
+        fact stamp.$i = 0
+        let F = pick(sc, free.0, free.1)
+        let fr = F > 0.5 and not win.$i.fullscreen and not win.$i.dialog
+        let fgx = if(maxed.$i, x0 + gap, fx.$i)
+        let fgy = if(maxed.$i, y0, fy.$i)
+        let fgw = if(maxed.$i, Ws - 2 * gap, fw.$i)
+        let fgh = if(maxed.$i, ah, fh.$i)
+        let goal.x = if(fr, fgx, txv)
+        let goal.y = if(fr, fgy, tyv)
+        let goal.w = if(fr, fgw, twv)
+        let goal.h = if(fr, fgh, thv)
+        // Free for the first time: where it is now. Opened free: in the middle, a step down per slot.
+        on change F while fw.$i < 1 and win.$i.open {
+            fx.$i = x.$i
+            fy.$i = y.$i
+            fw.$i = w.$i
+            fh.$i = h.$i
+        }
+        // (What comes from the compositor is already new when the rules look.)
+        on change win.$i.open while win.$i.open and F > 0.5 {
+            fw.$i = Ws * 0.6
+            fh.$i = ah * 0.7
+            fx.$i = x0 + Ws * 0.2 + 28 * i
+            fy.$i = y0 + ah * 0.1 + 28 * i
+            maxed.$i = 0
+        }
+        on change win.$i.open while not win.$i.open {
+            fw.$i = 0
+            maxed.$i = 0
+        }
+        // The one that gets the keyboard comes over the rest.
+        on change win.$i.focused while win.$i.focused {
+            stamp.$i = stamp.top + 1
+            stamp.top = stamp.top + 1
+        }
+
         prop x.$i = 24 ~glide
         prop y.$i = 12 ~glide
         prop w.$i = 60 ~glide
         prop h.$i = 34 ~glide
-        follow x.$i = if(win.$i.open, if(overview, ox, txv), home.x)
-        follow y.$i = if(win.$i.open, if(overview, oy, tyv), home.y)
-        follow w.$i = if(win.$i.open, if(overview, tw * s, twv), 60)
-        follow h.$i = if(win.$i.open, if(overview, th * s, thv), 34)
+        follow x.$i = if(win.$i.open, if(overview, ox, goal.x), home.x)
+        follow y.$i = if(win.$i.open, if(overview, oy, goal.y), home.y)
+        follow w.$i = if(win.$i.open, if(overview, tw * s, goal.w), 60)
+        follow h.$i = if(win.$i.open, if(overview, th * s, goal.h), 34)
         // Carried with the mouse: how far from its place.
         prop dx.$i = 0 ~glide
         prop dy.$i = 0 ~glide
@@ -241,7 +301,7 @@ scene Session {
         // depend on which copy it is. Which monitor shows it goes in `show`.)
         let hollow.there = dragging == i and crossing
         prop hollow.$i = 0 ~140ms
-        follow hollow.$i = if(swaps or (dragging == i and over < 0 and not crossing) or hollow.there, 1, 0)
+        follow hollow.$i = if(not fr and (swaps or (dragging == i and over < 0 and not crossing) or hollow.there), 1, 0)
         // (Its own place as it would be: in the layout picked, if one is.)
         let hx = if(hollow.there, txg, if(dragging == i, txv, tx))
         let hy = if(hollow.there, tyg, if(dragging == i, tyv, ty))
@@ -253,12 +313,38 @@ scene Session {
             box { from: hx + 4, hy + 4; size: hw - 8, hh - 8; corner: 12; color: mint; opacity: 7% }
             box { from: hx + 4, hy + 4; size: hw - 8, hh - 8; corner: 12; stroke: 1.5; color: mint; opacity: 55% }
         }
+        // Where it is laid out, not where it is carried: a drag goes on while
+        // its zone still holds the point it was pressed on.
+        // (In a group of their own, just over the window's `z:`: where
+        // windows overlap, the one on top takes the mouse, and on its own
+        // window its edges and buttons go before what the program shows.)
         group {
+            z: stamp.$i + 0.5
+            zone box title.$i { from: x.$i, y.$i; size: w - 56, tb; cursor: pointer; active: here and not overview and not win.$i.dialog }
+            zone ellipse lead_zone.$i { at: x + w - 40, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog }
+            zone ellipse close_zone.$i { at: x + w - 20, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog }
+            // At a glance, the whole window is a button: pressing it chooses it.
+            zone box choose.$i { from: x, y; size: w, h; cursor: pointer; active: here and overview and not win.$i.dialog }
+            // Free: its edges and its corner make it bigger or smaller.
+            // (While it is being resized, where they were when taken: a drag
+            // goes on while its zone holds the point it was pressed on.)
+            let ex = if(sizing == i, g.x, x)
+            let ey = if(sizing == i, g.y, y)
+            let ew = if(sizing == i, g.w, w)
+            let eh = if(sizing == i, g.h, h)
+            zone box left_edge.$i { from: ex - 5, ey + tb; size: 10, eh - tb - 12; cursor: grab; active: here and fr and not maxed.$i and not overview }
+            zone box right_edge.$i { from: ex + ew - 5, ey + tb; size: 10, eh - tb - 12; cursor: grab; active: here and fr and not maxed.$i and not overview }
+            zone box bottom_edge.$i { from: ex + 12, ey + eh - 5; size: ew - 24, 10; cursor: grab; active: here and fr and not maxed.$i and not overview }
+            zone box corner.$i { from: ex + ew - 14, ey + eh - 14; size: 20, 20; cursor: grab; active: here and fr and not maxed.$i and not overview }
+        }
+        group {
+            // Over the others as it was last touched (free, they overlap).
+            z: stamp.$i
             // Carried, it is drawn over the others, further down.
             show: seen.$i > 0.01 and sc == screen.index and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog
             opacity: seen.$i
             pivot: x + w / 2, y + h / 2
-            scale: 0.92 + 0.08 * seen.$i + 0.025 * pick.$i.hover * ov
+            scale: 0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov
             body {
                 color: #0c0e10
                 shadow: 0, 14 + 8 * lit.$i, 34, 45% + 20% * lit.$i
@@ -271,20 +357,57 @@ scene Session {
                 clip box { from: x, y; size: w, h; corner: 12 }
                 box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: twv, thv - tb; show: here and not win.$i.fullscreen }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: goal.w, goal.h - tb; show: here and not win.$i.fullscreen }
             }
-            // Its two buttons: to the front, and away.
+            // Its two buttons: to the front (free, the whole monitor), and away.
             ellipse { at: x + w - 40, y + tb / 2; radius: 5.5 + lead_zone.$i.hover; color: mint; opacity: 35% + 50% * lead_zone.$i.hover }
             ellipse { at: x + w - 20, y + tb / 2; radius: 5.5 + close_zone.$i.hover; color: coral; opacity: 45% + 50% * close_zone.$i.hover }
             box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: lit.$i * 70% * (1 - ov) }
         }
-        // Where it is laid out, not where it is carried: a drag goes on while
-        // its zone still holds the point it was pressed on.
-        zone box title.$i { from: x.$i, y.$i; size: w - 56, tb; cursor: pointer; active: here and not overview and not win.$i.dialog }
-        zone ellipse lead_zone.$i { at: x + w - 40, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog }
-        zone ellipse close_zone.$i { at: x + w - 20, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog }
-        // At a glance, the whole window is a button: pressing it chooses it.
-        zone box pick.$i { from: x, y; size: w, h; cursor: pointer; active: here and overview and not win.$i.dialog }
+        // Taken by an edge or the corner: where it was and how big.
+        on press left_edge.$i {
+            sizing = i
+            g.x = fx.$i
+            g.y = fy.$i
+            g.w = fw.$i
+            g.h = fh.$i
+        }
+        on press right_edge.$i {
+            sizing = i
+            g.x = fx.$i
+            g.y = fy.$i
+            g.w = fw.$i
+            g.h = fh.$i
+        }
+        on press bottom_edge.$i {
+            sizing = i
+            g.x = fx.$i
+            g.y = fy.$i
+            g.w = fw.$i
+            g.h = fh.$i
+        }
+        on press corner.$i {
+            sizing = i
+            g.x = fx.$i
+            g.y = fy.$i
+            g.w = fw.$i
+            g.h = fh.$i
+        }
+        on release left_edge.$i { sizing = -1 }
+        on release right_edge.$i { sizing = -1 }
+        on release bottom_edge.$i { sizing = -1 }
+        on release corner.$i { sizing = -1 }
+        on drag left_edge.$i {
+            fx.$i = min(g.x + drag.dx, g.x + g.w - 240)
+            fw.$i = max(g.w - drag.dx, 240)
+        }
+        on drag right_edge.$i { fw.$i = max(g.w + drag.dx, 240) }
+        on drag bottom_edge.$i { fh.$i = max(g.h + drag.dy, 140) }
+        on drag corner.$i {
+            fw.$i = max(g.w + drag.dx, 240)
+            fh.$i = max(g.h + drag.dy, 140)
+        }
+        on press lead_zone.$i while fr { toggle maxed.$i }
         on press title.$i {
             focus win.$i
             grab.x = pointer.x - x.$i
@@ -307,6 +430,12 @@ scene Session {
             dy.$i: mouse.y - grab.y - y.$i ~0ms
             dx.$i: 0 after 30ms
             dy.$i: 0 after 30ms
+        }
+        // Free: it stays where it was let go (on the monitor it was let go on).
+        on release title.$i while pick(mon, free.0, free.1) > 0.5 and picked < 0 {
+            fx.$i = mouse.x - grab.x
+            fy.$i = max(mouse.y - grab.y, pick(mon, win.reserved.0.top, win.reserved.1.top))
+            maxed.$i = 0
         }
         // Let go on another one (the one under it, as the others showed).
         on release title.$i while over >= 0 and not crossing { swap win.$i with win(over) }
@@ -331,8 +460,14 @@ scene Session {
         }
         // Let go on a layout of the strip: that monitor takes it, and with a
         // leader, the one carried leads.
-        on release title.$i while picked >= 0 and mon == 0 { lay.0 = choice }
-        on release title.$i while picked >= 0 and mon == 1 { lay.1 = choice }
+        on release title.$i while picked >= 0 and mon == 0 {
+            lay.0 = choice
+            free.0 = 0
+        }
+        on release title.$i while picked >= 0 and mon == 1 {
+            lay.1 = choice
+            free.1 = 0
+        }
         on release title.$i while leads { promote win.$i }
         on release title.$i {
             over = -1
@@ -340,12 +475,13 @@ scene Session {
         // The keyboard goes to the window the mouse is over, as it enters it:
         // no click needed first (Super+Q closes the one under the mouse).
         let pointed = win.$i.open and sc == mon and not win.$i.dialog and mouse.x >= x.$i and mouse.x < x.$i + w.$i and mouse.y >= y.$i and mouse.y < y.$i + h.$i
-        on change pointed while dragging < 0 and not overview and fs.on < 0.5 {
+        // (Free, they overlap: the keyboard goes with a click, as on Windows.)
+        on change pointed while dragging < 0 and not overview and fs.on < 0.5 and pick(mon, free.0, free.1) < 0.5 {
             focus win(if(pointed, i, -1))
         }
-        on press lead_zone.$i { promote win.$i }
+        on press lead_zone.$i while not fr { promote win.$i }
         on press close_zone.$i { close win.$i }
-        on press pick.$i {
+        on press choose.$i {
             focus win.$i
             overview = false
         }
@@ -376,11 +512,22 @@ scene Session {
             text "At a glance" { at: 62, 15; anchor: center; size: 12; weight: 500; color: ink; opacity: 70% + 30% * glance.hover }
             zone box glance { from: 0, 0; size: 124, 30; corner: 15; cursor: pointer }
         }
+        // Tiled or free: what this monitor is, and the other it can be.
+        group {
+            size: 124, 30
+            let free.here = pick(screen.index, free.0, free.1)
+            box { from: 0, 0; size: 124, 30; corner: 15; color: mix(mix(#1b2024, #22302b, freeb.hover), #2b4a40, free.here) }
+            text "Free windows" { at: 62, 15; anchor: center; size: 12; weight: 500; color: ink; opacity: (70% + 30% * freeb.hover) * (1 - free.here) }
+            text "Tiled" { at: 62, 15; anchor: center; size: 12; weight: 500; color: ink; opacity: (70% + 30% * freeb.hover) * free.here }
+            zone box freeb { from: 0, 0; size: 124, 30; corner: 15; cursor: pointer }
+        }
     }
     on press app.0 { launch "kitty" }
     on press app.1 { launch "gnome-calculator" }
     on press app.2 { launch "gnome-text-editor" }
     on press glance { toggle overview }
+    on press freeb while screen.index == 0 { free.0 = 1 - free.0 }
+    on press freeb while screen.index == 1 { free.1 = 1 - free.1 }
     text "{win.count} of 6 · drag a title bar to move it · Super+T terminal · Super+Q close · Super+arrows keyboard · Super+Shift+arrows move · Super+Tab at a glance · Super+Space search · Super+L lock · Ctrl+Alt+Backspace leaves" {
         // Down in the corner: the top middle is Marea's.
         at: W - 18, H - 16 - pick(screen.index, win.reserved.0.bottom, win.reserved.1.bottom); anchor: right center; size: 11; color: ink; opacity: 55%
@@ -547,6 +694,9 @@ scene Session {
         }
     }
     on key Super+f { fullscreen win(win.focus) }
+    // Tiled or free, on the monitor under the mouse.
+    on key Super+w while mon == 0 { free.0 = 1 - free.0 }
+    on key Super+w while mon == 1 { free.1 = 1 - free.1 }
 
     // ── the touchpad: as on Hyprland ──
     // Three fingers down closes; up, fullscreen; four sideways, the keyboard
