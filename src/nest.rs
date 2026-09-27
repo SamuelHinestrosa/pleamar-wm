@@ -18,7 +18,12 @@
 //!
 //! What it does not do yet: XWayland, and more than one scale.
 
+#[path = "x11.rs"]
+mod x11;
+
 use crate::layers::{self, ClientLayer, ClientPiece, ToLayers};
+use smithay::wayland::xwayland_shell::XWaylandShellState;
+use smithay::xwayland::{X11Surface, X11Wm, XWaylandClientData};
 use pleamar::scene::{DmabufPiece, NestEvent, PieceContent, ToNest, ToRender, WindowPiece};
 use smithay::delegate_layer_shell;
 use smithay::input::pointer::RelativeMotionEvent;
@@ -129,8 +134,90 @@ struct Content {
     changed: bool,
 }
 
+/// A program's window: a Wayland one (xdg-shell), or an X11 one (XWayland).
+/// Both are a surface of the compositor; they differ in how they are asked
+/// for a size, told they have the keyboard, or closed.
+#[derive(Clone, PartialEq)]
+enum Toplevel {
+    Xdg(ToplevelSurface),
+    X11(X11Surface),
+}
+
+impl Toplevel {
+    fn send_close(&self) {
+        match self {
+            Toplevel::Xdg(t) => t.send_close(),
+            Toplevel::X11(x) => {
+                let _ = x.close();
+            }
+        }
+    }
+
+    /// The size the scene gives it; an X11 one keeps where it is on the desktop.
+    fn resize(&self, w: i32, h: i32) {
+        match self {
+            Toplevel::Xdg(t) => {
+                t.with_pending_state(|s| s.size = Some((w.max(1), h.max(1)).into()));
+                if t.is_initial_configure_sent() {
+                    t.send_pending_configure();
+                }
+            }
+            Toplevel::X11(x) => {
+                let loc = x.geometry().loc;
+                let _ = x.configure(smithay::utils::Rectangle::new(loc, (w.max(1), h.max(1)).into()));
+            }
+        }
+    }
+
+    fn set_activated(&self, yes: bool) {
+        match self {
+            Toplevel::Xdg(t) => {
+                let changed = t.with_pending_state(|s| {
+                    let has = s.states.contains(xdg_toplevel::State::Activated);
+                    if yes && !has {
+                        s.states.set(xdg_toplevel::State::Activated);
+                    } else if !yes && has {
+                        s.states.unset(xdg_toplevel::State::Activated);
+                    }
+                    has != yes
+                });
+                if changed && t.is_initial_configure_sent() {
+                    t.send_pending_configure();
+                }
+            }
+            Toplevel::X11(x) => {
+                if x.is_activated() != yes {
+                    let _ = x.set_activated(yes);
+                }
+            }
+        }
+    }
+
+    fn set_fullscreen(&self, yes: bool) {
+        match self {
+            Toplevel::Xdg(t) => {
+                t.with_pending_state(|s| {
+                    if yes {
+                        s.states.set(xdg_toplevel::State::Fullscreen);
+                    } else {
+                        s.states.unset(xdg_toplevel::State::Fullscreen);
+                    }
+                });
+                if t.is_initial_configure_sent() {
+                    t.send_pending_configure();
+                }
+            }
+            Toplevel::X11(x) => {
+                let _ = x.set_fullscreen(yes);
+            }
+        }
+    }
+}
+
 struct Window {
-    toplevel: ToplevelSurface,
+    toplevel: Toplevel,
+    /// Its surface in the compositor (for an X11 one, the one XWayland made for it).
+    surface: WlSurface,
     title: String,
     app: String,
     /// Where the window itself is inside its buffer: a program that draws
@@ -270,7 +357,7 @@ struct State {
     autostart: Vec<String>,
     /// One per slot of the scene. A window that finds them all taken waits in `waiting`.
     slots: Vec<Option<Window>>,
-    waiting: Vec<ToplevelSurface>,
+    waiting: Vec<(Toplevel, WlSurface)>,
     /// The order the scene lays them out in: the first is the one that leads.
     order: Vec<usize>,
     /// Where the next one goes: turning round, so that a slot just freed —whose
@@ -333,8 +420,16 @@ struct State {
     /// Who watches a monitor's power (wlr-output-power-management), and which.
     powers: Vec<(ZwlrOutputPowerV1, usize)>,
     socket: String,
-    /// XWayland's display (`:1`), once it is ready.
+    /// XWayland's display (`:1`), once it is ready; while it starts, what is
+    /// launched waits for it.
     x_display: Option<String>,
+    x_starting: bool,
+    xwm: Option<X11Wm>,
+    xwayland_shell: XWaylandShellState,
+    /// X11 windows mapped whose surface has not arrived yet.
+    x11_pending: Vec<X11Surface>,
+    /// X11's menus and tooltips (override-redirect): drawn with their window.
+    unmanaged: Vec<X11Surface>,
     start: Instant,
     quit: bool,
 }
@@ -515,6 +610,11 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         next_number: 0,
         socket: socket.clone(),
         x_display: None,
+        x_starting: false,
+        xwm: None,
+        xwayland_shell: XWaylandShellState::new::<State>(&dh),
+        x11_pending: Vec::new(),
+        unmanaged: Vec::new(),
         start: Instant::now(),
         quit: false,
         dh,
@@ -526,6 +626,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         }
     }
     state.write_desktop();
+    state.start_xwayland();
     state.export_environment();
     println!("windows · programs connect at WAYLAND_DISPLAY={socket}");
     let _ = state.to_render.send(ToRender::Nest(NestEvent::Socket(socket)));
@@ -547,7 +648,8 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         event_loop.dispatch(Some(Duration::from_millis(100)), &mut state).map_err(|e| e.to_string())?;
         state.popups.cleanup();
         state.compose_dirty();
-        if !state.autostart.is_empty() && (state.dmabuf_global.is_some() || state.start.elapsed() > Duration::from_secs(3)) {
+        let x_ready = !state.x_starting || state.start.elapsed() > Duration::from_secs(5);
+        if !state.autostart.is_empty() && x_ready && (state.dmabuf_global.is_some() || state.start.elapsed() > Duration::from_secs(3)) {
             for line in std::mem::take(&mut state.autostart) {
                 println!("windows · starting: {line}");
                 state.launch(&line);
@@ -576,7 +678,7 @@ impl State {
     }
 
     fn window_of(&self, surface: &WlSurface) -> Option<usize> {
-        self.slots.iter().position(|w| w.as_ref().is_some_and(|w| w.toplevel.wl_surface() == surface))
+        self.slots.iter().position(|w| w.as_ref().is_some_and(|w| &w.surface == surface))
     }
 
     fn handle(&mut self, m: ToNest) {
@@ -602,17 +704,14 @@ impl State {
                     *a = Some((w, h));
                 }
                 if let Some(Some(win)) = self.slots.get(slot) {
-                    win.toplevel.with_pending_state(|s| s.size = Some((w.max(1), h.max(1)).into()));
-                    if win.toplevel.is_initial_configure_sent() {
-                        win.toplevel.send_pending_configure();
-                    }
+                    win.toplevel.resize(w, h);
                 }
             }
             ToNest::Pointer { slot, x, y } => {
                 let Some(Some(win)) = self.slots.get(slot) else { return };
                 let g = win.geometry;
                 let at: Point<f64, Logical> = (g[0] as f64 + x, g[1] as f64 + y).into();
-                let root = win.toplevel.wl_surface().clone();
+                let root = win.surface.clone();
                 let under = self.surface_under(&root, g, at).map(|(s, o)| (s, o.to_f64()));
                 self.pointer_on = Some(slot);
                 self.panel_pointer = None;
@@ -638,7 +737,7 @@ impl State {
                 if down {
                     if let Some(slot) = self.pointer_on {
                         if let Some(Some(w)) = self.slots.get(slot) {
-                            let root = w.toplevel.wl_surface().clone();
+                            let root = w.surface.clone();
                             self.dismiss_popups_not_under(&root);
                         }
                         if self.focus != Some(slot) {
@@ -681,7 +780,7 @@ impl State {
             }
             ToNest::HostFocus(yes) => {
                 self.host_focus = yes;
-                let target = if yes { self.focus.and_then(|s| self.slots[s].as_ref()).map(|w| w.toplevel.wl_surface().clone()) } else { None };
+                let target = if yes { self.focus.and_then(|s| self.slots[s].as_ref()).map(|w| w.surface.clone()) } else { None };
                 let k = self.keyboard.clone();
                 k.set_focus(self, target, serial);
             }
@@ -710,6 +809,9 @@ impl State {
                 }
             }
             ToNest::Shown { slot, monitor, rect } => {
+                if let Some(m) = layers::monitors().iter().find(|m| m.name == monitor) {
+                    self.x11_shown_at(slot, (m.x + rect[0], m.y + rect[1]));
+                }
                 if let Some(Some(w)) = self.slots.get_mut(slot) {
                     w.shown = Some((monitor, rect));
                 }
@@ -722,7 +824,7 @@ impl State {
                     if w.screen != screen {
                         let (from, to) = (self.outputs.get(w.screen).cloned(), self.outputs.get(screen).cloned());
                         w.screen = screen;
-                        let surface = w.toplevel.wl_surface().clone();
+                        let surface = w.surface.clone();
                         if let (Some(from), Some(to)) = (from, to) {
                             from.leave(&surface);
                             to.enter(&surface);
@@ -803,6 +905,34 @@ impl State {
         }
     }
 
+    /// A window's title, to the scene and to whoever lists the windows.
+    fn set_title(&mut self, slot: usize, title: String) {
+        if let Some(Some(w)) = self.slots.get_mut(slot) {
+            w.title = title.clone();
+            w.listed.send_title(&title);
+            w.listed.send_done();
+        }
+        for (_, h) in self.toplevel_handles.iter().filter(|(s, _)| *s == slot) {
+            h.title(title.clone());
+            h.done();
+        }
+        self.tell(NestEvent::Title(slot, title));
+    }
+
+    /// Which program it is (its app id; an X11 one's class).
+    fn set_app(&mut self, slot: usize, app: String) {
+        if let Some(Some(w)) = self.slots.get_mut(slot) {
+            w.app = app.clone();
+            w.listed.send_app_id(&app);
+            w.listed.send_done();
+        }
+        for (_, h) in self.toplevel_handles.iter().filter(|(s, _)| *s == slot) {
+            h.app_id(app.clone());
+            h.done();
+        }
+        self.tell(NestEvent::App(slot, app));
+    }
+
     /// A window to fullscreen or back: the program is told (it hides its own
     /// bars), and the scene, which decides where it goes. The monitors are
     /// told which have one.
@@ -812,16 +942,7 @@ impl State {
             return;
         }
         w.fullscreen = yes;
-        w.toplevel.with_pending_state(|s| {
-            if yes {
-                s.states.set(xdg_toplevel::State::Fullscreen);
-            } else {
-                s.states.unset(xdg_toplevel::State::Fullscreen);
-            }
-        });
-        if w.toplevel.is_initial_configure_sent() {
-            w.toplevel.send_pending_configure();
-        }
+        w.toplevel.set_fullscreen(yes);
         self.tell(NestEvent::Fullscreen(slot, yes));
         self.tell_fullscreen();
     }
@@ -841,9 +962,16 @@ impl State {
         let mut c = std::process::Command::new("sh");
         c.arg("-c").arg(command);
         c.env("WAYLAND_DISPLAY", &self.socket);
-        // Without X: with DISPLAY a program that prefers X11 would open on the
-        // real desktop instead of here.
-        c.env_remove("DISPLAY");
+        // X11 through our XWayland; without it, no DISPLAY at all: a program
+        // that prefers X11 would open on the real desktop instead of here.
+        match &self.x_display {
+            Some(d) => {
+                c.env("DISPLAY", d);
+            }
+            None => {
+                c.env_remove("DISPLAY");
+            }
+        }
         // Nor Hyprland's: a program that asks it things would get another desktop's answers.
         c.env_remove("HYPRLAND_INSTANCE_SIGNATURE");
         // pleamar-wm itself by its name (`pleamar-wm hyprctl`, what Marea asks instead).
@@ -878,21 +1006,16 @@ impl State {
         self.focus = slot.filter(|s| self.slots.get(*s).is_some_and(Option::is_some));
         for (k, w) in self.slots.iter().enumerate() {
             let Some(w) = w else { continue };
-            let active = Some(k) == self.focus;
-            let changed = w.toplevel.with_pending_state(|s| {
-                let has = s.states.contains(xdg_toplevel::State::Activated);
-                if active && !has {
-                    s.states.set(xdg_toplevel::State::Activated);
-                } else if !active && has {
-                    s.states.unset(xdg_toplevel::State::Activated);
-                }
-                has != active
-            });
-            if changed && w.toplevel.is_initial_configure_sent() {
-                w.toplevel.send_pending_configure();
+            w.toplevel.set_activated(Some(k) == self.focus);
+        }
+        // An X11 one with the keyboard goes over the other X11 ones: its menus
+        // and dialogs are found above it.
+        if let Some(Toplevel::X11(x)) = self.focus.and_then(|s| self.slots[s].as_ref()).map(|w| w.toplevel.clone()) {
+            if let Some(wm) = self.xwm.as_mut() {
+                let _ = wm.raise_window(&x);
             }
         }
-        let target = if self.host_focus { self.focus.and_then(|s| self.slots[s].as_ref()).map(|w| w.toplevel.wl_surface().clone()) } else { None };
+        let target = if self.host_focus { self.focus.and_then(|s| self.slots[s].as_ref()).map(|w| w.surface.clone()) } else { None };
         let k = self.keyboard.clone();
         k.set_focus(self, target, SERIAL_COUNTER.next_serial());
         if before != self.focus {
@@ -910,6 +1033,14 @@ impl State {
     /// The surface under a point of the window, in the window's surface
     /// coordinates: a menu first, then the window and its subsurfaces.
     fn surface_under(&self, root: &WlSurface, g: [i32; 4], at: Point<f64, Logical>) -> Option<(WlSurface, Point<i32, Logical>)> {
+        // An X11 window's menus, over it.
+        if let Some(slot) = self.window_of(root) {
+            for (surface, o) in self.unmanaged_of(slot).iter().rev() {
+                if let Some(found) = hit_tree(surface, at, *o) {
+                    return Some(found);
+                }
+            }
+        }
         let popups: Vec<(PopupKind, Point<i32, Logical>)> = PopupManager::popups_for_surface(root).collect();
         for (popup, offset) in popups.iter().rev() {
             let origin = Point::<i32, Logical>::from((g[0], g[1])) + *offset - popup.geometry().loc;
@@ -1001,7 +1132,7 @@ impl State {
             let to = new_index(w.screen).unwrap_or(0);
             if to != w.screen || new_index(w.screen).is_none() {
                 w.screen = to;
-                moved.push((slot, to, w.toplevel.wl_surface().clone()));
+                moved.push((slot, to, w.surface.clone()));
             }
         }
         for (slot, to, surface) in moved {
@@ -1368,30 +1499,40 @@ impl State {
     }
 
     /// A slot for a new window, if there is one free: turning round from the last one given.
-    fn place(&mut self, toplevel: ToplevelSurface) {
+    fn place(&mut self, toplevel: Toplevel, surface: WlSurface) {
         let n = self.slots.len();
         let Some(slot) = (0..n).map(|k| (self.next_slot + k) % n).find(|k| self.slots[*k].is_none()) else {
-            self.waiting.push(toplevel);
+            self.waiting.push((toplevel, surface));
             return;
         };
         self.next_slot = (slot + 1) % n.max(1);
-        let (title, app) = with_states(toplevel.wl_surface(), |s| {
-            let d = s.data_map.get::<XdgToplevelSurfaceData>().map(|d| d.lock().unwrap());
-            d.map_or((String::new(), String::new()), |d| (d.title.clone().unwrap_or_default(), d.app_id.clone().unwrap_or_default()))
-        });
+        let (title, app) = match &toplevel {
+            Toplevel::Xdg(_) => with_states(&surface, |s| {
+                let d = s.data_map.get::<XdgToplevelSurfaceData>().map(|d| d.lock().unwrap());
+                d.map_or((String::new(), String::new()), |d| (d.title.clone().unwrap_or_default(), d.app_id.clone().unwrap_or_default()))
+            }),
+            Toplevel::X11(x) => (x.title(), x.class()),
+        };
         // Its size, the one the scene already has for that slot; tiled on all
         // sides, so it does not draw a shadow or round corners of its own: the
         // scene decides how it looks.
         let size = self.asked[slot];
-        toplevel.with_pending_state(|s| {
-            s.size = size.map(|(w, h)| (w.max(1), h.max(1)).into());
-            for t in [xdg_toplevel::State::TiledLeft, xdg_toplevel::State::TiledRight, xdg_toplevel::State::TiledTop, xdg_toplevel::State::TiledBottom] {
-                s.states.set(t);
+        match &toplevel {
+            Toplevel::Xdg(t) => t.with_pending_state(|s| {
+                s.size = size.map(|(w, h)| (w.max(1), h.max(1)).into());
+                for t in [xdg_toplevel::State::TiledLeft, xdg_toplevel::State::TiledRight, xdg_toplevel::State::TiledTop, xdg_toplevel::State::TiledBottom] {
+                    s.states.set(t);
+                }
+            }),
+            Toplevel::X11(_) => {
+                if let Some((w, h)) = size {
+                    toplevel.resize(w, h);
+                }
             }
-        });
-        self.outputs[self.on_screen.min(self.outputs.len() - 1)].enter(toplevel.wl_surface());
+        }
+        self.outputs[self.on_screen.min(self.outputs.len() - 1)].enter(&surface);
         let listed = self.toplevel_list.new_toplevel::<State>(title.clone(), app.clone());
-        self.slots[slot] = Some(Window { toplevel, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen: self.on_screen, shown: None, listed, fullscreen: false });
+        self.slots[slot] = Some(Window { toplevel, surface, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen: self.on_screen, shown: None, listed, fullscreen: false });
         self.order.push(slot);
         self.tell(NestEvent::Opened { slot, title, app, screen: self.on_screen });
         self.tell(NestEvent::Order(self.order.clone()));
@@ -1401,8 +1542,8 @@ impl State {
         self.set_focus(Some(slot));
     }
 
-    fn forget(&mut self, toplevel: &ToplevelSurface) {
-        self.waiting.retain(|t| t != toplevel);
+    fn forget(&mut self, toplevel: &Toplevel) {
+        self.waiting.retain(|(t, _)| t != toplevel);
         let Some(slot) = self.slots.iter().position(|w| w.as_ref().is_some_and(|w| &w.toplevel == toplevel)) else { return };
         if let Some(w) = self.slots[slot].take() {
             self.toplevel_list.remove_toplevel(&w.listed);
@@ -1427,8 +1568,8 @@ impl State {
         }
         // One that was waiting takes its place.
         if !self.waiting.is_empty() {
-            let t = self.waiting.remove(0);
-            self.place(t);
+            let (t, s) = self.waiting.remove(0);
+            self.place(t, s);
         }
     }
 
@@ -1460,6 +1601,9 @@ impl State {
             for (popup, offset) in PopupManager::popups_for_surface(&root) {
                 let origin = Point::<i32, Logical>::from((g[0], g[1])) + offset - popup.geometry().loc;
                 pieces_of(popup.wl_surface(), (origin.x, origin.y), &sent, &mut pieces);
+            }
+            for (surface, at) in self.unmanaged_of(slot) {
+                pieces_of(&surface, at, &sent, &mut pieces);
             }
             if let Some(Some(win)) = self.slots.get_mut(slot) {
                 win.geometry = g;
@@ -1651,6 +1795,9 @@ impl CompositorHandler for State {
     }
 
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
+        if let Some(x) = client.get_data::<XWaylandClientData>() {
+            return &x.compositor_state;
+        }
         &client.get_data::<ClientState>().unwrap().compositor
     }
 
@@ -1797,9 +1944,10 @@ impl CompositorHandler for State {
             self.dirty.push(root);
         // A window says nothing until it is answered: the first configure goes on its first commit.
         } else if let Some(slot) = self.window_of(&root) {
-            let t = self.slots[slot].as_ref().unwrap().toplevel.clone();
-            if !t.is_initial_configure_sent() {
-                t.send_configure();
+            if let Some(Toplevel::Xdg(t)) = self.slots[slot].as_ref().map(|w| w.toplevel.clone()) {
+                if !t.is_initial_configure_sent() {
+                    t.send_configure();
+                }
             }
             self.dirty.push(root);
         } else if let Some(popup) = self.popups.find_popup(&root) {
@@ -1813,7 +1961,12 @@ impl CompositorHandler for State {
             if let Ok(owner) = smithay::desktop::find_popup_root_surface(&popup) {
                 self.dirty.push(owner);
             }
-        } else if let Some(t) = self.waiting.iter().find(|t| t.wl_surface() == &root).cloned() {
+        } else if let Some(x) = self.unmanaged.iter().find(|x| x.wl_surface().as_ref() == Some(&root)).cloned() {
+            // An X11 menu or tooltip: drawn with its window.
+            if let Some(s) = self.unmanaged_owner(&x).and_then(|k| self.slots[k].as_ref()).map(|w| w.surface.clone()) {
+                self.dirty.push(s);
+            }
+        } else if let Some((Toplevel::Xdg(t), _)) = self.waiting.iter().find(|(_, s)| s == &root).cloned() {
             if !t.is_initial_configure_sent() {
                 t.send_configure();
             }
@@ -1862,41 +2015,24 @@ impl XdgShellHandler for State {
     }
 
     fn new_toplevel(&mut self, surface: ToplevelSurface) {
-        self.place(surface);
+        let s = surface.wl_surface().clone();
+        self.place(Toplevel::Xdg(surface), s);
     }
 
     fn toplevel_destroyed(&mut self, surface: ToplevelSurface) {
-        self.forget(&surface);
+        self.forget(&Toplevel::Xdg(surface));
     }
 
     fn title_changed(&mut self, surface: ToplevelSurface) {
         let Some(slot) = self.window_of(surface.wl_surface()) else { return };
         let title = with_states(surface.wl_surface(), |s| s.data_map.get::<XdgToplevelSurfaceData>().and_then(|d| d.lock().unwrap().title.clone())).unwrap_or_default();
-        if let Some(Some(w)) = self.slots.get_mut(slot) {
-            w.title = title.clone();
-            w.listed.send_title(&title);
-            w.listed.send_done();
-        }
-        for (_, h) in self.toplevel_handles.iter().filter(|(s, _)| *s == slot) {
-            h.title(title.clone());
-            h.done();
-        }
-        self.tell(NestEvent::Title(slot, title));
+        self.set_title(slot, title);
     }
 
     fn app_id_changed(&mut self, surface: ToplevelSurface) {
         let Some(slot) = self.window_of(surface.wl_surface()) else { return };
         let app = with_states(surface.wl_surface(), |s| s.data_map.get::<XdgToplevelSurfaceData>().and_then(|d| d.lock().unwrap().app_id.clone())).unwrap_or_default();
-        if let Some(Some(w)) = self.slots.get_mut(slot) {
-            w.app = app.clone();
-            w.listed.send_app_id(&app);
-            w.listed.send_done();
-        }
-        for (_, h) in self.toplevel_handles.iter().filter(|(s, _)| *s == slot) {
-            h.app_id(app.clone());
-            h.done();
-        }
-        self.tell(NestEvent::App(slot, app));
+        self.set_app(slot, app);
     }
 
     fn new_popup(&mut self, surface: PopupSurface, positioner: PositionerState) {
@@ -2015,6 +2151,14 @@ impl SeatHandler for State {
 
 impl SelectionHandler for State {
     type SelectionUserData = ();
+
+    fn new_selection(&mut self, ty: smithay::wayland::selection::SelectionTarget, source: Option<smithay::wayland::selection::SelectionSource>, _: Seat<Self>) {
+        x11::wayland_copied(self, ty, source.map(|s| s.mime_types()));
+    }
+
+    fn send_selection(&mut self, ty: smithay::wayland::selection::SelectionTarget, mime_type: String, fd: std::os::fd::OwnedFd, _: Seat<Self>, _: &()) {
+        x11::wayland_pastes(self, ty, mime_type, fd);
+    }
 }
 
 impl DataDeviceHandler for State {
