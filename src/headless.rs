@@ -215,6 +215,12 @@ impl pleamar::Platform for Headless {
                         "down" | "up" => {
                             route.button(&screens, 0x110, what == "down");
                         }
+                        // `wheel:-1` a notch down (as the session tells it: up is positive).
+                        _ if what.starts_with("wheel:") => {
+                            if let Ok(n) = what[6..].parse::<f32>() {
+                                route.wheel(n);
+                            }
+                        }
                         _ if what.starts_with("key:") => {
                             let mut parts = what[4..].splitn(2, ':');
                             let name = parts.next().unwrap_or("");
