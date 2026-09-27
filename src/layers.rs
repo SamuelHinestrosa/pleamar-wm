@@ -42,6 +42,9 @@ pub enum ToLayers {
     FrameDone,
     /// Buffers a monitor no longer reads.
     Released(Vec<u64>),
+    /// A picture a program asked for (wlr-screencopy): its pixels, BGRA,
+    /// row after row with no padding; none if it could not be taken.
+    Captured { id: u64, pixels: Option<Vec<u8>> },
 }
 
 /// A program's surface on a monitor: where, at what level, and what it shows.
@@ -60,6 +63,9 @@ pub struct ClientLayer {
     pub keyboard: u8,
     /// Where what is behind it is shown blurred (ext-background-effect), from its corner.
     pub blur: Vec<[i32; 4]>,
+    /// Which program it is (0: none known), so that its own changes do not
+    /// count as «something changed behind» for its own pictures.
+    pub owner: u64,
 }
 
 pub struct ClientPiece {
@@ -204,13 +210,13 @@ pub fn show(monitor: usize, layer: ClientLayer) {
         if same_place {
             if let Some(n) = &new {
                 for p in n.pieces.iter().filter(|p| p.content.is_some()) {
-                    st.changed.push([n.rect[0] + p.at.0, n.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32]);
+                    st.changed.push(([n.rect[0] + p.at.0, n.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32], n.owner));
                 }
             }
         } else {
             for l in old.iter().chain(new.iter()) {
                 for p in &l.pieces {
-                    st.changed.push([l.rect[0] + p.at.0, l.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32]);
+                    st.changed.push(([l.rect[0] + p.at.0, l.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32], l.owner));
                 }
             }
         }
@@ -247,7 +253,7 @@ pub fn hide(id: u64) {
         if let Some(i) = st.clients.iter().position(|c| c.id == id) {
             let old = st.clients.remove(i);
             for p in &old.pieces {
-                st.changed.push([old.rect[0] + p.at.0, old.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32]);
+                st.changed.push(([old.rect[0] + p.at.0, old.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32], old.owner));
             }
             for p in old.pieces {
                 if let (Some(PieceContent::Dmabuf(_)), Some(b)) = (&p.content, p.buffer) {
@@ -262,6 +268,33 @@ pub fn hide(id: u64) {
     }
     if !unread.is_empty() {
         tell(ToLayers::Released(unread));
+    }
+}
+
+/// A picture of that piece of that monitor (x, y, w, h), for a program:
+/// taken the next time it is put together.
+/// With `on_change` (copy_with_damage), not before something in that piece
+/// changes: it does not make the monitor be put together, it waits for it.
+pub fn capture(monitor: usize, id: u64, piece: [i32; 4], on_change: bool, owner: u64) {
+    let monitors = MONITORS.lock().unwrap();
+    let Some((_, sc)) = monitors.get(monitor) else {
+        drop(monitors);
+        tell(ToLayers::Captured { id, pixels: None });
+        return;
+    };
+    let (lock, cv) = &**sc;
+    let mut st = lock.lock().unwrap();
+    st.captures.push((id, piece, on_change, owner));
+    if !on_change {
+        st.dirty = true;
+        cv.notify_all();
+    }
+}
+
+/// A picture no longer wanted: its program let it go before it was taken.
+pub fn uncapture(id: u64) {
+    for (_, sc) in MONITORS.lock().unwrap().iter() {
+        sc.0.lock().unwrap().captures.retain(|c| c.0 != id);
     }
 }
 

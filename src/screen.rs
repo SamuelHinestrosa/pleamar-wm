@@ -71,8 +71,13 @@ pub struct ScreenState {
     pub forget: Vec<u64>,
     /// What has changed on it since it was last put together, on the monitor
     /// (x, y, w, h); `changed_all` when all of it may have.
-    pub changed: Vec<[i32; 4]>,
+    /// And whose each change is (0, the scene's).
+    pub changed: Vec<([i32; 4], u64)>,
     pub changed_all: bool,
+    /// Pictures programs asked for: which, and of what piece.
+    /// With `true`, not before something in that piece changes.
+    /// And the program that asked: its own changes do not count for it.
+    pub captures: Vec<(u64, [i32; 4], bool, u64)>,
     output: Option<Box<dyn Output>>,
     pub quit: bool,
 }
@@ -81,7 +86,7 @@ pub type Screen = Arc<(Mutex<ScreenState>, Condvar)>;
 
 pub fn screen(name: String, size: (u32, u32), output: Box<dyn Output>) -> Screen {
     Arc::new((
-        Mutex::new(ScreenState { name, size, layers: Vec::new(), dirty: false, idle: true, paused: false, anew: true, fresh: Vec::new(), on_flip: Vec::new(), modifiers: Vec::new(), clients: Vec::new(), held: Vec::new(), forget: Vec::new(), changed: Vec::new(), changed_all: true, output: Some(output), quit: false }),
+        Mutex::new(ScreenState { name, size, layers: Vec::new(), dirty: false, idle: true, paused: false, anew: true, fresh: Vec::new(), on_flip: Vec::new(), modifiers: Vec::new(), clients: Vec::new(), held: Vec::new(), forget: Vec::new(), changed: Vec::new(), changed_all: true, captures: Vec::new(), output: Some(output), quit: false }),
         Condvar::new(),
     ))
 }
@@ -250,7 +255,7 @@ impl Frames for LayerFrames {
             };
         }
         match piece {
-            Some(p) if p[2] > 0 && p[3] > 0 => st.changed.push(p),
+            Some(p) if p[2] > 0 && p[3] > 0 => st.changed.push((p, 0)),
             Some(_) => {}
             None => st.changed_all = true,
         }
@@ -454,7 +459,7 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
     let debug = std::env::var_os("PLEAMAR_DEBUG_SCREEN").is_some();
     let (lock, cv) = &*screen;
     loop {
-        let (quads, blurs, size, modifiers, fresh, anew, arrived, forget, shows, drew_clients, surfaces, changed) = {
+        let (quads, blurs, size, modifiers, fresh, anew, arrived, forget, shows, drew_clients, surfaces, changed, captures) = {
             let mut st = lock.lock().unwrap();
             while !st.quit && !(st.dirty && st.idle && !st.paused) {
                 st = cv.wait_timeout(st, Duration::from_millis(500)).unwrap().0;
@@ -512,14 +517,29 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
             let drew_clients = !st.clients.is_empty();
             // What changed, as one box (none: all of it).
             // `PLEAMAR_FULL_COMPOSE=1`: all of it every time, to compare.
-            let changed = if std::mem::take(&mut st.changed_all) || anew || std::env::var_os("PLEAMAR_FULL_COMPOSE").is_some() {
+            // `PLEAMAR_FULL_COMPOSE=1`: all of it every time, to compare.
+            let mut changed = if std::mem::take(&mut st.changed_all) || anew || std::env::var_os("PLEAMAR_FULL_COMPOSE").is_some() {
                 st.changed.clear();
                 None
             } else {
-                let b = st.changed.drain(..).fold([i32::MAX, i32::MAX, i32::MIN, i32::MIN], |a, r| [a[0].min(r[0]), a[1].min(r[1]), a[2].max(r[0] + r[2]), a[3].max(r[1] + r[3])]);
+                let b = st.changed.iter().fold([i32::MAX, i32::MAX, i32::MIN, i32::MIN], |a, (r, _)| [a[0].min(r[0]), a[1].min(r[1]), a[2].max(r[0] + r[2]), a[3].max(r[1] + r[3])]);
                 Some(b)
             };
-            (quads, blurs, st.size, st.modifiers.clone(), std::mem::take(&mut st.fresh), anew, arrived, std::mem::take(&mut st.forget), shows, drew_clients, surfaces, changed)
+            let changes = std::mem::take(&mut st.changed);
+            // The pictures due now: the plain ones, and the ones waiting for a
+            // change once something changed where they look.
+            // Waiting for a change: someone else's, where it looks. A program's
+            // own frame is not «what is behind changed»: counted, its glass
+            // watched itself and painted again, sixty times a second.
+            let (due, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut st.captures).into_iter().partition(|(_, p, on_change, owner)| {
+                !on_change || changed.is_none() || changes.iter().any(|(r, who)| who != owner && p[0] < r[0] + r[2] && p[0] + p[2] > r[0] && p[1] < r[1] + r[3] && p[1] + p[3] > r[1])
+            });
+            st.captures = waiting;
+            // A picture is taken of all of it: put together whole.
+            if !due.is_empty() {
+                changed = None;
+            }
+            (quads, blurs, st.size, st.modifiers.clone(), std::mem::take(&mut st.fresh), anew, arrived, std::mem::take(&mut st.forget), shows, drew_clients, surfaces, changed, due)
         };
         part(0, &mut parts);
         for b in forget {
@@ -561,10 +581,17 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
         }
         part(1, &mut parts);
         let Some((which, target)) = output.buffer(&device, &modifiers) else {
-            // Nothing to put it together in yet: again as soon as there is.
+            // Nothing to put it together in yet: again as soon as there is, with
+            // all it had to do (what changed and the pictures asked for).
             let mut st = lock.lock().unwrap();
             st.dirty = true;
             st.fresh.extend(fresh);
+            match changed {
+                Some(b) if b[2] > b[0] && b[3] > b[1] => st.changed.push(([b[0], b[1], b[2] - b[0], b[3] - b[1]], 0)),
+                Some(_) => {}
+                None => st.changed_all = true,
+            }
+            st.captures.extend(captures);
             drop(st);
             std::thread::sleep(Duration::from_millis(2));
             continue;
@@ -791,8 +818,22 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
         queue.submit(Some(encoder.finish()));
         let done = pleamar::Sent::after(&queue);
         part(3, &mut parts);
+        // The pictures asked for: what was just put together, again, whole,
+        // into a texture of its own, and read back.
+        for (id, piece, _, _) in &captures {
+            let pixels = capture(&device, &queue, &pipeline, &groups, &bound, size, *piece);
+            layers::tell(ToLayers::Captured { id: *id, pixels });
+        }
         let shown_at = std::time::Instant::now();
+        // A flip on its way from before it is asked for: its landing may be told
+        // before `show` returns (at once, headless; a fast event from the card),
+        // and marking it after that left the monitor waiting for a flip that had
+        // already landed —half a second, until the wait ran out—.
+        lock.lock().unwrap().idle = false;
         let flying = output.show(which, done, &device, &queue, anew);
+        if !flying {
+            lock.lock().unwrap().idle = true;
+        }
         part(4, &mut parts);
         if timing {
             tally.1 += 1;
@@ -815,9 +856,6 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
             let mut st = lock.lock().unwrap();
             let gone: Vec<u64> = st.held.iter().copied().filter(|b| !shows.contains(b)).collect();
             st.held = shows;
-            if flying {
-                st.idle = false;
-            }
             // The surfaces whose frame went into this may paint the next one now,
             // not when the flip lands: the card has read their texture already
             // (`show` waited for it), and the next goes into their other one.
@@ -841,6 +879,75 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
         }
         part(5, &mut parts);
     }
+}
+
+/// A piece of the monitor as it has just been put together (what the
+/// programs and the scene show; not the cursor, which is on its own plane),
+/// read back: BGRA, rows with no padding.
+fn capture(device: &wgpu::Device, queue: &wgpu::Queue, pipeline: &wgpu::RenderPipeline, groups: &[Option<usize>], bound: &[Bound], size: (u32, u32), piece: [i32; 4]) -> Option<Vec<u8>> {
+    let x0 = piece[0].clamp(0, size.0 as i32) as u32;
+    let y0 = piece[1].clamp(0, size.1 as i32) as u32;
+    let x1 = (piece[0] + piece[2]).clamp(x0 as i32, size.0 as i32) as u32;
+    let y1 = (piece[1] + piece[3]).clamp(y0 as i32, size.1 as i32) as u32;
+    let (w, h) = (x1 - x0, y1 - y0);
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("a picture"),
+        size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Bgra8Unorm,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&Default::default());
+    let mut encoder = device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("a picture"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store } })],
+            depth_stencil_attachment: None,
+            timestamp_writes: None,
+            occlusion_query_set: None,
+            multiview_mask: None,
+        });
+        pass.set_pipeline(pipeline);
+        pass.set_scissor_rect(x0, y0, w, h);
+        for k in groups.iter().flatten() {
+            pass.set_bind_group(0, &bound[*k].group, &[]);
+            pass.draw(0..4, 0..1);
+        }
+    }
+    let row = (w * 4).div_ceil(256) * 256;
+    let out = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: (row * h) as u64, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo { texture: &texture, mip_level: 0, origin: wgpu::Origin3d { x: x0, y: y0, z: 0 }, aspect: wgpu::TextureAspect::All },
+        wgpu::TexelCopyBufferInfo { buffer: &out, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(row), rows_per_image: None } },
+        wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+    );
+    queue.submit(Some(encoder.finish()));
+    let mapped = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = mapped.clone();
+    out.slice(..).map_async(wgpu::MapMode::Read, move |r| flag.store(r.is_ok(), std::sync::atomic::Ordering::Release));
+    let sent = pleamar::Sent::after(queue);
+    sent.wait(device, Duration::from_secs(2));
+    let start = std::time::Instant::now();
+    while !mapped.load(std::sync::atomic::Ordering::Acquire) && start.elapsed() < Duration::from_secs(2) {
+        let _ = device.poll(wgpu::PollType::Poll);
+        std::thread::sleep(Duration::from_micros(250));
+    }
+    if !mapped.load(std::sync::atomic::Ordering::Acquire) {
+        return None;
+    }
+    let data = out.slice(..).get_mapped_range().ok()?;
+    let mut pixels = Vec::with_capacity((w * h * 4) as usize);
+    for y in 0..h {
+        pixels.extend_from_slice(&data[(y * row) as usize..(y * row + w * 4) as usize]);
+    }
+    Some(pixels)
 }
 
 fn client_texture(device: &wgpu::Device, (w, h): (u32, u32)) -> wgpu::Texture {

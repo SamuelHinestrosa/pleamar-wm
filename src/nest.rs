@@ -30,6 +30,11 @@ use smithay::reexports::wayland_protocols_wlr::foreign_toplevel::v1::server::{
     zwlr_foreign_toplevel_manager_v1::{self as toplevel_manager, ZwlrForeignToplevelManagerV1},
 };
 use smithay::reexports::wayland_server::{DataInit, Dispatch, GlobalDispatch, New};
+use smithay::reexports::wayland_protocols_wlr::screencopy::v1::server::{
+    zwlr_screencopy_frame_v1::{self as copy_frame, ZwlrScreencopyFrameV1},
+    zwlr_screencopy_manager_v1::{self as copy_manager, ZwlrScreencopyManagerV1},
+};
+use smithay::wayland::shm::with_buffer_contents_mut;
 use smithay::reexports::wayland_protocols::ext::background_effect::v1::server::{
     ext_background_effect_manager_v1::{self as effect_manager, ExtBackgroundEffectManagerV1},
     ext_background_effect_surface_v1::{self as effect_surface, ExtBackgroundEffectSurfaceV1},
@@ -114,6 +119,36 @@ struct Window {
     sent: Vec<u64>,
     /// The monitor it is on: which copy of the scene lays it out.
     screen: usize,
+    /// Where the scene shows it: on which monitor, and its box there.
+    shown: Option<(String, [i32; 4])>,
+}
+
+/// A number for a program, the same for all its surfaces and buffers.
+fn owner_hash(c: &ClientId) -> u64 {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    c.hash(&mut h);
+    h.finish() | 1
+}
+
+fn owner_of(surface: &WlSurface) -> u64 {
+    surface.client().map_or(0, |c| owner_hash(&c.id()))
+}
+
+/// Where the session says how its desktop is (see `write_desktop`).
+pub fn desktop_file() -> String {
+    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+    format!("{dir}/pleamar-wm-desktop")
+}
+
+/// A picture of a monitor a program asked for: of which piece (x, y, w, h,
+/// on it), and into which of its buffers once it says.
+struct Picture {
+    frame: ZwlrScreencopyFrameV1,
+    monitor: usize,
+    piece: [i32; 4],
+    buffer: Option<WlBuffer>,
+    damage: bool,
 }
 
 /// A program's buffer on loan: given back with `release`, and, with
@@ -193,6 +228,9 @@ struct State {
     panels: Vec<Panel>,
     /// What the programs' bars keep on each monitor, last told to the scene.
     reserved: Vec<[f32; 4]>,
+    /// Pictures of a monitor a program asked for (wlr-screencopy: grim, a
+    /// recorder, a lens), until their monitor has taken them.
+    pictures: HashMap<u64, Picture>,
     /// The program's surface the pointer is on, or the one with the keyboard.
     panel_pointer: Option<u64>,
     panel_keyboard: Option<u64>,
@@ -327,6 +365,11 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
     for o in &outputs {
         let _ = o.create_global::<State>(&dh);
     }
+    // Pictures of the monitors, for the programs that take them (grim, a
+    // recorder): only in a session of its own, which has monitors.
+    if !monitors.is_empty() {
+        dh.create_global::<State, ZwlrScreencopyManagerV1, _>(3, ());
+    }
     // What the session and the monitors tell about the programs' surfaces.
     let (layers_tx, layers_rx) = channel::channel::<ToLayers>();
     layers::set_nest(layers_tx);
@@ -356,6 +399,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         outputs,
         panels: Vec::new(),
         reserved: Vec::new(),
+        pictures: HashMap::new(),
         panel_pointer: None,
         panel_keyboard: None,
         _session_lock: SessionLockManagerState::new::<State, _>(&dh, |_| true),
@@ -392,6 +436,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
             eprintln!("windows · the keyboard layout could not be copied: {e:?}");
         }
     }
+    state.write_desktop();
     println!("windows · programs connect at WAYLAND_DISPLAY={socket}");
     let _ = state.to_render.send(ToRender::Nest(NestEvent::Socket(socket)));
     let _ = ready.send(Some(()));
@@ -557,7 +602,20 @@ impl State {
                 }
             }
             ToNest::Launch(command) => self.launch(&command),
-            ToNest::OnScreen(screen) => self.on_screen = screen,
+            ToNest::OnScreen(screen) => {
+                if self.on_screen != screen {
+                    self.on_screen = screen;
+                    self.write_desktop();
+                }
+            }
+            ToNest::Shown { slot, monitor, rect } => {
+                if let Some(Some(w)) = self.slots.get_mut(slot) {
+                    w.shown = Some((monitor, rect));
+                }
+                if self.focus == Some(slot) {
+                    self.write_desktop();
+                }
+            }
             ToNest::Send(slot, screen) => {
                 if let Some(Some(w)) = self.slots.get_mut(slot) {
                     if w.screen != screen {
@@ -634,6 +692,11 @@ impl State {
         c.env_remove("DISPLAY");
         // Nor Hyprland's: a program that asks it things would get another desktop's answers.
         c.env_remove("HYPRLAND_INSTANCE_SIGNATURE");
+        // pleamar-wm itself by its name (`pleamar-wm hyprctl`, what Marea asks instead).
+        if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.to_path_buf())) {
+            let path = std::env::var("PATH").unwrap_or_default();
+            c.env("PATH", format!("{}:{path}", dir.display()));
+        }
         c.env("GDK_BACKEND", "wayland").env("QT_QPA_PLATFORM", "wayland").env("MOZ_ENABLE_WAYLAND", "1").env("SDL_VIDEODRIVER", "wayland");
         // Programs that draw with the GPU hand over their frames on the card
         // (dmabuf). If the card the scene is painted on cannot read them, with
@@ -679,6 +742,7 @@ impl State {
         let k = self.keyboard.clone();
         k.set_focus(self, target, SERIAL_COUNTER.next_serial());
         if before != self.focus {
+            self.write_desktop();
             self.tell(NestEvent::Focused(self.focus));
             for (slot, h) in &self.toplevel_handles {
                 if Some(*slot) == before || Some(*slot) == self.focus {
@@ -718,6 +782,60 @@ impl State {
         h.state(activated(self.focus == Some(slot)));
         h.done();
         self.toplevel_handles.push((slot, h));
+    }
+
+    /// The desktop as it is, for whoever asks without a compositor's own
+    /// socket to ask (`pleamar-wm hyprctl`, what Marea's screenshots use):
+    /// the monitors, which has the focus, and where the window with the
+    /// keyboard is. Only in a session of its own.
+    fn write_desktop(&self) {
+        let monitors = layers::monitors();
+        if monitors.is_empty() {
+            return;
+        }
+        let mut text = String::new();
+        for (k, m) in monitors.iter().enumerate() {
+            text.push_str(&format!("monitor {} {} {} {} 0 {} {}\n", m.name, m.size.0, m.size.1, m.x, m.mhz, (k == self.on_screen) as u8));
+        }
+        if let Some(w) = self.focus.and_then(|s| self.slots.get(s)).and_then(Option::as_ref) {
+            if let Some((name, r)) = &w.shown {
+                let x = monitors.iter().find(|m| &m.name == name).map_or(0, |m| m.x);
+                text.push_str(&format!("window {} {} {} {} {}\t{}\n", r[0] + x, r[1], r[2], r[3], w.app, w.title));
+            }
+        }
+        let _ = std::fs::write(desktop_file(), text);
+    }
+
+    /// A picture taken: into the program's memory, and told it is ready.
+    fn hand_picture(&mut self, id: u64, pixels: Option<Vec<u8>>) {
+        let Some(p) = self.pictures.remove(&id) else { return };
+        let (w, h) = (p.piece[2] as usize, p.piece[3] as usize);
+        let written = match (&p.buffer, pixels) {
+            (Some(buffer), Some(px)) if px.len() >= w * h * 4 => with_buffer_contents_mut(buffer, |ptr, len, d| {
+                let (stride, offset) = (d.stride.max(0) as usize, d.offset.max(0) as usize);
+                if offset + stride * h > len || stride < w * 4 {
+                    return false;
+                }
+                // SAFETY: the program's pool, `len` bytes from `ptr`, and the range was checked.
+                let dst = unsafe { std::slice::from_raw_parts_mut(ptr.add(offset), stride * h) };
+                for y in 0..h {
+                    dst[y * stride..y * stride + w * 4].copy_from_slice(&px[y * w * 4..(y + 1) * w * 4]);
+                }
+                true
+            })
+            .unwrap_or(false),
+            _ => false,
+        };
+        if !written {
+            p.frame.failed();
+            return;
+        }
+        p.frame.flags(copy_frame::Flags::empty());
+        if p.damage && p.frame.version() >= 2 {
+            p.frame.damage(0, 0, w as u32, h as u32);
+        }
+        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
+        p.frame.ready((t.as_secs() >> 32) as u32, t.as_secs() as u32, t.subsec_nanos());
     }
 
     fn release(&mut self, numbers: Vec<u64>) {
@@ -783,6 +901,7 @@ impl State {
             }
             ToLayers::FrameDone => self.frame_done(),
             ToLayers::Released(numbers) => self.release(numbers),
+            ToLayers::Captured { id, pixels } => self.hand_picture(id, pixels),
         }
     }
 
@@ -829,7 +948,7 @@ impl State {
         let id = self.panels[k].id;
         // A lock screen: all of its monitor, over everything, with the keyboard.
         if matches!(self.panels[k].shell, Shell::Lock(_)) {
-            layers::show(self.panels[k].monitor, ClientLayer { id, level: 4, rect: [0, 0, w, h], pieces, region: None, keyboard: 1, blur: Vec::new() });
+            layers::show(self.panels[k].monitor, ClientLayer { id, level: 4, rect: [0, 0, w, h], pieces, region: None, keyboard: 1, blur: Vec::new(), owner: owner_of(&root) });
             return;
         }
         let m = c.margin;
@@ -856,7 +975,7 @@ impl State {
         if std::env::var_os("PLEAMAR_DEBUG_WINDOWS").is_some() {
             eprintln!("windows · surface {id}: level {level}, keyboard {keyboard}, {}×{} at {x},{y}", w, h);
         }
-        layers::show(self.panels[k].monitor, ClientLayer { id, level, rect: [x, y, w, h], pieces, region, keyboard, blur });
+        layers::show(self.panels[k].monitor, ClientLayer { id, level, rect: [x, y, w, h], pieces, region, keyboard, blur, owner: owner_of(&root) });
     }
 
     /// What the programs' bars keep at each edge of each monitor (their
@@ -946,7 +1065,7 @@ impl State {
             }
         });
         self.outputs[self.on_screen.min(self.outputs.len() - 1)].enter(toplevel.wl_surface());
-        self.slots[slot] = Some(Window { toplevel, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen: self.on_screen });
+        self.slots[slot] = Some(Window { toplevel, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen: self.on_screen, shown: None });
         self.order.push(slot);
         self.tell(NestEvent::Opened { slot, title, app, screen: self.on_screen });
         self.tell(NestEvent::Order(self.order.clone()));
@@ -1597,6 +1716,66 @@ impl SessionLockHandler for State {
         self.next_number += 1;
         self.outputs[monitor].enter(surface.wl_surface());
         self.panels.push(Panel { shell: Shell::Lock(surface), id: self.next_number, monitor, configured: Some((w, h)), sent: Vec::new() });
+    }
+}
+
+impl GlobalDispatch<ZwlrScreencopyManagerV1, ()> for State {
+    fn bind(_: &mut Self, _: &DisplayHandle, _: &Client, resource: New<ZwlrScreencopyManagerV1>, _: &(), init: &mut DataInit<'_, Self>) {
+        init.init(resource, ());
+    }
+}
+
+/// A picture of a monitor, or of a piece of it: said what memory it wants
+/// (XRGB, its size), taken the next time that monitor is put together.
+impl Dispatch<ZwlrScreencopyManagerV1, ()> for State {
+    fn request(state: &mut Self, _: &Client, _: &ZwlrScreencopyManagerV1, request: copy_manager::Request, _: &(), _: &DisplayHandle, init: &mut DataInit<'_, Self>) {
+        let (frame, output, piece) = match request {
+            copy_manager::Request::CaptureOutput { frame, output, .. } => (frame, output, None),
+            copy_manager::Request::CaptureOutputRegion { frame, output, x, y, width, height, .. } => (frame, output, Some([x, y, width, height])),
+            _ => return,
+        };
+        state.next_number += 1;
+        let id = state.next_number;
+        let frame = init.init(frame, id);
+        let Some(monitor) = state.outputs.iter().position(|o| o.owns(&output)) else {
+            frame.failed();
+            return;
+        };
+        let (mw, mh) = state.monitor_size(monitor);
+        let p = piece.unwrap_or([0, 0, mw, mh]);
+        let (x0, y0) = (p[0].clamp(0, mw), p[1].clamp(0, mh));
+        let (x1, y1) = ((p[0] + p[2]).clamp(x0, mw), (p[1] + p[3]).clamp(y0, mh));
+        let piece = [x0, y0, x1 - x0, y1 - y0];
+        if piece[2] == 0 || piece[3] == 0 {
+            frame.failed();
+            return;
+        }
+        frame.buffer(wl_shm::Format::Xrgb8888, piece[2] as u32, piece[3] as u32, piece[2] as u32 * 4);
+        if frame.version() >= 3 {
+            frame.buffer_done();
+        }
+        state.pictures.insert(id, Picture { frame, monitor, piece, buffer: None, damage: false });
+    }
+}
+
+impl Dispatch<ZwlrScreencopyFrameV1, u64> for State {
+    fn request(state: &mut Self, _: &Client, _: &ZwlrScreencopyFrameV1, request: copy_frame::Request, id: &u64, _: &DisplayHandle, _: &mut DataInit<'_, Self>) {
+        let (buffer, damage) = match request {
+            copy_frame::Request::Copy { buffer } => (buffer, false),
+            copy_frame::Request::CopyWithDamage { buffer } => (buffer, true),
+            copy_frame::Request::Destroy => {
+                if state.pictures.remove(id).is_some() {
+                    layers::uncapture(*id);
+                }
+                return;
+            }
+            _ => return,
+        };
+        let owner = buffer.client().map_or(0, |c| owner_hash(&c.id()));
+        let Some(p) = state.pictures.get_mut(id) else { return };
+        p.buffer = Some(buffer);
+        p.damage = damage;
+        layers::capture(p.monitor, *id, p.piece, damage, owner);
     }
 }
 
