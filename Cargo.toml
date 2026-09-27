@@ -2,6 +2,7 @@
 name = "pleamar-wm"
 version = "0.1.0"
 edition = "2024"
+license = "BSD-3-Clause"
 description = "A window manager written as a pleamar scene: a Wayland compositor that fills a scene's `windows`"
 repository = "https://github.com/k4ditano/pleamar-wm"
 
