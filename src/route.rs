@@ -79,10 +79,10 @@ impl Route {
             self.set_key_client(None);
             layers::tell(ToLayers::ScenePress);
         }
+        // Left, right, middle; and the side ones (back, forward), which only
+        // the windows use.
         let b = match code {
-            0x110 => 0,
-            0x111 => 1,
-            0x112 => 2,
+            0x110..=0x116 => (code - 0x110) as u8,
             _ => return false,
         };
         let _ = self.to_render.send(ToRender::Button(b, down));

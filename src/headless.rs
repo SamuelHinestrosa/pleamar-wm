@@ -215,6 +215,12 @@ impl pleamar::Platform for Headless {
                         "down" | "up" => {
                             route.button(&screens, 0x110, what == "down");
                         }
+                        // The mouse's side buttons: back and forward.
+                        "back" | "forward" => {
+                            let code = if what == "back" { 0x113 } else { 0x114 };
+                            route.button(&screens, code, true);
+                            route.button(&screens, code, false);
+                        }
                         // `wheel:-1` a notch down (as the session tells it: up is positive).
                         _ if what.starts_with("wheel:") => {
                             if let Ok(n) = what[6..].parse::<f32>() {
