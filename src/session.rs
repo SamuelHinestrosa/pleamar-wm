@@ -16,7 +16,8 @@ use crate::screen::{self, Hit, LayerFrames, LayerWindow, Output, Screen};
 use pleamar::{NewSheet, Target, View};
 use smithay::backend::drm::DrmDeviceFd;
 use smithay::backend::input::{
-    AbsolutePositionEvent, Axis, AxisSource, ButtonState, InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent, PointerButtonEvent, PointerMotionEvent,
+    AbsolutePositionEvent, Axis, AxisSource, ButtonState, GestureBeginEvent, GestureEndEvent, GesturePinchUpdateEvent, GestureSwipeUpdateEvent, InputEvent, KeyState, KeyboardKeyEvent, PointerAxisEvent,
+    PointerButtonEvent, PointerMotionEvent,
 };
 use smithay::backend::libinput::{LibinputInputBackend, LibinputSessionInterface};
 use smithay::backend::session::libseat::LibSeatSession;
@@ -189,6 +190,10 @@ struct State {
     scene_cursor: Cursor,
     program_cursor: Cursor,
     scroll: f64,
+    /// A swipe on the touchpad under way: how many fingers, and how far they went;
+    /// a pinch: how many, and how much bigger or smaller.
+    swipe: Option<(u32, f64, f64)>,
+    pinch: Option<(u32, f64)>,
     /// Who has the pointer: the scene, or a program's surface (layer-shell).
     hit: Hit,
     /// The program's surface a button was pressed on: it keeps the pointer until it is let go.
@@ -314,7 +319,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     let first = monitors.first().map_or((0.0, 0.0), |m| (m.x as f64 + m.size.0 as f64 / 2.0, m.y as f64 + m.size.1 as f64 / 2.0));
     layers::set_card(drm.clone());
     layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz }, m.screen.clone())).collect());
-    let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, hit: Hit::Scene(None), grab: None, key_client: None, gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
+    let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, hit: Hit::Scene(None), grab: None, key_client: None, gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
     state.make_cursors(&gbm);
     // The cursor the scene and the programs ask for, whenever it changes.
     let (cursor_tx, cursor_rx) = smithay::reexports::calloop::channel::channel::<(bool, Cursor)>();
@@ -836,6 +841,37 @@ impl State {
                 }
             }
             InputEvent::Keyboard { event } => self.key(event.key_code(), event.state() == KeyState::Pressed),
+            // Swipes and pinches with three or more fingers are the scene's, by
+            // name: `swipe3_down`, `swipe4_left`, `pinch3_in`… (two are the
+            // programs' scrolling). One it does not declare does nothing.
+            InputEvent::GestureSwipeBegin { event } => self.swipe = Some((event.fingers(), 0.0, 0.0)),
+            InputEvent::GestureSwipeUpdate { event } => {
+                if let Some(s) = &mut self.swipe {
+                    s.1 += event.delta_x();
+                    s.2 += event.delta_y();
+                }
+            }
+            InputEvent::GestureSwipeEnd { event } => {
+                if let Some((fingers, dx, dy)) = self.swipe.take() {
+                    if !event.cancelled() && fingers >= 3 && dx.abs().max(dy.abs()) > 60.0 {
+                        let way = if dx.abs() > dy.abs() { if dx > 0.0 { "right" } else { "left" } } else if dy > 0.0 { "down" } else { "up" };
+                        self.gesture(format!("swipe{fingers}_{way}"));
+                    }
+                }
+            }
+            InputEvent::GesturePinchBegin { event } => self.pinch = Some((event.fingers(), 1.0)),
+            InputEvent::GesturePinchUpdate { event } => {
+                if let Some(p) = &mut self.pinch {
+                    p.1 = event.scale();
+                }
+            }
+            InputEvent::GesturePinchEnd { event } => {
+                if let Some((fingers, scale)) = self.pinch.take() {
+                    if !event.cancelled() && fingers >= 3 && !(0.8..=1.25).contains(&scale) {
+                        self.gesture(format!("pinch{fingers}_{}", if scale < 1.0 { "in" } else { "out" }));
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -886,6 +922,15 @@ impl State {
             }
             let _ = self.to_render.send(ToRender::KeyReleased(name, evdev));
         }
+    }
+
+    /// A touchpad gesture, to the scene as the event of that name.
+    fn gesture(&self, name: String) {
+        if layers::locked() {
+            return;
+        }
+        println!("session · gesture {name}");
+        let _ = self.to_render.send(ToRender::ExternalSignal(pleamar::scene::intern(&name), None));
     }
 
     fn set_key_client(&mut self, id: Option<u64>) {

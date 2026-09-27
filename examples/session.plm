@@ -13,6 +13,8 @@
 //   Super+Shift+Up/Down change places with the one before / after it
 //   Super+Tab  everything at a glance       Super+-/+  the leader narrower / wider
 //   Super+Space  Marea's search (the wallpaper and Marea start with it: autostart)
+//   Touchpad: three fingers down close, up everything at a glance; four
+//   sideways, the keyboard to the next / previous window
 //   With the mouse: carry a window by its title bar; let it go on another one
 //   and they change places, or at the edge and it goes to the other monitor.
 //
@@ -379,4 +381,15 @@ scene Session {
     // The leader narrower or wider.
     on key Super+minus { ratio = clamp(ratio - 0.05, 0.25, 0.8) }
     on key Super+plus { ratio = clamp(ratio + 0.05, 0.25, 0.8) }
+    // ── the touchpad: as on Hyprland ──
+    // Three fingers down closes; up, everything at a glance; four sideways,
+    // the keyboard to the next or the one before.
+    event swipe3_down
+    event swipe3_up
+    event swipe4_left
+    event swipe4_right
+    on swipe3_down { close win(win.focus) }
+    on swipe3_up { toggle overview }
+    on swipe4_left { focus win(previous) }
+    on swipe4_right { focus win(next) }
 }
