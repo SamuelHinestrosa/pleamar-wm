@@ -9,6 +9,7 @@
 ![Badge Commit]
 [![Badge Issues]][Issues]
 [![Badge X]][X]
+[![Badge Ko-fi]][Ko-fi]
 
 <br>
 
@@ -311,6 +312,7 @@ own scene (its `carries:` zones), screen sharing tested end to end.
 pleamar-wm is under the [BSD 3-Clause License][License], like Hyprland.
 
 Made by **[@k4ditano][X]** — follow along on X for what comes next.
+If it makes your desktop nicer, you can **[buy me a coffee on Ko-fi][Ko-fi]** ☕
 
 <!----------------------------------------------------------------------------->
 
@@ -321,6 +323,7 @@ Made by **[@k4ditano][X]** — follow along on X for what comes next.
 [Marea]: https://github.com/k4ditano/marea-plm
 [License]: LICENSE
 [X]: https://x.com/k4ditano
+[Ko-fi]: https://ko-fi.com/k4ditano
 [Issues]: https://github.com/k4ditano/pleamar-wm/issues
 
 <!----------------------------------{ Thanks }--------------------------------->
@@ -340,3 +343,4 @@ Made by **[@k4ditano][X]** — follow along on X for what comes next.
 [Badge Commit]: https://img.shields.io/github/last-commit/k4ditano/pleamar-wm?style=flat-square&color=9ed6bd
 [Badge Issues]: https://img.shields.io/github/issues/k4ditano/pleamar-wm?style=flat-square&color=2c7684
 [Badge X]: https://img.shields.io/badge/follow-@k4ditano-000000?style=flat-square&logo=x
+[Badge Ko-fi]: https://img.shields.io/badge/support-Ko--fi-ff5e5b?style=flat-square&logo=ko-fi&logoColor=white
