@@ -378,7 +378,8 @@ scene Session {
             // and fading as it goes; back, it comes out of it the same way.
             opacity: seen.$i * (1 - mini.$i * mini.$i)
             pivot: x + w / 2, y + h / 2
-            move: (W / 2 - 64 - x - w / 2) * mini.$i, (pick(sc, win.reserved.0.top, win.reserved.1.top) + 26 - y - h / 2) * (2 * mini.$i - mini.$i * mini.$i)
+            // (To where Marea puts its stone: at her left, at her height.)
+            move: (W / 2 - 97 - x - w / 2) * mini.$i, (46 - y - h / 2) * (2 * mini.$i - mini.$i * mini.$i)
             scale: (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F)) * (1 - 0.95 * mini.$i)
             body {
                 color: #0c0e10
