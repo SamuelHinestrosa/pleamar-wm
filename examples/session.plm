@@ -16,8 +16,12 @@
 //   Super+Space  Marea's search (the wallpaper and Marea start with it: autostart)
 //   Touchpad: three fingers down close, up fullscreen; four
 //   sideways, the keyboard to the next / previous window
+//   The keyboard goes to the window the mouse is over, without a click.
 //   With the mouse: carry a window by its title bar; let it go on another one
-//   and they change places, or at the edge and it goes to the other monitor.
+//   and they change places, or on the other monitor and it goes there. While
+//   carried, a strip at the top offers five layouts —a leader on the left,
+//   columns, rows, a grid, a leader on the right—: over one, the windows show
+//   how they would be; let go there, and that monitor keeps it.
 //
 // What Hyprland does not do: its animations are curves of a fixed length that
 // start again when interrupted, and its layout is code of its own. Here every
@@ -82,6 +86,26 @@ scene Session {
     let focus_at = (win.order.1 == win.focus) + 2 * (win.order.2 == win.focus) + 3 * (win.order.3 == win.focus) + 4 * (win.order.4 == win.focus) + 5 * (win.order.5 == win.focus)
     let all = max(win.count, 1)
 
+    // ── the layouts, one for each monitor: 0 a leader on the left and the
+    // rest stacked on the right, 1 columns, 2 rows, 3 a grid, 4 the leader
+    // on the right. Carrying a window, a strip of them appears at the top of
+    // the monitor under the mouse: over one, everything shows how it would
+    // be; let go there, and it is so (with a leader, the one carried leads).
+    fact lay.0 = 0
+    fact lay.1 = 0
+    let lay.here = pick(mon, lay.0, lay.1)
+    let strip.x = pick(mon, screen.0.width, screen.1.width) / 2 - 5 * 60 / 2
+    let strip.y = pick(mon, win.reserved.0.top, win.reserved.1.top) + 6
+    let on.strip = dragging >= 0 and mouse.y >= strip.y and mouse.y < strip.y + 44 and mouse.x >= strip.x and mouse.x < strip.x + 5 * 60
+    let picked = if(on.strip, floor((mouse.x - strip.x) / 60), -1)
+    let leads = picked == 0 or picked == 4
+    // What it is over, kept: let go, `picked` is already gone (it needs the
+    // window carried) by the time the rules that apply it read it.
+    fact choice = -1
+    on change picked {
+        choice = picked
+    }
+
     // ── carrying a window: how the others would be if it were let go here ──
     // Its monitor and place; each window's turn in the order of all of them.
     let dsc = pick(max(dragging, 0), win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen)
@@ -94,10 +118,14 @@ scene Session {
     let ord.5 = 1 * (win.order.1 == 5) + 2 * (win.order.2 == 5) + 3 * (win.order.3 == 5) + 4 * (win.order.4 == 5) + 5 * (win.order.5 == 5)
     let ordD = pick(max(dragging, 0), ord.0, ord.1, ord.2, ord.3, ord.4, ord.5)
     // Over the other monitor it would go there: there they make room for it,
-    // and on its own the rest close up. Its turn there is its turn in the order.
+    // and on its own the rest close up. Its turn there is its turn in the
+    // order; first, if it is let go on a layout with a leader.
     let crossing = dragging >= 0 and mon != dsc
-    let landing.place = (win.0.open and win.0.screen == mon and ord.0 < ordD) + (win.1.open and win.1.screen == mon and ord.1 < ordD) + (win.2.open and win.2.screen == mon and ord.2 < ordD) + (win.3.open and win.3.screen == mon and ord.3 < ordD) + (win.4.open and win.4.screen == mon and ord.4 < ordD) + (win.5.open and win.5.screen == mon and ord.5 < ordD)
+    let landing.place = if(leads, 0, (win.0.open and win.0.screen == mon and ord.0 < ordD) + (win.1.open and win.1.screen == mon and ord.1 < ordD) + (win.2.open and win.2.screen == mon and ord.2 < ordD) + (win.3.open and win.3.screen == mon and ord.3 < ordD) + (win.4.open and win.4.screen == mon and ord.4 < ordD) + (win.5.open and win.5.screen == mon and ord.5 < ordD))
     let landing.n = pick(mon, win.on.0, win.on.1) + 1
+    let landing.lay = if(picked >= 0, picked, lay.here)
+    // A window fullscreen on the monitor under the mouse: the ones below it keep off the keyboard.
+    let fs.on = (win.0.fullscreen and win.0.screen == mon) + (win.1.fullscreen and win.1.screen == mon) + (win.2.fullscreen and win.2.screen == mon) + (win.3.fullscreen and win.3.screen == mon) + (win.4.fullscreen and win.4.screen == mon) + (win.5.fullscreen and win.5.screen == mon)
 
     repeat i in 0..6 {
         // A window is laid out on its own monitor: how big that one is and how
@@ -105,55 +133,82 @@ scene Session {
         let sc = win.$i.screen
         let here = win.$i.open and sc == screen.index
         let n = max(pick(sc, win.on.0, win.on.1), 1)
-        // ── where it goes: the leader on the left, the rest stacked on the right ──
         let p = max(win.$i.place, 0)
+        let L = pick(sc, lay.0, lay.1)
+        // ── where it goes, in its monitor's layout ──
         let Ws = pick(sc, screen.0.width, screen.1.width) - pick(sc, win.reserved.0.left, win.reserved.1.left) - pick(sc, win.reserved.0.right, win.reserved.1.right)
         let Hs = pick(sc, screen.0.height, screen.1.height) - pick(sc, win.reserved.0.top, win.reserved.1.top) - pick(sc, win.reserved.0.bottom, win.reserved.1.bottom)
-        let areah = Hs - bar - gap
-        let lead.w = if(n < 1.5, Ws - 2 * gap, (Ws - 3 * gap) * ratio)
-        let stack.h = (areah - (n - 2) * gap) / max(n - 1, 1)
-        let tx = pick(sc, win.reserved.0.left, win.reserved.1.left) + if(p < 0.5, gap, 2 * gap + lead.w)
-        let ty = pick(sc, win.reserved.0.top, win.reserved.1.top) + if(p < 0.5, bar, bar + (p - 1) * (stack.h + gap))
-        let tw = if(p < 0.5, lead.w, Ws - 3 * gap - lead.w)
-        let th = if(p < 0.5, areah, stack.h)
+        let x0 = pick(sc, win.reserved.0.left, win.reserved.1.left)
+        let y0 = pick(sc, win.reserved.0.top, win.reserved.1.top) + bar
+        let ah = Hs - bar - gap
+        let lw = if(n < 1.5, Ws - 2 * gap, (Ws - 3 * gap) * ratio)
+        let sw = Ws - 3 * gap - lw
+        let sh = (ah - (n - 2) * gap) / max(n - 1, 1)
+        let cw = (Ws - (n + 1) * gap) / max(n, 1)
+        let rh = (ah - (n - 1) * gap) / max(n, 1)
+        let gc = ceil(sqrt(n))
+        let gw = (Ws - (gc + 1) * gap) / gc
+        let gh = (ah - (ceil(n / gc) - 1) * gap) / ceil(n / gc)
+        let tx = x0 + pick(L, if(p < 0.5, gap, 2 * gap + lw), gap + p * (cw + gap), gap, gap + mod(p, gc) * (gw + gap), if(p < 0.5, 2 * gap + sw, gap))
+        let ty = y0 + pick(L, if(p < 0.5, 0, (p - 1) * (sh + gap)), 0, p * (rh + gap), floor(p / gc) * (gh + gap), if(p < 0.5, 0, (p - 1) * (sh + gap)))
+        let tw = pick(L, if(p < 0.5, lw, sw), cw, Ws - 2 * gap, gw, if(p < 0.5, lw, sw))
+        let th = pick(L, if(p < 0.5, ah, sh), ah, rh, gh, if(p < 0.5, ah, sh))
         // Under the mouse while another is carried —measured on where it is,
         // not where it is shown moving aside—: it would change places with it.
-        let under = dragging >= 0 and dragging != i and win.$i.open and sc == mon and mouse.x >= tx and mouse.x < tx + tw and mouse.y >= ty and mouse.y < ty + th
+        let under = dragging >= 0 and dragging != i and win.$i.open and sc == mon and not on.strip and mouse.x >= tx and mouse.x < tx + tw and mouse.y >= ty and mouse.y < ty + th
         on change under {
             over = if(under, i, if(over == i, -1, over))
         }
         // ── where it is shown going, while one is carried ── (the program is
         // asked for that size too: it changes only when the mouse goes onto
-        // another window or monitor, so it draws itself as it would be
-        // instead of being stretched)
+        // another window, monitor or layout, so it draws itself as it would
+        // be instead of being stretched)
         let ord.me = pick(i, ord.0, ord.1, ord.2, ord.3, ord.4, ord.5)
         let swaps = over == i and not crossing and sc == dsc
+        let promoted = leads and not crossing and sc == dsc and dragging >= 0
         let n.shown = max(if(crossing and sc == mon, n + 1, if(crossing and sc == dsc, n - 1, n)), 1)
-        let p.shown = if(swaps, dplace, if(crossing and sc == mon, p + (ordD < ord.me), if(crossing and sc == dsc, p - (ord.me > ordD), p)))
+        let p.shown = if(dragging == i and promoted, 0, if(promoted, p + (p < dplace), if(swaps, dplace, if(crossing and sc == mon, p + if(leads, 1, ordD < ord.me), if(crossing and sc == dsc, p - (ord.me > ordD), p)))))
+        let L.shown = if(dragging >= 0 and picked >= 0 and sc == mon, picked, L)
         let Wsv = pick(sc, screen.0.width, screen.1.width) - pick(sc, win.reserved.0.left, win.reserved.1.left) - pick(sc, win.reserved.0.right, win.reserved.1.right)
         let Hsv = pick(sc, screen.0.height, screen.1.height) - pick(sc, win.reserved.0.top, win.reserved.1.top) - pick(sc, win.reserved.0.bottom, win.reserved.1.bottom)
-        let areahv = Hsv - bar - gap
-        let lead.wv = if(n.shown < 1.5, Wsv - 2 * gap, (Wsv - 3 * gap) * ratio)
-        let stack.hv = (areahv - (n.shown - 2) * gap) / max(n.shown - 1, 1)
-        let txv = pick(sc, win.reserved.0.left, win.reserved.1.left) + if(p.shown < 0.5, gap, 2 * gap + lead.wv)
-        let tyv = pick(sc, win.reserved.0.top, win.reserved.1.top) + if(p.shown < 0.5, bar, bar + (p.shown - 1) * (stack.hv + gap))
-        let twv = if(p.shown < 0.5, lead.wv, Wsv - 3 * gap - lead.wv)
-        let thv = if(p.shown < 0.5, areahv, stack.hv)
+        let x0v = pick(sc, win.reserved.0.left, win.reserved.1.left)
+        let y0v = pick(sc, win.reserved.0.top, win.reserved.1.top) + bar
+        let ahv = Hsv - bar - gap
+        let lwv = if(n.shown < 1.5, Wsv - 2 * gap, (Wsv - 3 * gap) * ratio)
+        let swv = Wsv - 3 * gap - lwv
+        let shv = (ahv - (n.shown - 2) * gap) / max(n.shown - 1, 1)
+        let cwv = (Wsv - (n.shown + 1) * gap) / max(n.shown, 1)
+        let rhv = (ahv - (n.shown - 1) * gap) / max(n.shown, 1)
+        let gcv = ceil(sqrt(n.shown))
+        let gwv = (Wsv - (gcv + 1) * gap) / gcv
+        let ghv = (ahv - (ceil(n.shown / gcv) - 1) * gap) / ceil(n.shown / gcv)
+        let txv = x0v + pick(L.shown, if(p.shown < 0.5, gap, 2 * gap + lwv), gap + p.shown * (cwv + gap), gap, gap + mod(p.shown, gcv) * (gwv + gap), if(p.shown < 0.5, 2 * gap + swv, gap))
+        let tyv = y0v + pick(L.shown, if(p.shown < 0.5, 0, (p.shown - 1) * (shv + gap)), 0, p.shown * (rhv + gap), floor(p.shown / gcv) * (ghv + gap), if(p.shown < 0.5, 0, (p.shown - 1) * (shv + gap)))
+        let twv = pick(L.shown, if(p.shown < 0.5, lwv, swv), cwv, Wsv - 2 * gap, gwv, if(p.shown < 0.5, lwv, swv))
+        let thv = pick(L.shown, if(p.shown < 0.5, ahv, shv), ahv, rhv, ghv, if(p.shown < 0.5, ahv, shv))
         // Where the carried one would land on the other monitor.
         let Wsg = pick(mon, screen.0.width, screen.1.width) - pick(mon, win.reserved.0.left, win.reserved.1.left) - pick(mon, win.reserved.0.right, win.reserved.1.right)
         let Hsg = pick(mon, screen.0.height, screen.1.height) - pick(mon, win.reserved.0.top, win.reserved.1.top) - pick(mon, win.reserved.0.bottom, win.reserved.1.bottom)
-        let areahg = Hsg - bar - gap
-        let lead.wg = if(landing.n < 1.5, Wsg - 2 * gap, (Wsg - 3 * gap) * ratio)
-        let stack.hg = (areahg - (landing.n - 2) * gap) / max(landing.n - 1, 1)
-        let txg = pick(mon, win.reserved.0.left, win.reserved.1.left) + if(landing.place < 0.5, gap, 2 * gap + lead.wg)
-        let tyg = pick(mon, win.reserved.0.top, win.reserved.1.top) + if(landing.place < 0.5, bar, bar + (landing.place - 1) * (stack.hg + gap))
-        let twg = if(landing.place < 0.5, lead.wg, Wsg - 3 * gap - lead.wg)
-        let thg = if(landing.place < 0.5, areahg, stack.hg)
+        let x0g = pick(mon, win.reserved.0.left, win.reserved.1.left)
+        let y0g = pick(mon, win.reserved.0.top, win.reserved.1.top) + bar
+        let ahg = Hsg - bar - gap
+        let lwg = if(landing.n < 1.5, Wsg - 2 * gap, (Wsg - 3 * gap) * ratio)
+        let swg = Wsg - 3 * gap - lwg
+        let shg = (ahg - (landing.n - 2) * gap) / max(landing.n - 1, 1)
+        let cwg = (Wsg - (landing.n + 1) * gap) / max(landing.n, 1)
+        let rhg = (ahg - (landing.n - 1) * gap) / max(landing.n, 1)
+        let gcg = ceil(sqrt(landing.n))
+        let gwg = (Wsg - (gcg + 1) * gap) / gcg
+        let ghg = (ahg - (ceil(landing.n / gcg) - 1) * gap) / ceil(landing.n / gcg)
+        let txg = x0g + pick(landing.lay, if(landing.place < 0.5, gap, 2 * gap + lwg), gap + landing.place * (cwg + gap), gap, gap + mod(landing.place, gcg) * (gwg + gap), if(landing.place < 0.5, 2 * gap + swg, gap))
+        let tyg = y0g + pick(landing.lay, if(landing.place < 0.5, 0, (landing.place - 1) * (shg + gap)), 0, landing.place * (rhg + gap), floor(landing.place / gcg) * (ghg + gap), if(landing.place < 0.5, 0, (landing.place - 1) * (shg + gap)))
+        let twg = pick(landing.lay, if(landing.place < 0.5, lwg, swg), cwg, Wsg - 2 * gap, gwg, if(landing.place < 0.5, lwg, swg))
+        let thg = pick(landing.lay, if(landing.place < 0.5, ahg, shg), ahg, rhg, ghg, if(landing.place < 0.5, ahg, shg))
         // (the grid at a glance)
         let cols = ceil(sqrt(n))
         let rows = ceil(n / cols)
         let cell.w = (Ws - 80 - (cols - 1) * 30) / cols
-        let cell.h = (areah - 40 - (rows - 1) * 30) / rows
+        let cell.h = (ah - 40 - (rows - 1) * 30) / rows
         // ── and at a glance: in a grid, each one keeping its shape ──
         let s = min(cell.w / tw, cell.h / th)
         let ox = pick(sc, win.reserved.0.left, win.reserved.1.left) + 40 + mod(p, cols) * (cell.w + 30) + (cell.w - tw * s) / 2
@@ -187,10 +242,11 @@ scene Session {
         let hollow.there = dragging == i and crossing
         prop hollow.$i = 0 ~140ms
         follow hollow.$i = if(swaps or (dragging == i and over < 0 and not crossing) or hollow.there, 1, 0)
-        let hx = if(hollow.there, txg, tx)
-        let hy = if(hollow.there, tyg, ty)
-        let hw = if(hollow.there, twg, tw)
-        let hh = if(hollow.there, thg, th)
+        // (Its own place as it would be: in the layout picked, if one is.)
+        let hx = if(hollow.there, txg, if(dragging == i, txv, tx))
+        let hy = if(hollow.there, tyg, if(dragging == i, tyv, ty))
+        let hw = if(hollow.there, twg, if(dragging == i, twv, tw))
+        let hh = if(hollow.there, thg, if(dragging == i, thv, th))
         group {
             show: hollow.$i > 0.01 and if(hollow.there, mon, sc) == screen.index
             opacity: hollow.$i
@@ -273,8 +329,19 @@ scene Session {
             landing = i
             landing.to = 0
         }
+        // Let go on a layout of the strip: that monitor takes it, and with a
+        // leader, the one carried leads.
+        on release title.$i while picked >= 0 and mon == 0 { lay.0 = choice }
+        on release title.$i while picked >= 0 and mon == 1 { lay.1 = choice }
+        on release title.$i while leads { promote win.$i }
         on release title.$i {
             over = -1
+        }
+        // The keyboard goes to the window the mouse is over, as it enters it:
+        // no click needed first (Super+Q closes the one under the mouse).
+        let pointed = win.$i.open and sc == mon and not win.$i.dialog and mouse.x >= x.$i and mouse.x < x.$i + w.$i and mouse.y >= y.$i and mouse.y < y.$i + h.$i
+        on change pointed while dragging < 0 and not overview and fs.on < 0.5 {
+            focus win(if(pointed, i, -1))
         }
         on press lead_zone.$i { promote win.$i }
         on press close_zone.$i { close win.$i }
@@ -347,6 +414,61 @@ scene Session {
                 window win.$i { at: x, y + tb; size: w, max(h - tb, 1); show: dragging == i or (landing == i and win.$i.screen != landing.to) }
             }
             box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: 80% }
+        }
+    }
+
+    // ── the layouts strip: while a window is carried, at the top of the
+    // monitor under the mouse. Over one, everything shows how it would be ──
+    prop strip = 0 ~160ms
+    follow strip = if(dragging >= 0, 1, 0)
+    let ico = #f5f7f5
+    group {
+        show: strip > 0.01 and screen.index == mon
+        opacity: strip
+        body {
+            color: #0d1013
+            shadow: 0, 10, 28, 45%
+            box { from: strip.x - 6, strip.y - 4; size: 5 * 60 + 12, 52; corner: 14; opacity: 90% }
+        }
+        box { from: strip.x - 6, strip.y - 4; size: 5 * 60 + 12, 52; corner: 14; stroke: 1; color: mint; opacity: 35% }
+        repeat k in 0..5 {
+            box { from: strip.x + k * 60 + 3, strip.y + 1; size: 54, 42; corner: 10; color: mint; opacity: 22% * (picked == k) }
+        }
+        // A leader on the left, and the rest on the right.
+        group {
+            opacity: 50% + 50% * (picked == 0)
+            box { from: strip.x + 10, strip.y + 9; size: 22, 26; corner: 3; color: ico }
+            box { from: strip.x + 34, strip.y + 9; size: 16, 12; corner: 3; color: ico }
+            box { from: strip.x + 34, strip.y + 23; size: 16, 12; corner: 3; color: ico }
+        }
+        // Columns.
+        group {
+            opacity: 50% + 50% * (picked == 1)
+            box { from: strip.x + 70, strip.y + 9; size: 12, 26; corner: 3; color: ico }
+            box { from: strip.x + 84, strip.y + 9; size: 12, 26; corner: 3; color: ico }
+            box { from: strip.x + 98, strip.y + 9; size: 12, 26; corner: 3; color: ico }
+        }
+        // Rows.
+        group {
+            opacity: 50% + 50% * (picked == 2)
+            box { from: strip.x + 130, strip.y + 9; size: 40, 8; corner: 2; color: ico }
+            box { from: strip.x + 130, strip.y + 18; size: 40, 8; corner: 2; color: ico }
+            box { from: strip.x + 130, strip.y + 27; size: 40, 8; corner: 2; color: ico }
+        }
+        // A grid.
+        group {
+            opacity: 50% + 50% * (picked == 3)
+            box { from: strip.x + 190, strip.y + 9; size: 19, 12; corner: 3; color: ico }
+            box { from: strip.x + 211, strip.y + 9; size: 19, 12; corner: 3; color: ico }
+            box { from: strip.x + 190, strip.y + 23; size: 19, 12; corner: 3; color: ico }
+            box { from: strip.x + 211, strip.y + 23; size: 19, 12; corner: 3; color: ico }
+        }
+        // A leader on the right.
+        group {
+            opacity: 50% + 50% * (picked == 4)
+            box { from: strip.x + 250, strip.y + 9; size: 16, 12; corner: 3; color: ico }
+            box { from: strip.x + 250, strip.y + 23; size: 16, 12; corner: 3; color: ico }
+            box { from: strip.x + 268, strip.y + 9; size: 22, 26; corner: 3; color: ico }
         }
     }
 
