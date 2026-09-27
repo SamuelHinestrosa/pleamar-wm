@@ -393,6 +393,17 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
     // it waits for the card, and the CPU each time costs.
     let timing = std::env::var_os("PLEAMAR_TIMING").is_some();
     let mut tally = (std::time::Instant::now(), 0u32, 0f64, 0f64);
+    // The CPU of each part: gathering, reading what programs brought, recording,
+    // sending, showing (the wait and the flip), and the rest.
+    let mut parts = [0f64; 6];
+    let mut mark = if timing { thread_cpu_ms() } else { 0.0 };
+    let mut part = |k: usize, parts: &mut [f64; 6]| {
+        if timing {
+            let now = thread_cpu_ms();
+            parts[k] += now - mark;
+            mark = now;
+        }
+    };
     // The programs' buffers read so far, and each surface's copied pixels.
     let mut buffers: std::collections::HashMap<u64, wgpu::Texture> = Default::default();
     let mut pixels: std::collections::HashMap<u64, wgpu::Texture> = Default::default();
@@ -457,6 +468,7 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
             let drew_clients = !st.clients.is_empty();
             (quads, blurs, st.size, st.modifiers.clone(), std::mem::take(&mut st.fresh), anew, arrived, std::mem::take(&mut st.forget), shows, drew_clients, surfaces)
         };
+        part(0, &mut parts);
         for b in forget {
             buffers.remove(&b);
         }
@@ -494,6 +506,7 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
                 PieceContent::Kept => {}
             }
         }
+        part(1, &mut parts);
         let Some((which, target)) = output.buffer(&device, &modifiers) else {
             // Nothing to put it together in yet: again as soon as there is.
             let mut st = lock.lock().unwrap();
@@ -673,10 +686,13 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
         // What has not been shown for a while is not kept (a surface's frames
         // take turns, so one that was not used this time may be the next).
         bound.retain(|b| round - b.used < 8);
+        part(2, &mut parts);
         queue.submit(Some(encoder.finish()));
         let done = pleamar::Sent::after(&queue);
+        part(3, &mut parts);
         let shown_at = std::time::Instant::now();
         let flying = output.show(which, done, &device, &queue, anew);
+        part(4, &mut parts);
         if timing {
             tally.1 += 1;
             tally.2 += shown_at.elapsed().as_secs_f64() * 1000.0;
@@ -685,6 +701,9 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
                 let secs = tally.0.elapsed().as_secs_f64();
                 let name = lock.lock().unwrap().name.clone();
                 println!("screen · {name}: put together {:.0} times a second, {:.2} ms waiting for the card each, {:.2} ms of CPU each", tally.1 as f64 / secs, tally.2 / tally.1 as f64, (tally.3 - CPU_AT.with(|c| c.get())) / tally.1 as f64);
+                let n = tally.1 as f64;
+                println!("screen · {name}: CPU each time: gathering {:.2} · reading programs' frames {:.2} · recording {:.2} · sending {:.2} · showing {:.2} · the rest {:.2} ms", parts[0] / n, parts[1] / n, parts[2] / n, parts[3] / n, parts[4] / n, parts[5] / n);
+                parts = [0.0; 6];
                 CPU_AT.with(|c| c.set(tally.3));
                 tally = (std::time::Instant::now(), 0, 0.0, tally.3);
             }
@@ -716,6 +735,7 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
         if drew_clients {
             layers::tell(ToLayers::FrameDone);
         }
+        part(5, &mut parts);
     }
 }
 
