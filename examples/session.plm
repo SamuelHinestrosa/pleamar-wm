@@ -104,13 +104,13 @@ scene Session {
         let n = max(pick(sc, win.on.0, win.on.1), 1)
         // ── where it goes: the leader on the left, the rest stacked on the right ──
         let p = max(win.$i.place, 0)
-        let Ws = pick(sc, screen.0.width, screen.1.width)
-        let Hs = pick(sc, screen.0.height, screen.1.height)
+        let Ws = pick(sc, screen.0.width, screen.1.width) - pick(sc, win.reserved.0.left, win.reserved.1.left) - pick(sc, win.reserved.0.right, win.reserved.1.right)
+        let Hs = pick(sc, screen.0.height, screen.1.height) - pick(sc, win.reserved.0.top, win.reserved.1.top) - pick(sc, win.reserved.0.bottom, win.reserved.1.bottom)
         let areah = Hs - bar - gap
         let lead.w = if(n < 1.5, Ws - 2 * gap, (Ws - 3 * gap) * ratio)
         let stack.h = (areah - (n - 2) * gap) / max(n - 1, 1)
-        let tx = if(p < 0.5, gap, 2 * gap + lead.w)
-        let ty = if(p < 0.5, bar, bar + (p - 1) * (stack.h + gap))
+        let tx = pick(sc, win.reserved.0.left, win.reserved.1.left) + if(p < 0.5, gap, 2 * gap + lead.w)
+        let ty = pick(sc, win.reserved.0.top, win.reserved.1.top) + if(p < 0.5, bar, bar + (p - 1) * (stack.h + gap))
         let tw = if(p < 0.5, lead.w, Ws - 3 * gap - lead.w)
         let th = if(p < 0.5, areah, stack.h)
         // Under the mouse while another is carried —measured on where it is,
@@ -127,23 +127,23 @@ scene Session {
         let swaps = over == i and not crossing and sc == dsc
         let n.shown = max(if(crossing and sc == mon, n + 1, if(crossing and sc == dsc, n - 1, n)), 1)
         let p.shown = if(swaps, dplace, if(crossing and sc == mon, p + (ordD < ord.me), if(crossing and sc == dsc, p - (ord.me > ordD), p)))
-        let Wsv = pick(sc, screen.0.width, screen.1.width)
-        let Hsv = pick(sc, screen.0.height, screen.1.height)
+        let Wsv = pick(sc, screen.0.width, screen.1.width) - pick(sc, win.reserved.0.left, win.reserved.1.left) - pick(sc, win.reserved.0.right, win.reserved.1.right)
+        let Hsv = pick(sc, screen.0.height, screen.1.height) - pick(sc, win.reserved.0.top, win.reserved.1.top) - pick(sc, win.reserved.0.bottom, win.reserved.1.bottom)
         let areahv = Hsv - bar - gap
         let lead.wv = if(n.shown < 1.5, Wsv - 2 * gap, (Wsv - 3 * gap) * ratio)
         let stack.hv = (areahv - (n.shown - 2) * gap) / max(n.shown - 1, 1)
-        let txv = if(p.shown < 0.5, gap, 2 * gap + lead.wv)
-        let tyv = if(p.shown < 0.5, bar, bar + (p.shown - 1) * (stack.hv + gap))
+        let txv = pick(sc, win.reserved.0.left, win.reserved.1.left) + if(p.shown < 0.5, gap, 2 * gap + lead.wv)
+        let tyv = pick(sc, win.reserved.0.top, win.reserved.1.top) + if(p.shown < 0.5, bar, bar + (p.shown - 1) * (stack.hv + gap))
         let twv = if(p.shown < 0.5, lead.wv, Wsv - 3 * gap - lead.wv)
         let thv = if(p.shown < 0.5, areahv, stack.hv)
         // Where the carried one would land on the other monitor.
-        let Wsg = pick(mon, screen.0.width, screen.1.width)
-        let Hsg = pick(mon, screen.0.height, screen.1.height)
+        let Wsg = pick(mon, screen.0.width, screen.1.width) - pick(mon, win.reserved.0.left, win.reserved.1.left) - pick(mon, win.reserved.0.right, win.reserved.1.right)
+        let Hsg = pick(mon, screen.0.height, screen.1.height) - pick(mon, win.reserved.0.top, win.reserved.1.top) - pick(mon, win.reserved.0.bottom, win.reserved.1.bottom)
         let areahg = Hsg - bar - gap
         let lead.wg = if(landing.n < 1.5, Wsg - 2 * gap, (Wsg - 3 * gap) * ratio)
         let stack.hg = (areahg - (landing.n - 2) * gap) / max(landing.n - 1, 1)
-        let txg = if(landing.place < 0.5, gap, 2 * gap + lead.wg)
-        let tyg = if(landing.place < 0.5, bar, bar + (landing.place - 1) * (stack.hg + gap))
+        let txg = pick(mon, win.reserved.0.left, win.reserved.1.left) + if(landing.place < 0.5, gap, 2 * gap + lead.wg)
+        let tyg = pick(mon, win.reserved.0.top, win.reserved.1.top) + if(landing.place < 0.5, bar, bar + (landing.place - 1) * (stack.hg + gap))
         let twg = if(landing.place < 0.5, lead.wg, Wsg - 3 * gap - lead.wg)
         let thg = if(landing.place < 0.5, areahg, stack.hg)
         // (the grid at a glance)
@@ -153,8 +153,8 @@ scene Session {
         let cell.h = (areah - 40 - (rows - 1) * 30) / rows
         // ── and at a glance: in a grid, each one keeping its shape ──
         let s = min(cell.w / tw, cell.h / th)
-        let ox = 40 + mod(p, cols) * (cell.w + 30) + (cell.w - tw * s) / 2
-        let oy = bar + 20 + floor(p / cols) * (cell.h + 30) + (cell.h - th * s) / 2
+        let ox = pick(sc, win.reserved.0.left, win.reserved.1.left) + 40 + mod(p, cols) * (cell.w + 30) + (cell.w - tw * s) / 2
+        let oy = pick(sc, win.reserved.0.top, win.reserved.1.top) + bar + 20 + floor(p / cols) * (cell.h + 30) + (cell.h - th * s) / 2
 
         prop x.$i = 24 ~glide
         prop y.$i = 12 ~glide
@@ -287,9 +287,10 @@ scene Session {
     }
 
     // ── the bar ──
-    box { from: 0, 0; size: W, bar - 6; color: #0d1013; opacity: 80% }
+    // Under what other programs' bars keep at the top of this monitor.
+    box { from: 0, pick(screen.index, win.reserved.0.top, win.reserved.1.top); size: W, bar - 6; color: #0d1013; opacity: 80% }
     row {
-        at: 16, 8
+        at: 16, 8 + pick(screen.index, win.reserved.0.top, win.reserved.1.top)
         gap: 8
         repeat a in 0..3 {
             group {
@@ -312,7 +313,7 @@ scene Session {
     on press glance { toggle overview }
     text "{win.count} of 6 · drag a title bar to move it · Super+T terminal · Super+Q close · Super+arrows keyboard · Super+Shift+arrows move · Super+Tab at a glance · Super+Space search · Super+L lock · Ctrl+Alt+Backspace leaves" {
         // Down in the corner: the top middle is Marea's.
-        at: W - 18, H - 16; anchor: right center; size: 11; color: ink; opacity: 55%
+        at: W - 18, H - 16 - pick(screen.index, win.reserved.0.bottom, win.reserved.1.bottom); anchor: right center; size: 11; color: ink; opacity: 55%
     }
     text "Nothing open here yet: Super+T, or a button above." { at: W / 2, H / 2; anchor: center; size: 15; color: ink; opacity: if(pick(screen.index, win.on.0, win.on.1) < 0.5, 45%, 0) }
 

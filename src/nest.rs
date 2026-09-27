@@ -37,7 +37,7 @@ use smithay::reexports::wayland_protocols::ext::background_effect::v1::server::{
 use smithay::reexports::wayland_server::protocol::wl_output::WlOutput;
 use smithay::wayland::compositor::RectangleKind;
 use smithay::wayland::output::OutputManagerState;
-use smithay::wayland::shell::wlr_layer::{Anchor, KeyboardInteractivity, Layer as ShellLayer, LayerSurface, LayerSurfaceCachedState, WlrLayerShellHandler, WlrLayerShellState};
+use smithay::wayland::shell::wlr_layer::{Anchor, ExclusiveZone, KeyboardInteractivity, Layer as ShellLayer, LayerSurface, LayerSurfaceCachedState, WlrLayerShellHandler, WlrLayerShellState};
 use smithay::backend::allocator::dmabuf::Dmabuf;
 use smithay::backend::allocator::{Buffer, Format, Fourcc, Modifier};
 use smithay::delegate_dmabuf;
@@ -191,6 +191,8 @@ struct State {
     _output_manager: OutputManagerState,
     layer_shell: WlrLayerShellState,
     panels: Vec<Panel>,
+    /// What the programs' bars keep on each monitor, last told to the scene.
+    reserved: Vec<[f32; 4]>,
     /// The program's surface the pointer is on, or the one with the keyboard.
     panel_pointer: Option<u64>,
     panel_keyboard: Option<u64>,
@@ -353,6 +355,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         layer_shell: WlrLayerShellState::new::<State>(&dh),
         outputs,
         panels: Vec::new(),
+        reserved: Vec::new(),
         panel_pointer: None,
         panel_keyboard: None,
         _session_lock: SessionLockManagerState::new::<State, _>(&dh, |_| true),
@@ -856,6 +859,39 @@ impl State {
         layers::show(self.panels[k].monitor, ClientLayer { id, level, rect: [x, y, w, h], pieces, region, keyboard, blur });
     }
 
+    /// What the programs' bars keep at each edge of each monitor (their
+    /// exclusive zones, and their margin on that edge): the scene lays the
+    /// windows out around it. Told when it changes.
+    fn tell_reserved(&mut self) {
+        let mut now = vec![[0f32; 4]; self.outputs.len()];
+        for p in &self.panels {
+            let Shell::Layer(layer) = &p.shell else { continue };
+            if content_of(layer.wl_surface(), |c| c.size == (0, 0)).unwrap_or(true) {
+                continue;
+            }
+            let c = with_states(layer.wl_surface(), |s| *s.cached_state.get::<LayerSurfaceCachedState>().current());
+            let ExclusiveZone::Exclusive(zone) = c.exclusive_zone else { continue };
+            let (t, r, b, l) = (c.anchor.contains(Anchor::TOP), c.anchor.contains(Anchor::RIGHT), c.anchor.contains(Anchor::BOTTOM), c.anchor.contains(Anchor::LEFT));
+            // One edge, or an edge and both of its sides: which one it keeps.
+            let edge = match (t, r, b, l) {
+                (true, _, false, _) if r == l || (r && l) => Some((0, c.margin.top)),
+                (false, _, true, _) if r == l || (r && l) => Some((2, c.margin.bottom)),
+                (_, true, _, false) if t == b || (t && b) => Some((1, c.margin.right)),
+                (_, false, _, true) if t == b || (t && b) => Some((3, c.margin.left)),
+                _ => None,
+            };
+            if let (Some((e, margin)), Some(m)) = (edge, now.get_mut(p.monitor)) {
+                m[e] += zone as f32 + margin.max(0) as f32;
+            }
+        }
+        for (k, edges) in now.iter().enumerate() {
+            if self.reserved.get(k) != Some(edges) {
+                self.tell(NestEvent::Reserved(k, *edges));
+            }
+        }
+        self.reserved = now;
+    }
+
     fn dismiss_popups_not_under(&mut self, root: &WlSurface) {
         let root = root.clone();
         let focused = self.pointer.current_focus();
@@ -958,6 +994,7 @@ impl State {
             done.push(root.clone());
             if let Some(k) = self.panels.iter().position(|p| p.shell.wl_surface() == &root) {
                 self.show_panel(k);
+                self.tell_reserved();
                 continue;
             }
             let Some(slot) = self.window_of(&root) else { continue };
@@ -1663,6 +1700,7 @@ impl WlrLayerShellHandler for State {
         let Some(k) = self.panels.iter().position(|p| p.shell.wl_surface() == surface.wl_surface()) else { return };
         let p = self.panels.remove(k);
         layers::hide(p.id);
+        self.tell_reserved();
         if self.panel_pointer == Some(p.id) {
             self.panel_pointer = None;
         }
