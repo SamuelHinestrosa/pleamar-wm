@@ -42,6 +42,7 @@ scene Session {
     let ink = #f5f7f5
     let mint = #9ed6bd
     let coral = #ef7a66
+    let amber = #e8c26a
     let bar = 52
     let gap = 12
     let tb = 30                          // each window's title bar
@@ -104,6 +105,8 @@ scene Session {
     // button in the bar. Each window remembers where it was free.
     fact free.0 = 0
     fact free.1 = 0
+    // The last one put away: Super+Shift+M brings it back.
+    fact last_min = -1
     fact stamp.top = 0
     // Where a window being resized was when it was taken.
     fact g.x = 0
@@ -149,7 +152,9 @@ scene Session {
         // A window is laid out on its own monitor: how big that one is and how
         // many windows share it. Each copy of the scene draws only its own.
         let sc = win.$i.screen
-        let here = win.$i.open and sc == screen.index
+        let here = win.$i.open and sc == screen.index and not win.$i.minimized
+        // (Drawn while it goes away into the island, too.)
+        let drawn = win.$i.open and sc == screen.index
         let n = max(pick(sc, win.on.0, win.on.1), 1)
         let p = max(win.$i.place, 0)
         let L = pick(sc, lay.0, lay.1)
@@ -248,10 +253,26 @@ scene Session {
         let fgy = if(maxed.$i, y0, fy.$i)
         let fgw = if(maxed.$i, Ws - 2 * gap, fw.$i)
         let fgh = if(maxed.$i, ah, fh.$i)
-        let goal.x = if(fr, fgx, txv)
-        let goal.y = if(fr, fgy, tyv)
-        let goal.w = if(fr, fgw, twv)
-        let goal.h = if(fr, fgh, thv)
+        // Put away, it stays where it was (the others close up without it),
+        // and flies from there into Marea's island.
+        fact mx.$i = 0
+        fact my.$i = 0
+        fact mw.$i = 0
+        fact mh.$i = 0
+        on change win.$i.minimized while win.$i.minimized {
+            mx.$i = x.$i
+            my.$i = y.$i
+            mw.$i = w.$i
+            mh.$i = h.$i
+            last_min = i
+        }
+        let goal.x = if(win.$i.minimized, mx.$i, if(fr, fgx, txv))
+        let goal.y = if(win.$i.minimized, my.$i, if(fr, fgy, tyv))
+        let goal.w = if(win.$i.minimized, mw.$i, if(fr, fgw, twv))
+        let goal.h = if(win.$i.minimized, mh.$i, if(fr, fgh, thv))
+        // How far into the island: 0 here, 1 put away.
+        prop mini.$i = 0 ~420ms
+        follow mini.$i = if(win.$i.minimized, 1, 0)
         // Free for the first time: where it is now. Opened free: in the middle, a step down per slot.
         // (A little smaller than its tile, in the middle of it: it is seen
         // coming off.)
@@ -329,8 +350,9 @@ scene Session {
         // window its edges and buttons go before what the program shows.)
         group {
             z: stamp.$i + 0.5
-            zone box title.$i { from: x.$i, y.$i; size: w - 56, tb; cursor: pointer; active: here and not overview and not win.$i.dialog }
+            zone box title.$i { from: x.$i, y.$i; size: w - 76, tb; cursor: pointer; active: here and not overview and not win.$i.dialog }
             zone ellipse lead_zone.$i { at: x + w - 40, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog }
+            zone ellipse mini_zone.$i { at: x + w - 60, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog }
             zone ellipse close_zone.$i { at: x + w - 20, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog }
             // At a glance, the whole window is a button: pressing it chooses it.
             zone box choose.$i { from: x, y; size: w, h; cursor: pointer; active: here and overview and not win.$i.dialog }
@@ -347,13 +369,17 @@ scene Session {
             zone box corner.$i { from: ex + ew - 14, ey + eh - 14; size: 20, 20; cursor: grab; active: here and fr and not maxed.$i and not overview }
         }
         group {
-            // Over the others as it was last touched (free, they overlap).
-            z: stamp.$i
+            // Over the others as it was last touched (free, they overlap);
+            // flying into the island or out of it, over all of them.
+            z: if(mini.$i > 0.001 and mini.$i < 0.995, 1000000, stamp.$i)
             // Carried, it is drawn over the others, further down.
-            show: seen.$i > 0.01 and sc == screen.index and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog
-            opacity: seen.$i
+            show: seen.$i > 0.01 and sc == screen.index and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog and mini.$i < 0.995
+            // Put away, it is sucked into the island: up first, shrinking
+            // and fading as it goes; back, it comes out of it the same way.
+            opacity: seen.$i * (1 - mini.$i * mini.$i)
             pivot: x + w / 2, y + h / 2
-            scale: (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F))
+            move: (W / 2 - 64 - x - w / 2) * mini.$i, (pick(sc, win.reserved.0.top, win.reserved.1.top) + 26 - y - h / 2) * (2 * mini.$i - mini.$i * mini.$i)
+            scale: (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F)) * (1 - 0.95 * mini.$i)
             body {
                 color: #0c0e10
                 shadow: 0, 14 + 8 * lit.$i + 10 * lift.$i, 34 + 18 * lift.$i, 45% + 20% * lit.$i + 10% * lift.$i
@@ -365,10 +391,12 @@ scene Session {
                 brightness: 0.72 + 0.28 * lit.$i
                 clip box { from: x, y; size: w, h; corner: 12 }
                 box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
-                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: goal.w, goal.h - tb; show: here and not win.$i.fullscreen }
+                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: goal.w, goal.h - tb; show: drawn and not win.$i.fullscreen }
             }
-            // Its two buttons: to the front (free, the whole monitor), and away.
+            // Its three buttons: put away (into Marea), to the front (free,
+            // the whole monitor), and away for good.
+            ellipse { at: x + w - 60, y + tb / 2; radius: 5.5 + mini_zone.$i.hover; color: amber; opacity: 40% + 50% * mini_zone.$i.hover }
             ellipse { at: x + w - 40, y + tb / 2; radius: 5.5 + lead_zone.$i.hover; color: mint; opacity: 35% + 50% * lead_zone.$i.hover }
             ellipse { at: x + w - 20, y + tb / 2; radius: 5.5 + close_zone.$i.hover; color: coral; opacity: 45% + 50% * close_zone.$i.hover }
             box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: lit.$i * 70% * (1 - ov) }
@@ -488,13 +516,14 @@ scene Session {
         }
         // The keyboard goes to the window the mouse is over, as it enters it:
         // no click needed first (Super+Q closes the one under the mouse).
-        let pointed = win.$i.open and sc == mon and not win.$i.dialog and mouse.x >= x.$i and mouse.x < x.$i + w.$i and mouse.y >= y.$i and mouse.y < y.$i + h.$i
+        let pointed = win.$i.open and sc == mon and not win.$i.dialog and not win.$i.minimized and mouse.x >= x.$i and mouse.x < x.$i + w.$i and mouse.y >= y.$i and mouse.y < y.$i + h.$i
         // (Free, they overlap: the keyboard goes with a click, as on Windows.)
         on change pointed while dragging < 0 and not overview and fs.on < 0.5 and pick(mon, free.0, free.1) < 0.5 {
             focus win(if(pointed, i, -1))
         }
         on press lead_zone.$i while not fr { promote win.$i }
         on press close_zone.$i { close win.$i }
+        on press mini_zone.$i { minimize win.$i }
         on press choose.$i {
             focus win.$i
             overview = false
@@ -667,6 +696,9 @@ scene Session {
     on key Super+t { launch "kitty" }
     on key Super+Return { launch "kitty" }
     on key Super+q { close win(win.focus) }
+    // Put away into Marea, and the last one back.
+    on key Super+m { minimize win(win.focus) }
+    on key Super+Shift+m { restore win(last_min) }
     // Marea's search (she runs in the session: see autostart).
     on key Super+space { launch "$HOME/Proyectos/marea-plm/marea search" }
     // Her screenshots, as on Hyprland: a piece, the screen, the active window.
@@ -738,6 +770,10 @@ scene Session {
     // Tiled or free, on the monitor under the mouse.
     on key Super+w while mon == 0 { free.0 = 1 - free.0 }
     on key Super+w while mon == 1 { free.1 = 1 - free.1 }
+    // The same, from outside: Marea's menu (`pleamar --say wm "emit toggle_free"`).
+    event toggle_free
+    on toggle_free while mon == 0 { free.0 = 1 - free.0 }
+    on toggle_free while mon == 1 { free.1 = 1 - free.1 }
 
     // ── the touchpad: as on Hyprland ──
     // Three fingers down closes; up, fullscreen; four sideways, the keyboard

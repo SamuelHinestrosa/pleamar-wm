@@ -266,6 +266,10 @@ struct Window {
     fullscreen: bool,
     /// A dialog floats: it is not in the layout's order.
     dialog: bool,
+    /// Put away (minimized): out of the order too, and where it was in it,
+    /// to go back there.
+    minimized: bool,
+    was_at: usize,
 }
 
 /// A number for a program, the same for all its surfaces and buffers.
@@ -278,6 +282,15 @@ fn owner_hash(c: &ClientId) -> u64 {
 
 fn owner_of(surface: &WlSurface) -> u64 {
     surface.client().map_or(0, |c| owner_hash(&c.id()))
+}
+
+/// The name the window manager's scene listens by (`session` for
+/// `session.plm`): its programs reach it as `wm` (`pleamar --say wm …`).
+static SCENE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+
+pub fn set_scene_name(path: &str) {
+    let stem = std::path::Path::new(path).file_stem().and_then(|s| s.to_str()).unwrap_or("session").to_owned();
+    let _ = SCENE.set(stem);
 }
 
 /// Where the session says how its desktop is (see `write_desktop`).
@@ -864,6 +877,7 @@ impl State {
                 }
             }
             ToNest::Launch(command) => self.launch(&command),
+            ToNest::Minimize(slot, yes) => self.set_minimized(slot, yes),
             ToNest::Fullscreen(slot) => {
                 let now = self.slots.get(slot).and_then(Option::as_ref).is_some_and(|w| w.fullscreen);
                 self.set_fullscreen(slot, !now);
@@ -982,6 +996,60 @@ impl State {
         }
     }
 
+    /// A window's states as wlr-foreign-toplevel lists them: with the
+    /// keyboard, and put away.
+    fn states(&self, slot: usize) -> Vec<u8> {
+        let mut out = Vec::new();
+        if self.focus == Some(slot) {
+            out.extend((toplevel_handle::State::Activated as u32).to_ne_bytes());
+        }
+        if self.slots.get(slot).and_then(Option::as_ref).is_some_and(|w| w.minimized) {
+            out.extend((toplevel_handle::State::Minimized as u32).to_ne_bytes());
+        }
+        out
+    }
+
+    /// A window put away, or brought back. Away, it leaves the layout's order
+    /// (the others close up) and the keyboard; back, it goes to where it was
+    /// in the order and takes the keyboard. Its program and whoever lists the
+    /// windows (Marea) are told.
+    fn set_minimized(&mut self, slot: usize, yes: bool) {
+        let Some(Some(w)) = self.slots.get_mut(slot) else { return };
+        if w.minimized == yes {
+            if !yes {
+                self.set_focus(Some(slot));
+            }
+            return;
+        }
+        w.minimized = yes;
+        let dialog = w.dialog;
+        if yes {
+            if let Some(at) = self.order.iter().position(|s| *s == slot) {
+                if let Some(Some(w)) = self.slots.get_mut(slot) {
+                    w.was_at = at;
+                }
+            }
+            self.order.retain(|s| *s != slot);
+        } else if !dialog && !self.order.contains(&slot) {
+            let at = self.slots[slot].as_ref().map_or(0, |w| w.was_at).min(self.order.len());
+            self.order.insert(at, slot);
+        }
+        self.tell(NestEvent::Minimized(slot, yes));
+        self.tell(NestEvent::Order(self.order.clone()));
+        if yes && self.focus == Some(slot) {
+            let next = self.order.first().copied();
+            self.set_focus(next);
+        } else if !yes {
+            self.set_focus(Some(slot));
+        }
+        for (s, h) in &self.toplevel_handles {
+            if *s == slot {
+                h.state(self.states(slot));
+                h.done();
+            }
+        }
+    }
+
     /// A dialog is left out of the layout's order (the scene floats it);
     /// back in it at the end if it stops being one.
     fn set_dialog(&mut self, slot: usize, yes: bool) {
@@ -1069,9 +1137,18 @@ impl State {
         c.env_remove("HYPRLAND_INSTANCE_SIGNATURE");
         // In a session of its own, the scenes it starts (Marea) listen apart
         // from the ones of another desktop of the same user that may be open.
+        // And the window manager's scene is there as `wm`: Marea switches it
+        // between tiled and free with `pleamar --say wm "emit toggle_free"`.
         if !layers::monitors().is_empty() {
             let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-            c.env("PLEAMAR_SOCKETS", format!("{dir}/pleamar-{}", self.socket));
+            let own = format!("{dir}/pleamar-{}", self.socket);
+            let _ = std::fs::create_dir_all(&own);
+            if let Some(scene) = SCENE.get() {
+                let link = format!("{own}/wm.sock");
+                let _ = std::fs::remove_file(&link);
+                let _ = std::os::unix::fs::symlink(format!("{dir}/pleamar/{scene}.sock"), &link);
+            }
+            c.env("PLEAMAR_SOCKETS", own);
         }
         // pleamar-wm itself by its name (`pleamar-wm hyprctl`, what Marea asks instead).
         if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.to_path_buf())) {
@@ -1122,7 +1199,7 @@ impl State {
             self.tell(NestEvent::Focused(self.focus));
             for (slot, h) in &self.toplevel_handles {
                 if Some(*slot) == before || Some(*slot) == self.focus {
-                    h.state(activated(Some(*slot) == self.focus));
+                    h.state(self.states(*slot));
                     h.done();
                 }
             }
@@ -1163,7 +1240,7 @@ impl State {
                 h.output_enter(&o);
             }
         }
-        h.state(activated(self.focus == Some(slot)));
+        h.state(self.states(slot));
         h.done();
         self.toplevel_handles.push((slot, h));
     }
@@ -1654,7 +1731,7 @@ impl State {
         }
         self.outputs[self.on_screen.min(self.outputs.len() - 1)].enter(&surface);
         let listed = self.toplevel_list.new_toplevel::<State>(title.clone(), app.clone());
-        self.slots[slot] = Some(Window { toplevel, surface, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen: self.on_screen, shown: None, listed, fullscreen: false, dialog: false });
+        self.slots[slot] = Some(Window { toplevel, surface, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen: self.on_screen, shown: None, listed, fullscreen: false, dialog: false, minimized: false, was_at: 0 });
         self.order.push(slot);
         self.tell(NestEvent::Opened { slot, title, app, screen: self.on_screen });
         self.tell(NestEvent::Order(self.order.clone()));
@@ -2383,6 +2460,13 @@ impl XdgShellHandler for State {
         }
     }
 
+    /// Its own minimize button: away.
+    fn minimize_request(&mut self, surface: ToplevelSurface) {
+        if let Some(slot) = self.window_of(surface.wl_surface()) {
+            self.set_minimized(slot, true);
+        }
+    }
+
     /// The layout is the scene's: a window that asks to be maximized is
     /// answered, and stays where the scene has it.
     fn maximize_request(&mut self, surface: ToplevelSurface) {
@@ -2724,10 +2808,6 @@ impl Dispatch<ExtBackgroundEffectSurfaceV1, WlSurface> for State {
     }
 }
 
-/// The states of a window as the protocol lists them: activated, or none.
-fn activated(yes: bool) -> Vec<u8> {
-    if yes { (toplevel_handle::State::Activated as u32).to_ne_bytes().to_vec() } else { Vec::new() }
-}
 
 impl GlobalDispatch<ZwlrForeignToplevelManagerV1, ()> for State {
     fn bind(state: &mut Self, _: &DisplayHandle, _: &Client, resource: New<ZwlrForeignToplevelManagerV1>, _: &(), init: &mut DataInit<'_, Self>) {
@@ -2753,7 +2833,16 @@ impl Dispatch<ZwlrForeignToplevelManagerV1, ()> for State {
 impl Dispatch<ZwlrForeignToplevelHandleV1, usize> for State {
     fn request(state: &mut Self, _: &Client, handle: &ZwlrForeignToplevelHandleV1, request: toplevel_handle::Request, slot: &usize, _: &DisplayHandle, _: &mut DataInit<'_, Self>) {
         match request {
-            toplevel_handle::Request::Activate { .. } => state.set_focus(Some(*slot)),
+            // Given the keyboard, a window put away comes back.
+            toplevel_handle::Request::Activate { .. } => {
+                if state.slots.get(*slot).and_then(Option::as_ref).is_some_and(|w| w.minimized) {
+                    state.set_minimized(*slot, false);
+                } else {
+                    state.set_focus(Some(*slot));
+                }
+            }
+            toplevel_handle::Request::SetMinimized => state.set_minimized(*slot, true),
+            toplevel_handle::Request::UnsetMinimized => state.set_minimized(*slot, false),
             toplevel_handle::Request::Close => {
                 if let Some(Some(w)) = state.slots.get(*slot) {
                     w.toplevel.send_close();

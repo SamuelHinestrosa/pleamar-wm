@@ -43,6 +43,7 @@ fn main() {
     if args.first().map(String::as_str) == Some("headless") {
         args.remove(0);
         let scene = if args.first().is_some_and(|a| !a.starts_with("--")) { args.remove(0) } else { "examples/session.plm".into() };
+        nest::set_scene_name(&scene);
         layers::expect_monitors();
         pleamar::provide_before_quit(Box::new(layers::stop_all));
         pleamar::provide_platform(Box::new(headless::Headless));
@@ -54,6 +55,7 @@ fn main() {
     if args.first().map(String::as_str) == Some("session") {
         args.remove(0);
         let scene = if args.first().is_some_and(|a| !a.starts_with("--")) { args.remove(0) } else { "examples/session.plm".into() };
+        nest::set_scene_name(&scene);
         layers::expect_monitors();
         pleamar::provide_before_quit(Box::new(layers::stop_all));
         pleamar::provide_platform(Box::new(session::Session));

@@ -210,6 +210,18 @@ impl XwmHandler for State {
         }
     }
 
+    fn minimize_request(&mut self, _: XwmId, window: X11Surface) {
+        if let Some(slot) = self.x11_slot(&window) {
+            self.set_minimized(slot, true);
+        }
+    }
+
+    fn unminimize_request(&mut self, _: XwmId, window: X11Surface) {
+        if let Some(slot) = self.x11_slot(&window) {
+            self.set_minimized(slot, false);
+        }
+    }
+
     fn unfullscreen_request(&mut self, _: XwmId, window: X11Surface) {
         if let Some(slot) = self.x11_slot(&window) {
             self.set_fullscreen(slot, false);
