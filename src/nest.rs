@@ -341,7 +341,9 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
     let mut seat = seats.new_wl_seat(&dh, "pleamar");
     // The keyboard as the user has it: the layout pleamar's own window was
     // given. If there is none yet, the system's default until it arrives.
-    let keyboard = seat.add_keyboard(XkbConfig::default(), 400, 33).map_err(|e| e.to_string())?;
+    // Repeating as the session's configuration says (25 a second after 400 ms, if nothing).
+    let (rate, delay) = crate::config::get().repeat();
+    let keyboard = seat.add_keyboard(XkbConfig::default(), delay as i32, rate as i32).map_err(|e| e.to_string())?;
     let pointer = seat.add_pointer();
     // The monitors, as the session has them; nested, one that is the scene.
     let monitors = layers::wait_monitors(Duration::from_millis(2500));
@@ -357,7 +359,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
             .map(|m| {
                 let output = Output::new(m.name.clone(), PhysicalProperties { size: (0, 0).into(), subpixel: Subpixel::Unknown, make: "pleamar".into(), model: m.name.clone() });
                 let mode = OutputMode { size: (m.size.0 as i32, m.size.1 as i32).into(), refresh: m.mhz };
-                output.change_current_state(Some(mode), Some(Transform::Normal), Some(Scale::Integer(1)), Some((m.x, 0).into()));
+                output.change_current_state(Some(mode), Some(Transform::Normal), Some(Scale::Integer(1)), Some((m.x, m.y).into()));
                 output.set_preferred(mode);
                 output
             })
@@ -795,12 +797,12 @@ impl State {
         }
         let mut text = String::new();
         for (k, m) in monitors.iter().enumerate() {
-            text.push_str(&format!("monitor {} {} {} {} 0 {} {}\n", m.name, m.size.0, m.size.1, m.x, m.mhz, (k == self.on_screen) as u8));
+            text.push_str(&format!("monitor {} {} {} {} {} {} {}\n", m.name, m.size.0, m.size.1, m.x, m.y, m.mhz, (k == self.on_screen) as u8));
         }
         if let Some(w) = self.focus.and_then(|s| self.slots.get(s)).and_then(Option::as_ref) {
             if let Some((name, r)) = &w.shown {
-                let x = monitors.iter().find(|m| &m.name == name).map_or(0, |m| m.x);
-                text.push_str(&format!("window {} {} {} {} {}\t{}\n", r[0] + x, r[1], r[2], r[3], w.app, w.title));
+                let (x, y) = monitors.iter().find(|m| &m.name == name).map_or((0, 0), |m| (m.x, m.y));
+                text.push_str(&format!("window {} {} {} {} {}\t{}\n", r[0] + x, r[1] + y, r[2], r[3], w.app, w.title));
             }
         }
         let _ = std::fs::write(desktop_file(), text);
@@ -828,7 +830,7 @@ impl State {
                     (o, g)
                 }
             };
-            o.change_current_state(Some(mode), Some(Transform::Normal), Some(Scale::Integer(1)), Some((m.x, 0).into()));
+            o.change_current_state(Some(mode), Some(Transform::Normal), Some(Scale::Integer(1)), Some((m.x, m.y).into()));
             o.set_preferred(mode);
             outputs.push(o);
             globals.push(g);

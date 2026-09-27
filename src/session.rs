@@ -10,6 +10,7 @@
 
 use pleamar::scene::{Cursor, Mods, Screens, Surface, ToRender};
 use pleamar::wgpu;
+use crate::config;
 use crate::layers::{self, MonitorInfo, ToLayers};
 use crate::screen::{self, Hit, LayerFrames, LayerWindow, Output, Screen};
 use pleamar::{NewSheet, Target, View};
@@ -61,8 +62,9 @@ struct Monitor {
     name: String,
     crtc: crtc::Handle,
     size: (u32, u32),
-    /// Where it is on the desktop, left to right.
+    /// Where it is on the desktop: its top left corner.
     x: i32,
+    y: i32,
     /// What is shown on it: its surfaces, put together.
     screen: Screen,
     flips: Arc<Mutex<Flips>>,
@@ -279,6 +281,9 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     pleamar::set_host_keymap(keymap.get_as_string(xkb::KEYMAP_FORMAT_TEXT_V1));
     let keymap = xkb::State::new(&keymap);
     let _ = to_render.send(ToRender::KeyboardFocus(true));
+    // How keys repeat, for the scene's fields (the programs are told by the compositor).
+    let (rate, delay) = config::get().repeat();
+    let _ = to_render.send(ToRender::KeyRepeat(Some((delay, (1000 / rate).max(1)))));
 
     let mut libinput = Libinput::new_with_udev(LibinputSessionInterface::from(session.clone()));
     libinput.udev_assign_seat(&seat).map_err(|()| "the input devices could not be taken")?;
@@ -306,9 +311,9 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     })
     .map_err(|e| e.to_string())?;
 
-    let first = monitors.first().map_or((0.0, 0.0), |m| (m.size.0 as f64 / 2.0, m.size.1 as f64 / 2.0));
+    let first = monitors.first().map_or((0.0, 0.0), |m| (m.x as f64 + m.size.0 as f64 / 2.0, m.y as f64 + m.size.1 as f64 / 2.0));
     layers::set_card(drm.clone());
-    layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, mhz: m.mhz }, m.screen.clone())).collect());
+    layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz }, m.screen.clone())).collect());
     let mut state = State { session, drm, monitors, libinput, to_render, keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, hit: Hit::Scene(None), grab: None, key_client: None, gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
     state.make_cursors(&gbm);
     // The cursor the scene and the programs ask for, whenever it changes.
@@ -336,8 +341,9 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     Ok(())
 }
 
-/// The monitors connected to the card now: their name (`DP-3`), connector,
-/// preferred mode and the controllers that can drive them.
+/// The monitors connected to the card now and not turned off in the
+/// configuration: their name (`DP-3`), connector, the mode asked for (or the
+/// one they prefer) and the controllers that can drive them.
 fn connected(drm: &DrmDeviceFd) -> Vec<(String, connector::Handle, Mode, Vec<crtc::Handle>)> {
     let Ok(res) = drm.resource_handles() else { return Vec::new() };
     let mut out = Vec::new();
@@ -346,37 +352,79 @@ fn connected(drm: &DrmDeviceFd) -> Vec<(String, connector::Handle, Mode, Vec<crt
         if info.state() != connector::State::Connected {
             continue;
         }
-        let Some(mode) = info.modes().iter().find(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED)).or(info.modes().first()).copied() else { continue };
+        let name = format!("{}-{}", info.interface().as_str(), info.interface_id());
+        let rule = config::get().monitor(&name);
+        if rule.is_some_and(|r| r.off) {
+            continue;
+        }
+        let Some(mode) = choose_mode(info.modes(), rule.map(|r| &r.mode)) else { continue };
         let crtcs: Vec<crtc::Handle> = info.encoders().iter().filter_map(|e| drm.get_encoder(*e).ok()).flat_map(|e| res.filter_crtcs(e.possible_crtcs())).collect();
-        out.push((format!("{}-{}", info.interface().as_str(), info.interface_id()), conn, mode, crtcs));
+        out.push((name, conn, mode, crtcs));
     }
     out
+}
+
+/// Its refresh in mHz, exactly (`vrefresh` rounds 164.997 up to 165).
+fn refresh_mhz(m: &Mode) -> i32 {
+    let (h, v) = (m.hsync().2 as i64, m.vsync().2 as i64);
+    if h == 0 || v == 0 {
+        return m.vrefresh() as i32 * 1000;
+    }
+    (m.clock() as i64 * 1_000_000 / (h * v)) as i32
+}
+
+/// The mode asked for, among the ones the monitor has: that size at the
+/// refresh closest to the one asked (the most it has, if none is asked), or
+/// its biggest at its most, or the one it prefers.
+fn choose_mode(modes: &[Mode], wish: Option<&config::ModeWish>) -> Option<Mode> {
+    let preferred = modes.iter().find(|m| m.mode_type().contains(ModeTypeFlags::PREFERRED)).or(modes.first()).copied();
+    match wish {
+        Some(config::ModeWish::Exact(w, h, hz)) => {
+            let same = modes.iter().filter(|m| m.size() == (*w as u16, *h as u16));
+            let best = if *hz > 0.0 { same.min_by_key(|m| (refresh_mhz(m) - (hz * 1000.0) as i32).abs()) } else { same.max_by_key(|m| refresh_mhz(m)) };
+            if best.is_none() {
+                eprintln!("session · there is no {w}×{h} mode: the preferred one instead");
+            }
+            best.copied().or(preferred)
+        }
+        Some(config::ModeWish::Highest) => modes.iter().max_by_key(|m| (m.size().0 as u32 * m.size().1 as u32, refresh_mhz(m))).copied(),
+        _ => preferred,
+    }
 }
 
 /// A monitor put up: its buffers on the card and the one that puts it together.
 fn make_monitor(drm: &DrmDeviceFd, gbm: &Arc<Mutex<gbm::Device<DrmDeviceFd>>>, name: String, conn: connector::Handle, mode: Mode, crtc: crtc::Handle) -> Monitor {
     let (w, h) = mode.size();
-    println!("session · monitor {name}: {w}×{h} at {} Hz", mode.vrefresh());
+    println!("session · monitor {name}: {w}×{h} at {:.2} Hz", refresh_mhz(&mode) as f64 / 1000.0);
     let size = (w as u32, h as u32);
     let flips: Arc<Mutex<Flips>> = Default::default();
     let output = DrmOutput { drm: drm.clone(), gbm: gbm.clone(), connector: conn, crtc, mode, size, name: name.clone(), buffers: Vec::new(), failed: false, flips: flips.clone() };
     let screen = screen::screen(name.clone(), size, Box::new(output));
-    Monitor { name, crtc, size, x: 0, screen, flips, mhz: mode.vrefresh() as i32 * 1000 }
+    Monitor { name, crtc, size, x: 0, y: 0, screen, flips, mhz: refresh_mhz(&mode) }
 }
 
-/// Left to right as `PLEAMAR_MONITORS` says («DP-3,HDMI-A-1»); the ones it
-/// does not name, after, in the card's order.
+/// Where the configuration puts them; the ones it does not place, left to
+/// right after them, as `PLEAMAR_MONITORS` says («DP-3,HDMI-A-1») and then in
+/// the card's order. Numbered left to right, top to bottom.
 fn place_monitors(monitors: &mut [Monitor]) {
     if let Ok(order) = std::env::var("PLEAMAR_MONITORS") {
         let names: Vec<&str> = order.split(',').map(str::trim).collect();
         monitors.sort_by_key(|m| names.iter().position(|n| *n == m.name).unwrap_or(names.len()));
     }
-    let mut x = 0;
-    for m in monitors.iter_mut() {
-        m.x = x;
-        x += m.size.0 as i32;
+    let placed: Vec<Option<(i32, i32)>> = monitors.iter().map(|m| config::get().monitor(&m.name).and_then(|r| r.at)).collect();
+    let mut x = monitors.iter().zip(&placed).filter_map(|(m, p)| p.map(|(px, _)| px + m.size.0 as i32)).max().unwrap_or(0);
+    for (m, p) in monitors.iter_mut().zip(&placed) {
+        (m.x, m.y) = match p {
+            Some(at) => *at,
+            None => {
+                let at = (x, 0);
+                x += m.size.0 as i32;
+                at
+            }
+        };
     }
-    println!("session · monitors, left to right: {}", monitors.iter().map(|m| m.name.as_str()).collect::<Vec<_>>().join(", "));
+    monitors.sort_by_key(|m| (m.x, m.y));
+    println!("session · monitors: {}", monitors.iter().map(|m| format!("{} at {},{}", m.name, m.x, m.y)).collect::<Vec<_>>().join(", "));
 }
 
 /// The scene's surfaces on the monitors, as sheets for the render. Its own:
@@ -423,13 +471,15 @@ fn give_sheets(monitors: &[Monitor], surfaces: &[Surface], to_render: &Sender<To
     given
 }
 
-/// The system's keyboard layout: `XKB_DEFAULT_LAYOUT` if set, else what
-/// `localectl` says the X11 layout is, else the default one.
+/// The keyboard layout: the configuration's (or Hyprland's), else
+/// `XKB_DEFAULT_LAYOUT`, else what `localectl` says the X11 layout is, else
+/// the default one.
 fn keymap() -> Result<xkb::Keymap, String> {
     let from_env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
-    let mut layout = from_env("XKB_DEFAULT_LAYOUT").unwrap_or_default();
-    let mut variant = from_env("XKB_DEFAULT_VARIANT").unwrap_or_default();
-    let options = from_env("XKB_DEFAULT_OPTIONS");
+    let k = &config::get().keyboard;
+    let mut layout = k.layout.clone().or_else(|| from_env("XKB_DEFAULT_LAYOUT")).unwrap_or_default();
+    let mut variant = k.variant.clone().or_else(|| from_env("XKB_DEFAULT_VARIANT")).unwrap_or_default();
+    let options = k.options.clone().or_else(|| from_env("XKB_DEFAULT_OPTIONS"));
     if layout.is_empty() {
         if let Ok(out) = std::process::Command::new("localectl").arg("status").output() {
             let text = String::from_utf8_lossy(&out.stdout);
@@ -498,29 +548,39 @@ impl State {
             st.dirty = true;
         }
         self.sheets = give_sheets(&self.monitors, &self.surfaces, &self.to_render, &self.cursor_kind, &mut self.next_sheet);
-        layers::register(self.monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, mhz: m.mhz }, m.screen.clone())).collect());
+        layers::register(self.monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz }, m.screen.clone())).collect());
         layers::tell(ToLayers::Monitors);
         // The cursor on every monitor, and the pointer within them.
         self.shown = None;
         self.show_cursor();
     }
 
-    /// The pointer moved by that much: across the monitors, left to right.
+    /// The pointer moved by that much: across the monitors as they are
+    /// placed. Off all of them, it stays at the edge of the nearest.
     fn move_pointer(&mut self, dx: f64, dy: f64) {
-        let width: i32 = self.monitors.iter().map(|m| m.size.0 as i32).sum();
         let (px, py) = (self.pointer.0 + dx, self.pointer.1 + dy);
-        let px = px.clamp(0.0, (width - 1).max(0) as f64);
-        let on = self.monitors.iter().position(|m| px >= m.x as f64 && px < (m.x + m.size.0 as i32) as f64).unwrap_or(0);
-        let py = py.clamp(0.0, self.monitors[on].size.1 as f64 - 1.0);
+        let clamp = |m: &Monitor| (px.clamp(m.x as f64, (m.x + m.size.0 as i32) as f64 - 1.0), py.clamp(m.y as f64, (m.y + m.size.1 as i32) as f64 - 1.0));
+        let Some((on, (px, py))) = self
+            .monitors
+            .iter()
+            .enumerate()
+            .map(|(k, m)| (k, clamp(m)))
+            .min_by(|a, b| {
+                let d = |(x, y): (f64, f64)| (x - px).powi(2) + (y - py).powi(2);
+                d(a.1).total_cmp(&d(b.1))
+            })
+        else {
+            return;
+        };
         self.pointer = (px, py);
         let hot = self.shown.and_then(|c| self.cursors.iter().find(|x| x.0 == c)).map_or((0, 0), |x| x.2);
         for (k, m) in self.monitors.iter().enumerate() {
-            let (cx, cy) = if k == on { ((px - m.x as f64) as i32 - hot.0, py as i32 - hot.1) } else { (-256, -256) };
+            let (cx, cy) = if k == on { ((px - m.x as f64) as i32 - hot.0, (py - m.y as f64) as i32 - hot.1) } else { (-256, -256) };
             #[allow(deprecated)]
             let _ = self.drm.move_cursor(m.crtc, (cx, cy));
         }
         let m = &self.monitors[on];
-        let (mx, my) = (px - m.x as f64, py);
+        let (mx, my) = (px - m.x as f64, py - m.y as f64);
         let hit = {
             let st = m.screen.0.lock().unwrap();
             match self.grab {
@@ -718,12 +778,16 @@ impl State {
         match event {
             InputEvent::PointerMotion { event } => self.move_pointer(event.delta_x(), event.delta_y()),
             InputEvent::PointerMotionAbsolute { event } => {
-                let width: i32 = self.monitors.iter().map(|m| m.size.0 as i32).sum();
-                let height = self.monitors.first().map_or(1, |m| m.size.1 as i32);
-                let p = event.position_transformed((width, height).into());
-                let (dx, dy) = (p.x - self.pointer.0, p.y - self.pointer.1);
+                // A tablet or a virtual machine's pointer: over all of the desktop.
+                let x0 = self.monitors.iter().map(|m| m.x).min().unwrap_or(0);
+                let y0 = self.monitors.iter().map(|m| m.y).min().unwrap_or(0);
+                let x1 = self.monitors.iter().map(|m| m.x + m.size.0 as i32).max().unwrap_or(1);
+                let y1 = self.monitors.iter().map(|m| m.y + m.size.1 as i32).max().unwrap_or(1);
+                let p = event.position_transformed((x1 - x0, y1 - y0).into());
+                let (dx, dy) = (p.x + x0 as f64 - self.pointer.0, p.y + y0 as f64 - self.pointer.1);
                 self.move_pointer(dx, dy);
             }
+            InputEvent::DeviceAdded { mut device } => set_up_device(&mut device),
             InputEvent::PointerButton { event } => {
                 let down = event.state() == ButtonState::Pressed;
                 if let Hit::Client(id, _) = self.hit {
@@ -832,3 +896,38 @@ impl State {
     }
 }
 
+/// A mouse or a touchpad as the configuration says: its acceleration and
+/// speed, and on a touchpad, tapping, natural scrolling and ignoring it while
+/// typing.
+fn set_up_device(device: &mut smithay::reexports::input::Device) {
+    use smithay::reexports::input::{AccelProfile, DeviceCapability};
+    if !device.has_capability(DeviceCapability::Pointer) {
+        return;
+    }
+    let touchpad = device.config_tap_finger_count() > 0;
+    let c = config::get();
+    let p = if touchpad { &c.touchpad } else { &c.pointer };
+    match p.accel.as_deref() {
+        Some("flat") => {
+            let _ = device.config_accel_set_profile(AccelProfile::Flat);
+        }
+        Some("adaptive") => {
+            let _ = device.config_accel_set_profile(AccelProfile::Adaptive);
+        }
+        _ => {}
+    }
+    if let Some(s) = p.speed {
+        let _ = device.config_accel_set_speed(s.clamp(-1.0, 1.0));
+    }
+    if let Some(n) = p.natural {
+        let _ = device.config_scroll_set_natural_scroll_enabled(n);
+    }
+    if touchpad {
+        // Tapping on unless it is said otherwise, as most desktops do.
+        let _ = device.config_tap_set_enabled(p.tap.unwrap_or(true));
+        if let Some(d) = p.dwt {
+            let _ = device.config_dwt_set_enabled(d);
+        }
+    }
+    println!("session · {}: {}", device.name(), if touchpad { "a touchpad" } else { "a pointer" });
+}

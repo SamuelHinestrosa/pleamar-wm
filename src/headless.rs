@@ -127,7 +127,7 @@ impl pleamar::Platform for Headless {
                 sc
             })
             .collect();
-        crate::layers::register(screens.iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * size.0 as i32, mhz: 60_000 }, sc.clone())).collect());
+        crate::layers::register(screens.iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * size.0 as i32, y: 0, mhz: 60_000 }, sc.clone())).collect());
         let cursor = Arc::new(Mutex::new(Cursor::Normal));
         let mut id = 7000;
         // Which sheets are on each monitor: to take one away, as if unplugged.
@@ -178,7 +178,7 @@ impl pleamar::Platform for Headless {
                     lock.lock().unwrap().quit = true;
                     cv.notify_all();
                 }
-                crate::layers::register(screens[..last].iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * size.0 as i32, mhz: 60_000 }, sc.clone())).collect());
+                crate::layers::register(screens[..last].iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * size.0 as i32, y: 0, mhz: 60_000 }, sc.clone())).collect());
                 crate::layers::tell(crate::layers::ToLayers::Monitors);
             });
         }

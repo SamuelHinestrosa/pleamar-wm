@@ -3,6 +3,7 @@
 //! scene's. Everything else —the command line, the scenes, the reloads— is
 //! pleamar's own.
 
+mod config;
 mod nest;
 mod headless;
 mod layers;
@@ -25,6 +26,11 @@ fn main() {
     // screenshots) and now runs here.
     if args.first().map(String::as_str) == Some("hyprctl") {
         std::process::exit(hyprctl(args.get(1).map(String::as_str).unwrap_or("")));
+    }
+    // `pleamar-wm config`: the session's configuration as it is understood.
+    if args.first().map(String::as_str) == Some("config") {
+        println!("{:#?}", config::get());
+        return;
     }
     if args.first().map(String::as_str) == Some("probe") {
         if let Err(e) = probe::run() {

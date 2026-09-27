@@ -15,12 +15,13 @@ use smithay::reexports::calloop::channel;
 use std::sync::Mutex;
 
 /// A monitor as the programs see it: its name (`DP-3`), size, where it is on
-/// the desktop, and its refresh in mHz.
+/// the desktop (its top left corner), and its refresh in mHz.
 #[derive(Clone, Debug)]
 pub struct MonitorInfo {
     pub name: String,
     pub size: (u32, u32),
     pub x: i32,
+    pub y: i32,
     pub mhz: i32,
 }
 

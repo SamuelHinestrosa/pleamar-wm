@@ -1,0 +1,18 @@
+# pleamar-wm's session: copy it to ~/.config/pleamar-wm/config.
+# What is not said here is taken from Hyprland's configuration (~/.config/hypr:
+# its monitor lines, kb_layout, accel_profile, sensitivity), if there is one.
+# `pleamar-wm config` shows what comes out.
+
+# monitor NAME  WxH@HZ | preferred | highest  [at X,Y]  [scale S]  [vrr]  [off]
+#monitor DP-3 1920x1080@165 at 0,0
+#monitor HDMI-A-1 preferred at 1920,0
+
+# keyboard  layout L  variant V  options O  repeat KEYS_A_SECOND  delay MS
+#keyboard layout es repeat 25 delay 400
+
+# pointer / touchpad  accel flat|adaptive  speed -1..1  natural on|off  tap on|off  dwt on|off
+#pointer accel flat
+#touchpad tap on natural on
+
+# idle  off-after SECONDS  (the monitors go dark; any input wakes them)
+#idle off-after 600
