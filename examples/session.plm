@@ -69,7 +69,11 @@ scene Session {
     fact mon = 0
     fact mouse.x = 0
     fact mouse.y = 0
-    on change pointer.x + pointer.y * 8192 while pointer.x >= 0 and pointer.x < W and pointer.y >= 0 and pointer.y < H {
+    // (Over another program's surface —Marea— the scene has no mouse, and
+    // then it reads 0, 0: the first monitor's corner. Taken for a real
+    // place, Marea on the second monitor was told the mouse had gone to the
+    // first the moment it came onto her, and left.)
+    on change pointer.x + pointer.y * 8192 while pointer.x >= 0 and pointer.x < W and pointer.y >= 0 and pointer.y < H and pointer.x + pointer.y > 0 {
         mon = screen.index
         mouse.x = pointer.x
         mouse.y = pointer.y
