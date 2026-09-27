@@ -294,9 +294,18 @@ pub fn set_scene_name(path: &str) {
 }
 
 /// Where the session says how its desktop is (see `write_desktop`).
-pub fn desktop_file() -> String {
+/// Where a session says its desktop (`pleamar-wm hyprctl` reads it): in the
+/// folder of its own programs, the one `PLEAMAR_SOCKETS` names for them. One
+/// file for every session was the last one's word for all: a check run
+/// without a screen told Marea, on Hyprland, of monitors that do not exist.
+pub fn desktop_file_of(socket: &str) -> String {
     let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    format!("{dir}/pleamar-wm-desktop")
+    format!("{dir}/pleamar-{socket}/desktop")
+}
+
+/// The desktop of the session this program runs in, if it runs in one.
+pub fn desktop_file() -> Option<String> {
+    std::env::var("PLEAMAR_SOCKETS").ok().filter(|d| !d.is_empty()).map(|d| format!("{d}/desktop"))
 }
 
 /// A picture of a monitor a program asked for: of which piece (x, y, w, h,
@@ -1271,7 +1280,11 @@ impl State {
                 text.push_str(&format!("window {} {} {} {} {}\t{}\n", r[0] + x, r[1] + y, r[2], r[3], w.app, w.title));
             }
         }
-        let _ = std::fs::write(desktop_file(), text);
+        let file = desktop_file_of(&self.socket);
+        if let Some(dir) = std::path::Path::new(&file).parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let _ = std::fs::write(file, text);
     }
 
     /// A monitor was plugged in or out: the outputs follow, by name. What was

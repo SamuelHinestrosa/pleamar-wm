@@ -75,7 +75,7 @@ fn main() {
 }
 
 fn hyprctl(what: &str) -> i32 {
-    let Ok(text) = std::fs::read_to_string(nest::desktop_file()) else {
+    let Some(Ok(text)) = nest::desktop_file().map(std::fs::read_to_string) else {
         eprintln!("pleamar-wm's session is not running");
         return 1;
     };
