@@ -112,7 +112,7 @@ use smithay::wayland::buffer::BufferHandler;
 use smithay::wayland::cursor_shape::CursorShapeManagerState;
 use smithay::wayland::tablet_manager::TabletSeatHandler;
 use smithay::wayland::compositor::{
-    get_parent, with_states, with_surface_tree_downward, BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, SubsurfaceCachedState, SurfaceAttributes,
+    get_parent, with_states, with_surface_tree_downward, with_surface_tree_upward, BufferAssignment, CompositorClientState, CompositorHandler, CompositorState, SubsurfaceCachedState, SurfaceAttributes,
     TraversalAction,
 };
 use smithay::wayland::output::OutputHandler;
@@ -1830,6 +1830,20 @@ impl State {
                 win.geometry = g;
                 win.sent = pieces.iter().map(|p| p.id).collect();
             }
+            if std::env::var_os("PLEAMAR_DEBUG_PIECES").is_some() {
+                let what: Vec<String> = pieces
+                    .iter()
+                    .map(|p| {
+                        let kind = match &p.content {
+                            PieceContent::Kept => "kept".to_owned(),
+                            PieceContent::Pixels(_) => "pixels".to_owned(),
+                            PieceContent::Dmabuf(d) => format!("{}·{}planes", String::from_utf8_lossy(&d.fourcc.to_le_bytes()), d.planes.len()),
+                        };
+                        format!("{} at {:?} {:?} px {:?} src {:?} {kind}", p.id, p.at, p.size, p.px, p.src)
+                    })
+                    .collect();
+                eprintln!("windows · slot {slot} {g:?}: {}", what.join(" | "));
+            }
             self.tell(NestEvent::Frame { slot, geometry: g, pieces });
         }
     }
@@ -1871,10 +1885,11 @@ fn content_of<T>(s: &WlSurface, f: impl FnOnce(&Content) -> T) -> Option<T> {
     with_states(s, |st| st.data_map.get::<Mutex<Content>>().map(|p| f(&p.lock().unwrap())))
 }
 
-/// A surface and its subsurfaces as pieces, each at its place: with what it
+/// A surface and its subsurfaces as pieces, each at its place, from the one
+/// furthest back to the nearest (the order they are drawn in): with what it
 /// shows if the render does not have it yet, or `Kept`.
 fn pieces_of(root: &WlSurface, at: (i32, i32), sent: &[u64], out: &mut Vec<WindowPiece>) {
-    with_surface_tree_downward(
+    with_surface_tree_upward(
         root,
         at,
         |s, states, &(x, y)| {
@@ -1921,7 +1936,7 @@ fn pieces_of(root: &WlSurface, at: (i32, i32), sent: &[u64], out: &mut Vec<Windo
 /// buffer on the card it is, if it is one.
 fn panel_pieces(root: &WlSurface, at: (i32, i32), sent: &[u64], scale: f64, out: &mut Vec<ClientPiece>) {
     let px = |v: i32| (v as f64 * scale).round() as i32;
-    with_surface_tree_downward(
+    with_surface_tree_upward(
         root,
         at,
         |s, states, &(x, y)| {
@@ -1941,7 +1956,7 @@ fn panel_pieces(root: &WlSurface, at: (i32, i32), sent: &[u64], scale: f64, out:
                 Some((number, d)) => dmabuf_piece(*number, d).map(PieceContent::Dmabuf),
                 None => Some(PieceContent::Pixels(c.data.clone())),
             });
-            let opaque = c.dmabuf.as_ref().is_some_and(|(_, d)| d.format().code == Fourcc::Xrgb8888);
+            let opaque = c.dmabuf.as_ref().is_some_and(|(_, d)| pleamar::dmabuf::opaque(d.format().code as u32));
             let size = (px(c.size.0 as i32).max(1) as u32, px(c.size.1 as i32).max(1) as u32);
             out.push(ClientPiece { key: c.key, at: (px(x + l.x), px(y + l.y)), size, px: (c.px.0 as u32, c.px.1 as u32), content: content.flatten(), buffer: c.dmabuf.as_ref().map(|(n, _)| *n), opaque });
         },
@@ -1952,15 +1967,13 @@ fn panel_pieces(root: &WlSurface, at: (i32, i32), sent: &[u64], scale: f64, out:
 /// What the render needs to read a program's buffer on the card: its own copy
 /// of the handle, and the layout.
 fn dmabuf_piece(number: u64, d: &Dmabuf) -> Option<DmabufPiece> {
-    let fd = d.handles().next()?.try_clone_to_owned().ok()?;
-    Some(DmabufPiece {
-        buffer: number,
-        fd,
-        fourcc: d.format().code as u32,
-        modifier: d.format().modifier.into(),
-        stride: d.strides().next()?,
-        offset: d.offsets().next()?,
-    })
+    let planes = d
+        .handles()
+        .zip(d.strides())
+        .zip(d.offsets())
+        .map(|((fd, stride), offset)| Some(pleamar::scene::DmabufPlane { fd: fd.try_clone_to_owned().ok()?, stride, offset }))
+        .collect::<Option<Vec<_>>>()?;
+    Some(DmabufPiece { buffer: number, planes, fourcc: d.format().code as u32, modifier: d.format().modifier.into() })
 }
 
 /// The topmost surface of a tree under a point, and where that surface is:
@@ -1989,7 +2002,8 @@ fn hit_tree(root: &WlSurface, at: Point<f64, Logical>, origin: (i32, i32)) -> Op
             let (x, y) = (x + dx, y + dy);
             let Some(p) = states.data_map.get::<Mutex<Content>>() else { return };
             let (w, h) = p.lock().unwrap().size;
-            if at.x >= x as f64 && at.y >= y as f64 && at.x < (x + w as i32) as f64 && at.y < (y + h as i32) as f64 {
+            // Nearest first: the first one under the point is the one seen.
+            if found.is_none() && at.x >= x as f64 && at.y >= y as f64 && at.x < (x + w as i32) as f64 && at.y < (y + h as i32) as f64 {
                 found = Some((s.clone(), Point::from((x, y))));
             }
         },
@@ -2111,7 +2125,7 @@ impl CompositorHandler for State {
         }
         match buffer {
             Some(BufferAssignment::NewBuffer(b)) => {
-                let on_card = get_dmabuf(&b).ok().filter(|d| d.num_planes() == 1).cloned();
+                let on_card = get_dmabuf(&b).ok().cloned();
                 let fresh = match on_card {
                     // On the card: lent to the render, and handed back once copied.
                     Some(d) => {
@@ -2274,9 +2288,9 @@ impl DmabufHandler for State {
         &mut self.dmabuf
     }
 
-    /// Accepted as it is: the render reads it when it is shown. One plane only, for now.
+    /// Accepted as it is, up to four planes: the render reads it when it is shown.
     fn dmabuf_imported(&mut self, _: &DmabufGlobal, dmabuf: Dmabuf, notifier: ImportNotifier) {
-        if dmabuf.num_planes() == 1 {
+        if (1..=4).contains(&dmabuf.num_planes()) {
             let _ = notifier.successful::<State>();
         } else {
             notifier.failed();

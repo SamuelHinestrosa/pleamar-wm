@@ -476,6 +476,9 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
     // The programs' buffers read so far, and each surface's copied pixels.
     let mut buffers: std::collections::HashMap<u64, wgpu::Texture> = Default::default();
     let mut pixels: std::collections::HashMap<u64, wgpu::Texture> = Default::default();
+    // Programs' video buffers (NV12) as they are; `buffers` has them as RGB.
+    let mut frames: std::collections::HashMap<u64, wgpu::Texture> = Default::default();
+    let mut yuv: Option<pleamar::dmabuf::YuvToRgb> = None;
     let debug = std::env::var_os("PLEAMAR_DEBUG_SCREEN").is_some();
     let (lock, cv) = &*screen;
     loop {
@@ -564,6 +567,7 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
         part(0, &mut parts);
         for b in forget {
             buffers.remove(&b);
+            frames.remove(&b);
         }
         // What the programs brought since the last time: their buffers on the
         // card are read where they are; their pixels, copied.
@@ -571,10 +575,33 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
             match content {
                 PieceContent::Dmabuf(d) => {
                     let Some(b) = buffer else { continue };
-                    if buffers.contains_key(&b) {
+                    let video = d.fourcc == pleamar::dmabuf::NV12;
+                    // RGB is read where it is, once; video is painted as RGB
+                    // into a texture of its own every time it brings a frame.
+                    if !video && buffers.contains_key(&b) {
                         continue;
                     }
-                    match pleamar::gpu::Gpu::import_dmabuf(&device, d.fd, (w, h), d.modifier, d.stride, d.offset, wgpu::TextureUses::RESOURCE, wgpu::TextureUsages::TEXTURE_BINDING, wgpu::TextureUses::RESOURCE) {
+                    if video {
+                        if !frames.contains_key(&b) {
+                            match pleamar::dmabuf::import(&device, d, (w, h), wgpu::TextureUses::RESOURCE, wgpu::TextureUsages::TEXTURE_BINDING, wgpu::TextureUses::RESOURCE) {
+                                Ok(t) => {
+                                    frames.insert(b, t);
+                                    buffers.insert(b, rgb_texture(&device, (w, h)));
+                                }
+                                Err(e) => {
+                                    eprintln!("screen · a program's video could not be read: {e}");
+                                    continue;
+                                }
+                            }
+                        }
+                        let (Some(frame), Some(rgb)) = (frames.get(&b), buffers.get(&b)) else { continue };
+                        let yuv = yuv.get_or_insert_with(|| pleamar::dmabuf::YuvToRgb::new(&device, wgpu::TextureFormat::Bgra8Unorm));
+                        let mut encoder = device.create_command_encoder(&Default::default());
+                        yuv.convert(&device, &mut encoder, frame, &rgb.create_view(&Default::default()), (w, h));
+                        queue.submit(Some(encoder.finish()));
+                        continue;
+                    }
+                    match pleamar::dmabuf::import(&device, d, (w, h), wgpu::TextureUses::RESOURCE, wgpu::TextureUsages::TEXTURE_BINDING, wgpu::TextureUses::RESOURCE) {
                         Ok(t) => {
                             buffers.insert(b, t);
                         }
@@ -970,6 +997,20 @@ fn capture(device: &wgpu::Device, queue: &wgpu::Queue, pipeline: &wgpu::RenderPi
         pixels.extend_from_slice(&data[(y * row) as usize..(y * row + w * 4) as usize]);
     }
     Some(pixels)
+}
+
+/// Where a program's video frame is painted as RGB, to be put together from.
+fn rgb_texture(device: &wgpu::Device, (w, h): (u32, u32)) -> wgpu::Texture {
+    device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("a program's video, as RGB"),
+        size: wgpu::Extent3d { width: w.max(1), height: h.max(1), depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: wgpu::TextureFormat::Bgra8Unorm,
+        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+        view_formats: &[],
+    })
 }
 
 fn client_texture(device: &wgpu::Device, (w, h): (u32, u32)) -> wgpu::Texture {
