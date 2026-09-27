@@ -275,6 +275,8 @@ struct State {
     syncobj: Option<DrmSyncobjState>,
     next_number: u64,
     socket: String,
+    /// XWayland's display (`:1`), once it is ready.
+    x_display: Option<String>,
     start: Instant,
     quit: bool,
 }
@@ -428,6 +430,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         syncobj: None,
         next_number: 0,
         socket: socket.clone(),
+        x_display: None,
         start: Instant::now(),
         quit: false,
         dh,
@@ -439,6 +442,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         }
     }
     state.write_desktop();
+    state.export_environment();
     println!("windows · programs connect at WAYLAND_DISPLAY={socket}");
     let _ = state.to_render.send(ToRender::Nest(NestEvent::Socket(socket)));
     let _ = ready.send(Some(()));
@@ -681,6 +685,25 @@ impl State {
             }
             ToNest::Released(numbers) => self.release(numbers),
             ToNest::Quit => self.quit = true,
+        }
+    }
+
+    /// In the session the login screen starts (`PLEAMAR_WM_EXPORT`), where
+    /// the programs started by dbus and systemd —the portals, notifications—
+    /// are told where the desktop is. Not from a TTY beside another desktop:
+    /// its portals would be pointed here.
+    fn export_environment(&self) {
+        if std::env::var_os("PLEAMAR_WM_EXPORT").is_none() || layers::monitors().is_empty() {
+            return;
+        }
+        let mut vars = vec![format!("WAYLAND_DISPLAY={}", self.socket), "XDG_SESSION_TYPE=wayland".to_owned()];
+        vars.push(format!("XDG_CURRENT_DESKTOP={}", std::env::var("XDG_CURRENT_DESKTOP").unwrap_or_else(|_| "pleamar".into())));
+        if let Some(d) = &self.x_display {
+            vars.push(format!("DISPLAY={d}"));
+        }
+        match std::process::Command::new("dbus-update-activation-environment").arg("--systemd").args(&vars).status() {
+            Ok(s) if s.success() => println!("windows · dbus and systemd know where the desktop is: {}", vars.join(" ")),
+            _ => eprintln!("windows · dbus-update-activation-environment failed: portals may not find the desktop"),
         }
     }
 

@@ -1,0 +1,6 @@
+[Desktop Entry]
+Name=pleamar-wm
+Comment=A window manager written as a pleamar scene, with Marea
+Exec=pleamar-wm-session
+Type=Application
+DesktopNames=pleamar
