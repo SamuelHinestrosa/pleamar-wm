@@ -293,7 +293,6 @@ pub fn set_scene_name(path: &str) {
     let _ = SCENE.set(stem);
 }
 
-/// Where the session says how its desktop is (see `write_desktop`).
 /// Where a session says its desktop (`pleamar-wm hyprctl` reads it): in the
 /// folder of its own programs, the one `PLEAMAR_SOCKETS` names for them. One
 /// file for every session was the last one's word for all: a check run

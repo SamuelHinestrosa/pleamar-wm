@@ -34,6 +34,11 @@ fn main() {
     if args.first().map(String::as_str) == Some("init") {
         std::process::exit(init());
     }
+    // `pleamar-wm scene`: the window manager that comes with it, to start one's own from.
+    if args.first().map(String::as_str) == Some("scene") {
+        print!("{DEFAULT_SCENE}");
+        return;
+    }
     // `pleamar-wm keys`: the bindings that come with it, to copy from.
     if args.first().map(String::as_str) == Some("keys") {
         print!("{}", keys::DEFAULTS);
@@ -54,7 +59,7 @@ fn main() {
     // `pleamar-wm headless scene.plm [options]`: the session's painting with no screen, to check it.
     if args.first().map(String::as_str) == Some("headless") {
         args.remove(0);
-        let scene = if args.first().is_some_and(|a| !a.starts_with("--")) { args.remove(0) } else { "examples/session.plm".into() };
+        let scene = if args.first().is_some_and(|a| !a.starts_with("--")) { args.remove(0) } else { default_scene() };
         nest::set_scene_name(&scene);
         layers::expect_monitors();
         pleamar::provide_before_quit(Box::new(|| {
@@ -69,7 +74,7 @@ fn main() {
     }
     if args.first().map(String::as_str) == Some("session") {
         args.remove(0);
-        let scene = if args.first().is_some_and(|a| !a.starts_with("--")) { args.remove(0) } else { "examples/session.plm".into() };
+        let scene = if args.first().is_some_and(|a| !a.starts_with("--")) { args.remove(0) } else { default_scene() };
         nest::set_scene_name(&scene);
         layers::expect_monitors();
         pleamar::provide_before_quit(Box::new(|| {
@@ -152,4 +157,24 @@ fn init() -> i32 {
     println!("init · {dir}/wm: your own window manager (session.plm), if you want one");
     println!("init · {dir}/shells: your scenes (bars, widgets, apps); start them from autostart");
     0
+}
+
+/// The window manager that comes with pleamar-wm, inside it: an installed
+/// pleamar-wm has no source folder next to it.
+const DEFAULT_SCENE: &str = include_str!("../examples/session.plm");
+
+/// The scene when none is said: the user's own (~/.config/pleamar/wm/session.plm),
+/// or the one that comes with it, written where it can be read.
+fn default_scene() -> String {
+    if let Some(own) = config::user_dir().map(|d| format!("{d}/wm/session.plm")).filter(|p| std::path::Path::new(p).exists()) {
+        return own;
+    }
+    // (Named session.plm: a scene answers by its file's name, `--say session`.)
+    let dir = format!("{}/pleamar-wm", std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into()));
+    let _ = std::fs::create_dir_all(&dir);
+    let path = format!("{dir}/session.plm");
+    if std::fs::read_to_string(&path).ok().as_deref() != Some(DEFAULT_SCENE) {
+        let _ = std::fs::write(&path, DEFAULT_SCENE);
+    }
+    path
 }
