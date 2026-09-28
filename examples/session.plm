@@ -1014,4 +1014,138 @@ scene Session {
     on toggle_free while mon == 0 { free.0 = 1 - free.0 }
     on toggle_free while mon == 1 { free.1 = 1 - free.1 }
 
+    // ── Marea rides a window ──
+    // Marea asks (`emit ride`): she leaves her island by the top edge, and here
+    // she drops onto the title bar of the window with the keyboard. She rides
+    // it: carried, she leans against the move and sways when it stops; shaken
+    // hard, she falls off. She hops to the window you settle on, jumps home
+    // when hers closes or is put away, and a press on her sends her home too.
+    // Back home, Marea is told (`ride_back`) and comes out of her island.
+    // Everything here is in the desktop's coordinates —monitor 1 starts where
+    // monitor 0 ends—, so she can ride a window from one monitor to the other.
+    event ride
+    event unride
+    fact riding = false
+    fact rider = -1
+    fact homing = false
+    fact falling = false
+    fact from.x = 0
+    fact from.y = 0
+    fact fall.dir = 1
+    prop hop = 1 ~650ms                  // from `from` to where she goes: 0 → 1
+    prop drop = 0 ~1300ms                // falling off: 0 → 1
+    // Leaning against the move, and swaying back when it stops.
+    prop sway = 0 ~pop
+    follow sway = clamp(-(mouse.x - lag.x) * 0.007, -0.55, 0.55) * (dragging == rider and rider >= 0)
+    let r.r = 15
+    // Where Marea lives, as seen from the desktop: the island, just above the top edge.
+    let r.isl = if(island.screen >= 0, island.screen, max(pick(max(rider, 0), win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen), 0))
+    let home.rx = screen.0.width * r.isl + pick(r.isl, screen.0.width, screen.1.width) / 2 - 50
+    let home.ry = -40
+    on ride while win.focus >= 0 and not riding {
+        riding = true
+        homing = false
+        falling = false
+        rider = win.focus
+        from.x = screen.0.width * max(if(island.screen >= 0, island.screen, pick(win.focus, win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen)), 0) + pick(max(island.screen, 0), screen.0.width, screen.1.width) / 2 - 50
+        from.y = -40
+        hop: 0 ~0ms
+        hop: 1 ~800ms after 16ms
+    }
+    // Nothing to ride: she stays at home.
+    on ride while win.focus < 0 and not riding and screen.index == 0 { launch "pleamar-wm --say marea 'emit ride_back'" }
+    // Home: Marea takes over.
+    on still hop for 60ms while riding and homing and hop > 0.97 {
+        riding = false
+        homing = false
+        rider = -1
+    }
+    on still hop for 60ms while riding and homing and hop > 0.97 and screen.index == 0 { launch "pleamar-wm --say marea 'emit ride_back'" }
+    on still drop for 60ms while falling and drop > 0.97 {
+        falling = false
+        riding = false
+        rider = -1
+    }
+    on still drop for 60ms while falling and drop > 0.97 and screen.index == 0 { launch "pleamar-wm --say marea 'emit ride_back'" }
+    repeat i in 0..6 {
+        let sc = win.$i.screen
+        let carried = dragging == i or (landing == i and win.$i.screen != landing.to)
+        // The window's corner on the desktop: where it is laid out, or where
+        // the hand carries it.
+        let wx = if(carried, mouse.x + screen.0.width * (mon > 0.5) - grab.x, x.$i + dx.$i + screen.0.width * sc)
+        let wy = if(carried, mouse.y - grab.y, y.$i + dy.$i)
+        // Her seat: on the top edge, left of the buttons; with no room above
+        // it (tiled, against the top of the monitor), in the title bar itself.
+        let seat.x = wx + max(w.$i * 0.5, w.$i - 132)
+        let seat.y = if(wy - r.r + 2 > 8, wy - r.r + 2, wy + tb / 2 - 1)
+        let to.x = if(homing, home.rx, seat.x)
+        let to.y = if(homing, home.ry, seat.y)
+        // On her way she goes up and comes down, like something with weight.
+        let at.x = from.x + (to.x - from.x) * hop
+        let at.y = from.y + (to.y - from.y) * hop - 130 * 4 * hop * (1 - hop)
+        let off = screen.0.width * screen.index
+        // Settling on another window: she hops over to it.
+        on still win.focus for 350ms while riding and not homing and not falling and rider == i and win.focus >= 0 and win.focus != i and not win.$i.minimized {
+            from.x = at.x
+            from.y = at.y
+            rider = win.focus
+            hop: 0 ~0ms
+            hop: 1 ~650ms after 16ms
+        }
+        // Hers goes away —closed, put away— or she is asked: home.
+        on change bye.$i while riding and rider == i and not homing and bye.$i > 0.5 {
+            from.x = at.x
+            from.y = at.y
+            homing = true
+            hop: 0 ~0ms
+            hop: 1 ~700ms after 16ms
+        }
+        on change win.$i.minimized while riding and rider == i and not homing and win.$i.minimized {
+            from.x = at.x
+            from.y = at.y
+            homing = true
+            hop: 0 ~0ms
+            hop: 1 ~700ms after 16ms
+        }
+        on unride while riding and rider == i and not homing and not falling {
+            from.x = at.x
+            from.y = at.y
+            homing = true
+            hop: 0 ~0ms
+            hop: 1 ~700ms after 16ms
+        }
+        // Shaken hard while carried: she lets go.
+        on change mouse.x while riding and rider == i and carried and not homing and not falling and hop > 0.97 and abs(mouse.x - lag.x) > 120 {
+            from.x = at.x
+            from.y = at.y
+            fall.dir = -sign(mouse.x - lag.x)
+            falling = true
+            drop: 0 ~0ms
+            drop: 1 ~1300ms after 16ms
+        }
+        // Her, as Marea looks: a drop of coal with two eyes that follow the mouse.
+        // Stretched while in the air, leaning while carried.
+        let st = clamp(abs(vel(hop)) * 0.06, 0, 0.3) * (1 - falling)
+        let px = if(falling, from.x + fall.dir * 90 * drop, at.x) - off
+        let py = if(falling, from.y - 40 * drop + 1500 * drop * drop, at.y)
+        let look = clamp((pointer.x - px) / 160, -1, 1) * 3
+        group {
+            z: 99999
+            show: riding and rider == i
+            opacity: if(falling, 1 - drop * drop, 1)
+            pivot: px, py + r.r
+            rotate: sway + if(falling, fall.dir * drop * 3, 0)
+            scale: 1 - st * 0.4, 1 + st
+            body {
+                color: marea
+                rim: 10%
+                shadow: 0, 4, 10, 35%
+                ellipse { at: px, py; radius: r.r }
+            }
+            box { at: px - 4.5 + look, py - 1; size: 4, 9 * (1 - 0.6 * st); corner: 2; color: #f5f7f5 }
+            box { at: px + 4.5 + look, py - 1; size: 4, 9 * (1 - 0.6 * st); corner: 2; color: #f5f7f5 }
+            zone ellipse rider_zone.$i { at: px, py; radius: r.r + 4; cursor: pointer; active: riding and rider == i and not homing and not falling }
+        }
+        on press rider_zone.$i { emit unride }
+    }
 }
