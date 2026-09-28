@@ -926,6 +926,11 @@ impl State {
             }
             ToNest::Shown { slot, monitor, rect } => {
                 layers::set_shown(slot, monitor.clone(), rect);
+                // No longer drawn: where it was is still where its menus and
+                // its X11 place are; only the ones who hide it need to know.
+                if monitor.is_empty() {
+                    return;
+                }
                 if let Some(m) = layers::monitors().iter().find(|m| m.name == monitor) {
                     self.x11_shown_at(slot, (m.x + rect[0], m.y + rect[1]));
                 }
@@ -1132,6 +1137,7 @@ impl State {
             return;
         }
         println!("windows · {} «{}»: {rules:?}", w.app, w.title);
+        layers::set_private(slot, rules.private);
         let size = rules.size.map(|(a, b)| (a as i32, b as i32));
         let screen = w.screen;
         if let Some(Some(w)) = self.slots.get_mut(slot) {
@@ -1843,6 +1849,7 @@ impl State {
         let listed = self.toplevel_list.new_toplevel::<State>(title.clone(), app.clone());
         self.slots[slot] = Some(Window { toplevel, surface, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen, shown: None, listed, fullscreen: false, dialog: false, floating: false, ruled: None, minimized: false, was_at: 0 });
         self.order.push(slot);
+        layers::set_private(slot, false);
         self.tell(NestEvent::Opened { slot, title, app, screen });
         self.tell(NestEvent::Order(self.order.clone()));
         self.apply_rules(slot);

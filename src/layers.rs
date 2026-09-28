@@ -121,7 +121,26 @@ pub fn set_shown(slot: usize, monitor: String, rect: [i32; 4]) {
 }
 
 pub fn shown(slot: usize) -> Option<(String, [i32; 4])> {
-    SHOWN.lock().unwrap().get(slot).cloned().flatten()
+    SHOWN.lock().unwrap().get(slot).cloned().flatten().filter(|(m, _)| !m.is_empty())
+}
+
+/// The windows a rule calls private (`window app=… private`): never seen
+/// in what is shared of a whole monitor, nor in a screenshot of it.
+static PRIVATE: Mutex<Vec<bool>> = Mutex::new(Vec::new());
+
+pub fn set_private(slot: usize, yes: bool) {
+    let mut p = PRIVATE.lock().unwrap();
+    if p.len() <= slot {
+        p.resize(slot + 1, false);
+    }
+    p[slot] = yes;
+}
+
+/// Where the private windows are seen on that monitor, in its pixels.
+pub fn private_on(monitor: &str) -> Vec<[i32; 4]> {
+    let private = PRIVATE.lock().unwrap().clone();
+    let shown = SHOWN.lock().unwrap();
+    private.iter().enumerate().filter(|(_, p)| **p).filter_map(|(k, _)| shown.get(k).cloned().flatten()).filter(|(m, _)| m == monitor).map(|(_, r)| r).collect()
 }
 
 /// A program dragging something: its icon, one surface per monitor (which

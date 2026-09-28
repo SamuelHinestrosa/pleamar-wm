@@ -103,8 +103,205 @@ pub fn deliver(id: u64, pixels: Option<Vec<u8>>) -> bool {
     if id < FIRST {
         return false;
     }
+    // A screenshot's, waiting for it; or a stream's.
+    let waiting = SNAPS.lock().unwrap().as_mut().and_then(|m| m.remove(&id));
+    if let Some(tx) = waiting {
+        let _ = tx.try_send(pixels);
+        return true;
+    }
     tell(Msg::Picture { id, pixels });
     true
+}
+
+/// The screenshots waiting for a monitor's picture, by its number.
+static SNAPS: Mutex<Option<HashMap<u64, async_channel::Sender<Option<Vec<u8>>>>>> = Mutex::new(None);
+
+/// Marea is told when the screen starts and stops being shared: its notices
+/// come in quietly meanwhile, and it shows it. Only on the first and the last.
+fn sharing(streams: usize) {
+    static SHARING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    let now = streams > 0;
+    if SHARING.swap(now, Ordering::AcqRel) != now {
+        layers::tell(layers::ToLayers::Launch(format!("marea {}", if now { "sharing_on" } else { "sharing_off" })));
+    }
+}
+
+/// The private windows on that monitor (`window app=… private`), made into
+/// big squares of their own colour: what they show cannot be read.
+fn hide_private(n: usize, pixels: &mut [u8], (w, h): (u32, u32)) {
+    let Some(m) = layers::monitors().get(n).cloned() else { return };
+    const BLOCK: i32 = 28;
+    // Its title bar too, which the scene draws over its box: a title says a lot.
+    let bar = (40.0 * m.scale) as i32;
+    for r in layers::private_on(&m.name) {
+        let r = [r[0] - 4, r[1] - bar, r[2] + 8, r[3] + bar + 4];
+        let (x0, y0) = (r[0].max(0), r[1].max(0));
+        let (x1, y1) = ((r[0] + r[2]).min(w as i32), (r[1] + r[3]).min(h as i32));
+        let mut by = y0;
+        while by < y1 {
+            let mut bx = x0;
+            while bx < x1 {
+                let (ex, ey) = ((bx + BLOCK).min(x1), (by + BLOCK).min(y1));
+                let mut sum = [0u64; 3];
+                let mut n = 0u64;
+                for y in by..ey {
+                    for x in bx..ex {
+                        let i = ((y as u32 * w + x as u32) * 4) as usize;
+                        for k in 0..3 {
+                            sum[k] += pixels[i + k] as u64;
+                        }
+                        n += 1;
+                    }
+                }
+                let avg = [(sum[0] / n.max(1)) as u8, (sum[1] / n.max(1)) as u8, (sum[2] / n.max(1)) as u8];
+                for y in by..ey {
+                    for x in bx..ex {
+                        let i = ((y as u32 * w + x as u32) * 4) as usize;
+                        pixels[i..i + 3].copy_from_slice(&avg);
+                    }
+                }
+                bx = ex;
+            }
+            by = (by + BLOCK).min(y1);
+        }
+    }
+}
+
+/// A monitor's picture now, whole (BGRx), with its private windows hidden.
+async fn monitor_picture(n: usize) -> Option<(Vec<u8>, (u32, u32))> {
+    let m = layers::monitors().get(n).cloned()?;
+    let id = NEXT.fetch_add(1, Ordering::Relaxed);
+    let (tx, rx) = async_channel::bounded(1);
+    SNAPS.lock().unwrap().get_or_insert_with(HashMap::new).insert(id, tx);
+    layers::capture(n, id, [0, 0, m.size.0 as i32, m.size.1 as i32], false, u64::MAX);
+    let pixels = futures_lite::future::or(async { rx.recv().await.ok().flatten() }, async {
+        async_io::Timer::after(std::time::Duration::from_secs(3)).await;
+        None
+    })
+    .await;
+    let mut pixels = pixels?;
+    hide_private(n, &mut pixels, m.size);
+    Some((pixels, m.size))
+}
+
+/// A window's picture now (BGRA premultiplied): asked once, and let go.
+async fn window_picture(slot: usize) -> Option<(Vec<u8>, (u32, u32))> {
+    let (tx, rx) = std::sync::mpsc::channel::<WindowPicture>();
+    render(ToRender::WatchWindow(slot, Some(tx)));
+    let (done, wait) = async_channel::bounded(1);
+    std::thread::spawn(move || {
+        let _ = done.try_send(rx.recv_timeout(std::time::Duration::from_secs(3)).ok());
+    });
+    let picture = wait.recv().await.ok().flatten();
+    render(ToRender::WatchWindow(slot, None));
+    picture.map(|p| (p.pixels, p.size))
+}
+
+/// The whole desktop: every monitor where it is, at the finest scale.
+async fn desktop_picture() -> Option<(Vec<u8>, (u32, u32))> {
+    let monitors = layers::monitors();
+    let scale = monitors.iter().map(|m| m.scale).fold(1.0, f64::max);
+    let x0 = monitors.iter().map(|m| m.x).min()?;
+    let y0 = monitors.iter().map(|m| m.y).min()?;
+    let x1 = monitors.iter().map(|m| m.x as f64 + m.size.0 as f64 / m.scale).fold(0.0, f64::max);
+    let y1 = monitors.iter().map(|m| m.y as f64 + m.size.1 as f64 / m.scale).fold(0.0, f64::max);
+    let (w, h) = (((x1 - x0 as f64) * scale).round() as u32, ((y1 - y0 as f64) * scale).round() as u32);
+    let mut canvas = vec![0u8; (w * h * 4) as usize];
+    for (n, m) in monitors.iter().enumerate() {
+        let Some((px, (mw, mh))) = monitor_picture(n).await else { continue };
+        let (ox, oy) = (((m.x - x0) as f64 * scale) as u32, ((m.y - y0) as f64 * scale) as u32);
+        for y in 0..mh.min(h.saturating_sub(oy)) {
+            let row = mw.min(w.saturating_sub(ox)) as usize * 4;
+            let d = ((oy + y) * w + ox) as usize * 4;
+            let s = (y * mw) as usize * 4;
+            canvas[d..d + row].copy_from_slice(&px[s..s + row]);
+        }
+    }
+    Some((canvas, (w, h)))
+}
+
+/// A picture to a PNG in the temporary folder (BGRA premultiplied in; the
+/// alpha of a monitor's picture means nothing, so it is made opaque):
+/// its `file://` address.
+fn save_png(pixels: &[u8], (w, h): (u32, u32), opaque: bool) -> Option<String> {
+    let mut rgba = Vec::with_capacity(pixels.len());
+    for p in pixels.chunks_exact(4) {
+        let a = if opaque { 255 } else { p[3] };
+        let un = |c: u8| if a == 0 || a == 255 { c } else { ((c as u32 * 255 + a as u32 / 2) / a as u32).min(255) as u8 };
+        rgba.extend_from_slice(&[un(p[2]), un(p[1]), un(p[0]), a]);
+    }
+    let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+    let path = std::env::temp_dir().join(format!("pleamar-screenshot-{stamp}.png"));
+    image::save_buffer(&path, &rgba, w, h, image::ExtendedColorType::Rgba8).ok()?;
+    Some(format!("file://{}", path.display()))
+}
+
+/// Asks the scene to choose (1 a monitor, 2 a window, 3 either); `None`, nothing.
+async fn choose(types: u32) -> Option<Picked> {
+    let (tx, choice) = async_channel::bounded(1);
+    if let Some(old) = CHOOSING.lock().unwrap().replace(tx) {
+        let _ = old.try_send(None);
+    }
+    render(ToRender::Nest(NestEvent::Pick(types)));
+    futures_lite::future::or(async { choice.recv().await.ok().flatten() }, async {
+        async_io::Timer::after(std::time::Duration::from_secs(120)).await;
+        picked(None);
+        None
+    })
+    .await
+}
+
+struct Screenshot;
+
+#[zbus::interface(name = "org.freedesktop.impl.portal.Screenshot")]
+impl Screenshot {
+    async fn screenshot(&self, _handle: OwnedObjectPath, app_id: String, _parent_window: String, options: HashMap<String, OwnedValue>) -> Answer {
+        let interactive = options.get("interactive").and_then(|v| bool::try_from(v).ok()).unwrap_or(false);
+        let target = options.get("target").and_then(|v| u32::try_from(v).ok()).unwrap_or(1);
+        println!("portal · {} asks for a screenshot", if app_id.is_empty() { "a program" } else { &app_id });
+        // Asked to choose, or a window: the same chooser as sharing.
+        let picture = if interactive || target == 2 {
+            match choose(if target == 2 { 2 } else { 3 }).await {
+                Some(Picked::Window(slot)) => window_picture(slot).await.map(|(p, s)| (p, s, false)),
+                Some(Picked::Screen(n)) => monitor_picture(n).await.map(|(p, s)| (p, s, true)),
+                None => return (1, HashMap::new()),
+            }
+        } else {
+            desktop_picture().await.map(|(p, s)| (p, s, true))
+        };
+        let Some((pixels, size, opaque)) = picture else { return (2, HashMap::new()) };
+        match save_png(&pixels, size, opaque) {
+            Some(uri) => (0, HashMap::from([("uri".to_owned(), owned(ZValue::from(uri)))])),
+            None => (2, HashMap::new()),
+        }
+    }
+
+    /// A colour of the screen, chosen with `hyprpicker` (its zoom and its
+    /// preview) if it is there.
+    async fn pick_color(&self, _handle: OwnedObjectPath, _app_id: String, _parent_window: String, _options: HashMap<String, OwnedValue>) -> Answer {
+        let (tx, rx) = async_channel::bounded(1);
+        std::thread::spawn(move || {
+            let out = std::process::Command::new("hyprpicker").args(["-f", "rgb", "-b", "-q"]).output().ok();
+            let _ = tx.try_send(out.filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()));
+        });
+        let Some(text) = rx.recv().await.ok().flatten() else { return (2, HashMap::new()) };
+        let v: Vec<f64> = text.split(|c: char| !c.is_ascii_digit()).filter_map(|n| n.parse::<f64>().ok()).collect();
+        if v.len() < 3 {
+            return (1, HashMap::new());
+        }
+        (0, HashMap::from([("color".to_owned(), owned(ZValue::from((v[0] / 255.0, v[1] / 255.0, v[2] / 255.0))))]))
+    }
+
+    /// The whole screen (1) and a window or monitor chosen (2).
+    #[zbus(property)]
+    fn available_targets(&self) -> u32 {
+        1 | 2
+    }
+
+    #[zbus(property, name = "version")]
+    fn version(&self) -> u32 {
+        3
+    }
 }
 
 /// Starts both threads. Without a session bus or PipeWire there is simply no
@@ -132,6 +329,7 @@ pub fn start(to_render: Sender<ToRender>) {
         let sessions: Sessions = Default::default();
         let built = zbus::blocking::connection::Builder::session()
             .and_then(|b| b.serve_at(PATH, ScreenCast { sessions }))
+            .and_then(|b| b.serve_at(PATH, Screenshot))
             .and_then(|b| b.name(NAME))
             .and_then(|b| b.build());
         match built {
@@ -207,20 +405,8 @@ impl ScreenCast {
         let Some((types, cursor)) = self.sessions.lock().unwrap().get(&session).map(|c| (c.types, c.cursor == 2)) else {
             return (2, HashMap::new());
         };
-        // The scene chooses: it is asked, and whoever asked before is let go.
-        let (tx, choice) = async_channel::bounded(1);
-        if let Some(old) = CHOOSING.lock().unwrap().replace(tx) {
-            let _ = old.try_send(None);
-        }
-        render(ToRender::Nest(NestEvent::Pick(types)));
-        // Not forever: a scene of one's own may not know how to choose.
-        let chosen = futures_lite::future::or(async { choice.recv().await.ok().flatten() }, async {
-            async_io::Timer::after(std::time::Duration::from_secs(120)).await;
-            picked(None);
-            None
-        })
-        .await;
-        let source = match chosen {
+        // The scene chooses (not forever: a scene of one's own may not know how).
+        let source = match choose(types).await {
             Some(Picked::Screen(n)) if types & 1 != 0 => Source::Monitor(n),
             Some(Picked::Window(slot)) if types & 2 != 0 => Source::Window(slot),
             // Turned down (or asked again by someone else): 1, the user said no.
@@ -468,6 +654,7 @@ fn pipewire_thread(rx: pw::channel::Receiver<Msg>) -> Result<(), pw::Error> {
             match open(&core, &session, Source::Monitor(n), cursor, m.size, (m.mhz.max(1000) as u32 + 500) / 1000, reply.clone()) {
                 Ok(cast) => {
                     c.borrow_mut().insert(session, cast);
+                    sharing(c.borrow().len());
                 }
                 Err(e) => {
                     eprintln!("portal · a stream could not be made: {e}");
@@ -498,6 +685,8 @@ fn pipewire_thread(rx: pw::channel::Receiver<Msg>) -> Result<(), pw::Error> {
                     Ok(cast) => {
                         cast.feed.borrow_mut().take(picture.pixels, picture.size);
                         c.borrow_mut().insert(session, cast);
+                        sharing(c.borrow().len());
+                    sharing(c.borrow().len());
                     }
                     Err(e) => {
                         eprintln!("portal · a stream could not be made: {e}");
@@ -540,7 +729,8 @@ fn pipewire_thread(rx: pw::channel::Receiver<Msg>) -> Result<(), pw::Error> {
                 render(ToRender::WatchWindow(slot, None));
                 let _ = reply.try_send(None);
             }
-            if let Some(cast) = c.borrow_mut().remove(&session) {
+            let removed = c.borrow_mut().remove(&session);
+            if let Some(cast) = removed {
                 let feed = cast.feed.borrow();
                 if let Some(id) = feed.asked {
                     layers::uncapture(id);
@@ -553,6 +743,7 @@ fn pipewire_thread(rx: pw::channel::Receiver<Msg>) -> Result<(), pw::Error> {
                 }
                 drop(feed);
                 let _ = cast.stream.disconnect();
+                sharing(c.borrow().len());
                 println!("portal · stopped sharing");
             }
         }
@@ -561,8 +752,11 @@ fn pipewire_thread(rx: pw::channel::Receiver<Msg>) -> Result<(), pw::Error> {
             let Some(cast) = casts.values().find(|k| k.feed.borrow().asked == Some(id)) else { return };
             let mut feed = cast.feed.borrow_mut();
             feed.asked = None;
-            if let Some(px) = pixels {
+            if let Some(mut px) = pixels {
                 let size = feed.size;
+                if let Source::Monitor(n) = feed.source {
+                    hide_private(n, &mut px, size);
+                }
                 feed.take(px, size);
                 drop(feed);
                 let _ = cast.stream.trigger_process();

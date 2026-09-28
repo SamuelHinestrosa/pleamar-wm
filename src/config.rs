@@ -21,6 +21,7 @@
 //! window app=pavucontrol float size 820x560
 //! window app=discord workspace 3 monitor HDMI-A-1
 //! window title="Picture-in-Picture" float
+//! window app=org.keepassxc.KeePassXC private
 //! ```
 //!
 //! What it does not say is looked for in Hyprland's own configuration
@@ -86,7 +87,7 @@ pub struct Config {
     /// Seconds without input before the monitors go dark (none: never).
     pub off_after: Option<u64>,
     /// What some windows do when they open: `window app=… [float] [size WxH]
-    /// [monitor N|NAME] [workspace N]`.
+    /// [monitor N|NAME] [workspace N] [private]`.
     pub windows: Vec<WindowRule>,
 }
 
@@ -103,15 +104,19 @@ pub struct WindowRule {
     /// A monitor by its number (0 the leftmost) or its name.
     pub monitor: Option<String>,
     pub workspace: Option<usize>,
+    /// Never seen in what is shared of a whole monitor, nor in its screenshots:
+    /// pixelated there (a password manager, a private chat).
+    pub private: bool,
 }
 
-/// What the rules say for a window: float, size, monitor, workspace.
+/// What the rules say for a window: float, size, monitor, workspace, private.
 #[derive(Default, Debug, PartialEq)]
 pub struct ForWindow {
     pub float: bool,
     pub size: Option<(u32, u32)>,
     pub monitor: Option<String>,
     pub workspace: Option<usize>,
+    pub private: bool,
 }
 
 /// `*` for anything, no case: `org.gnome.*`, `*Picture*`, `firefox`.
@@ -142,6 +147,7 @@ impl Config {
                 continue;
             }
             out.float |= r.float;
+            out.private |= r.private;
             out.size = r.size.or(out.size);
             out.monitor = r.monitor.clone().or(out.monitor);
             out.workspace = r.workspace.or(out.workspace);
@@ -300,6 +306,8 @@ pub fn parse(text: &str, c: &mut Config) {
                         r.title = Some(v.to_owned());
                     } else if w == "float" {
                         r.float = true;
+                    } else if w == "private" {
+                        r.private = true;
                     } else if w == "size" {
                         r.size = rest.get(k + 1).and_then(|s| s.split_once('x')).and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)));
                         ok &= r.size.is_some();
@@ -320,7 +328,7 @@ pub fn parse(text: &str, c: &mut Config) {
                 if ok && (r.app.is_some() || r.title.is_some()) {
                     c.windows.push(r);
                 } else {
-                    eprintln!("config · line {}: a window rule is `window app=NAME|title=TEXT [float] [size WxH] [monitor N|NAME] [workspace N]`", n + 1);
+                    eprintln!("config · line {}: a window rule is `window app=NAME|title=TEXT [float] [size WxH] [monitor N|NAME] [workspace N] [private]`", n + 1);
                 }
             }
             "idle" => pairs(&mut |k, v| match k {
@@ -546,6 +554,9 @@ mod tests {
         assert_eq!(c.for_window("firefox", "picture in picture").monitor.as_deref(), Some("HDMI-A-1"));
         assert_eq!(c.for_window("kitty", "zsh"), ForWindow::default());
         assert!(matches("*picture*", "Picture-in-Picture") && !matches("fire", "firefox") && matches("fire*", "firefox"));
+        parse("window app=org.keepassxc.* private", &mut c);
+        assert!(c.for_window("org.keepassxc.KeePassXC", "Passwords").private);
+        assert!(!c.for_window("kitty", "zsh").private);
     }
 
     #[test]

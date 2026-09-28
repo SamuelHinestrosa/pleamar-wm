@@ -171,6 +171,7 @@ idle off-after 600                          # the monitors go dark
 window app=pavucontrol float size 820x560   # what some windows do when they open
 window app=discord workspace 3 monitor 1
 window title="Picture in Picture" float     # `*` for anything: app=org.gnome.*
+window app=org.keepassxc.KeePassXC private  # pixelated when a whole screen is shared
 ```
 
 In the login screen (SDDM, GDM): `pleamar-update --session` puts «pleamar-wm»
@@ -183,7 +184,11 @@ browser or OBS ask, the overview opens to choose: press a window, or «This
 whole screen» on a monitor's band (Escape or «Cancel», nothing). A window is
 read from its own buffers, so it is shared whole even with another on top;
 it goes through PipeWire only when something changes, with the pointer drawn
-in if the program asks for it.
+in if the program asks for it. Screenshots asked through the portal are its
+own too (the whole desktop, or a window or monitor chosen the same way). While
+anything is shared, Marea's notices come in quietly and a ring breathes
+around her; windows a rule calls `private` come out pixelated —their title
+bar with them— in a whole screen shared or photographed.
 
 # Keys
 

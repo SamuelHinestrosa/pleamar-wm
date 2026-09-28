@@ -195,19 +195,33 @@ mod tests {
         let mut k = Keys::default();
         parse("bind Super+q close\nbind Super+Return launch kitty --single\nbind Shift+Super+m restore_last\ngesture swipe3_down close\n", &mut k);
         let sup = Mods { logo: true, ..Default::default() };
-        assert_eq!(k.find("q", sup), Some(&Action::Emit("close".into(), None)));
-        assert_eq!(k.find("Return", sup), Some(&Action::Launch("kitty --single".into())));
-        assert_eq!(k.find("M", Mods { logo: true, shift: true, ..Default::default() }), Some(&Action::Emit("restore_last".into(), None)));
-        assert_eq!(k.find("q", Mods::default()), None);
+        assert_eq!(k.bind("q", sup).map(|b| &b.action), Some(&Action::Emit("close".into(), None)));
+        assert_eq!(k.bind("Return", sup).map(|b| &b.action), Some(&Action::Launch("kitty --single".into())));
+        assert_eq!(k.bind("M", Mods { logo: true, shift: true, ..Default::default() }).map(|b| &b.action), Some(&Action::Emit("restore_last".into(), None)));
+        assert!(k.bind("q", Mods::default()).is_none());
         assert_eq!(k.gesture("swipe3_down"), Some(&Action::Emit("close".into(), None)));
         parse("unbind Super+q\n", &mut k);
-        assert_eq!(k.find("q", sup), None);
+        assert!(k.bind("q", sup).is_none());
+    }
+
+    #[test]
+    fn flags() {
+        let mut k = Keys::default();
+        parse("bind Super+Shift+v launch voxtype record start\nbind Super+Shift+v release launch voxtype record stop\n", &mut k);
+        let m = Mods { logo: true, shift: true, ..Default::default() };
+        assert_eq!(k.bind("v", m).map(|b| &b.action), Some(&Action::Launch("voxtype record start".into())));
+        let r = k.on_release("v", m).expect("the release is its own binding");
+        assert!(r.release && !r.repeat);
+        assert_eq!(r.action, Action::Launch("voxtype record stop".into()));
     }
 
     #[test]
     fn defaults_parse() {
         let mut k = Keys::default();
         parse(DEFAULTS, &mut k);
-        assert!(k.find("q", Mods { logo: true, ..Default::default() }).is_some());
+        assert!(k.bind("q", Mods { logo: true, ..Default::default() }).is_some());
+        // The keyboard's own keys: they repeat and work locked.
+        let up = k.bind("XF86AudioRaiseVolume", Mods::default()).expect("volume up is bound");
+        assert!(up.repeat && up.locked);
     }
 }
