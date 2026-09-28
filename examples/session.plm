@@ -1037,7 +1037,9 @@ scene Session {
     // Leaning against the move, and swaying back when it stops.
     prop sway = 0 ~pop
     follow sway = clamp(-(mouse.x - lag.x) * 0.007, -0.55, 0.55) * (dragging == rider and rider >= 0)
-    let r.r = 15
+    // Her real size, the one she has in her island: a 46 px body, eyes of
+    // 5 × 13, 13 apart and 2.5 below the centre.
+    let r.r = 23
     // Where Marea lives, as seen from the desktop: the island, just above the top edge.
     let r.isl = if(island.screen >= 0, island.screen, max(pick(max(rider, 0), win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen), 0))
     let home.rx = screen.0.width * r.isl + pick(r.isl, screen.0.width, screen.1.width) / 2 - 50
@@ -1076,7 +1078,7 @@ scene Session {
         let wy = if(carried, mouse.y - grab.y, y.$i + dy.$i)
         // Her seat: on the top edge, left of the buttons; with no room above
         // it (tiled, against the top of the monitor), in the title bar itself.
-        let seat.x = wx + max(w.$i * 0.5, w.$i - 132)
+        let seat.x = wx + max(w.$i * 0.5, w.$i - 140)
         let seat.y = if(wy - r.r + 2 > 8, wy - r.r + 2, wy + tb / 2 - 1)
         let to.x = if(homing, home.rx, seat.x)
         let to.y = if(homing, home.ry, seat.y)
@@ -1142,8 +1144,8 @@ scene Session {
                 shadow: 0, 4, 10, 35%
                 ellipse { at: px, py; radius: r.r }
             }
-            box { at: px - 4.5 + look, py - 1; size: 4, 9 * (1 - 0.6 * st); corner: 2; color: #f5f7f5 }
-            box { at: px + 4.5 + look, py - 1; size: 4, 9 * (1 - 0.6 * st); corner: 2; color: #f5f7f5 }
+            box { at: px - 6.5 + look, py + 2.5; size: 5, 13 * (1 - 0.6 * st); corner: 2.5; color: #f5f7f5 }
+            box { at: px + 6.5 + look, py + 2.5; size: 5, 13 * (1 - 0.6 * st); corner: 2.5; color: #f5f7f5 }
             zone ellipse rider_zone.$i { at: px, py; radius: r.r + 4; cursor: pointer; active: riding and rider == i and not homing and not falling }
         }
         on press rider_zone.$i { emit unride }
