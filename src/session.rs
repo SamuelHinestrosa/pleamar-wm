@@ -67,7 +67,10 @@ struct Monitor {
     connector: connector::Handle,
     /// Lit, or dark (idle, or a program turned it off).
     on: bool,
+    /// Its size upright, as it is seen: a monitor on its side is taller than wide.
     size: (u32, u32),
+    /// Quarter turns it stands at (`transform`): its cursor is turned with it.
+    turn: u8,
     /// Where it is on the desktop: its top left corner, in units.
     x: i32,
     y: i32,
@@ -203,7 +206,9 @@ struct State {
     keymap: xkb::State,
     pointer: (f64, f64),
     /// The cursor's shapes on the card, each with its hot spot, and which is shown.
-    cursors: Vec<(Cursor, gbm::BufferObject<()>, (i32, i32))>,
+    /// Each shape, for each way a monitor stands (quarter turns): its image
+    /// on the card and its tip, both turned.
+    cursors: Vec<(Cursor, u8, gbm::BufferObject<()>, (i32, i32))>,
     shown: Option<Cursor>,
     /// What the scene asks for, and what a program's surface under the pointer does.
     scene_cursor: Cursor,
@@ -457,19 +462,40 @@ fn choose_mode(modes: &[Mode], wish: Option<&config::ModeWish>) -> Option<Mode> 
     }
 }
 
+/// Where a point of a monitor seen upright (`size` its upright size) falls
+/// on it as it really is, turned `turn` quarter turns: the same turn
+/// `screen::Turned` gives what is put together.
+fn turned_point(turn: u8, (x, y): (f64, f64), (w, h): (f64, f64)) -> (f64, f64) {
+    match turn % 4 {
+        1 => (h - y, x),
+        2 => (w - x, h - y),
+        3 => (y, w - x),
+        _ => (x, y),
+    }
+}
+
 /// A monitor put up: its buffers on the card and the one that puts it together.
 fn make_monitor(drm: &DrmDeviceFd, gbm: &Arc<Mutex<gbm::Device<DrmDeviceFd>>>, name: String, conn: connector::Handle, mode: Mode, crtc: crtc::Handle) -> Monitor {
     let (w, h) = mode.size();
     println!("session · monitor {name}: {w}×{h} at {:.2} Hz", refresh_mhz(&mode) as f64 / 1000.0);
-    let size = (w as u32, h as u32);
+    let real = (w as u32, h as u32);
     let flips: Arc<Mutex<Flips>> = Default::default();
-    let output = DrmOutput { drm: drm.clone(), gbm: gbm.clone(), connector: conn, crtc, mode, size, name: name.clone(), buffers: Vec::new(), failed: false, flips: flips.clone() };
-    let screen = screen::screen(name.clone(), size, Box::new(output));
+    let output = DrmOutput { drm: drm.clone(), gbm: gbm.clone(), connector: conn, crtc, mode, size: real, name: name.clone(), buffers: Vec::new(), failed: false, flips: flips.clone() };
+    // Standing on its side: everything else sees it upright, taller than wide.
+    let turn = config::get().monitor(&name).map_or(0, |r| r.transform % 4);
+    let (size, output): ((u32, u32), Box<dyn screen::Output>) = if turn == 0 {
+        (real, Box::new(output))
+    } else {
+        println!("session · {name}: turned {}°", turn as u32 * 90);
+        let t = screen::Turned::new(Box::new(output), turn, real);
+        (if turn % 2 == 1 { (real.1, real.0) } else { real }, Box::new(t))
+    };
+    let screen = screen::screen(name.clone(), size, output);
     let scale = config::get().monitor(&name).and_then(|r| r.scale).unwrap_or(1.0).clamp(0.5, 4.0);
     if scale != 1.0 {
         println!("session · {name}: scale {scale}");
     }
-    Monitor { name, crtc, connector: conn, on: true, size, x: 0, y: 0, scale, screen, flips, mhz: refresh_mhz(&mode) }
+    Monitor { name, crtc, connector: conn, on: true, size, turn, x: 0, y: 0, scale, screen, flips, mhz: refresh_mhz(&mode) }
 }
 
 /// Where the configuration puts them; the ones it does not place, left to
@@ -649,10 +675,16 @@ impl State {
         };
         self.pointer = (px, py);
         layers::move_drag((px, py));
-        let hot = self.shown.and_then(|c| self.cursors.iter().find(|x| x.0 == c)).map_or((0, 0), |x| x.2);
-        // The monitor is put together in its pixels: from units to them.
+        // The monitor is put together in its pixels: from units to them, and
+        // on one standing on its side, turned the way it stands.
         for (k, m) in self.monitors.iter().enumerate() {
-            let (cx, cy) = if k == on { (((px - m.x as f64) * m.scale) as i32 - hot.0, ((py - m.y as f64) * m.scale) as i32 - hot.1) } else { (-256, -256) };
+            let hot = self.shown.and_then(|c| self.cursors.iter().find(|x| x.0 == c && x.1 == m.turn).or_else(|| self.cursors.iter().find(|x| x.0 == c && x.1 == 0))).map_or((0, 0), |x| x.3);
+            let (cx, cy) = if k == on {
+                let (x, y) = turned_point(m.turn, ((px - m.x as f64) * m.scale, (py - m.y as f64) * m.scale), (m.size.0 as f64, m.size.1 as f64));
+                (x as i32 - hot.0, y as i32 - hot.1)
+            } else {
+                (-256, -256)
+            };
             self.mover.to(m.crtc, (cx, cy));
         }
         let m = &self.monitors[on];
@@ -738,7 +770,26 @@ impl State {
             if bo.write(&px).is_err() {
                 continue;
             }
-            self.cursors.push((kind, bo, hot));
+            self.cursors.push((kind, 0, bo, hot));
+            // And turned, for the monitors that stand on their side.
+            let mut turns: Vec<u8> = self.monitors.iter().map(|m| m.turn).filter(|t| *t != 0).collect();
+            turns.sort();
+            turns.dedup();
+            for turn in turns {
+                let mut out = vec![0u8; 64 * 64 * 4];
+                for y in 0..64usize {
+                    for x in 0..64usize {
+                        let (qx, qy) = turned_point(turn, (x as f64, y as f64), (63.0, 63.0));
+                        let (i, o) = ((y * 64 + x) * 4, (qy as usize * 64 + qx as usize) * 4);
+                        out[o..o + 4].copy_from_slice(&px[i..i + 4]);
+                    }
+                }
+                let (hx, hy) = turned_point(turn, (hot.0 as f64, hot.1 as f64), (63.0, 63.0));
+                let Ok(mut bo) = gbm.lock().unwrap().create_buffer_object::<()>(64, 64, gbm::Format::Argb8888, gbm::BufferObjectFlags::CURSOR | gbm::BufferObjectFlags::WRITE) else { continue };
+                if bo.write(&out).is_ok() {
+                    self.cursors.push((kind, turn, bo, (hx as i32, hy as i32)));
+                }
+            }
         }
         println!("session · cursor: {} ({} shapes)", theme.as_deref().unwrap_or("its own arrow"), self.cursors.len());
         self.show_cursor();
@@ -749,13 +800,16 @@ impl State {
         let want = if matches!(self.route.hit, Hit::Client(..)) { self.program_cursor } else { self.scene_cursor };
         // A shape the theme lacks is shown as the arrow.
         let want = if self.cursors.iter().any(|c| c.0 == want) { want } else { Cursor::Normal };
+        if !self.cursors.iter().any(|c| c.0 == want) {
+            return;
+        }
         if self.shown == Some(want) {
             return;
         }
-        let Some((_, bo, hot)) = self.cursors.iter().find(|c| c.0 == want) else { return };
         use smithay::reexports::drm::buffer::Buffer;
-        let image = CursorImage { size: Buffer::size(bo), format: Buffer::format(bo), pitch: Buffer::pitch(bo), handle: Buffer::handle(bo) };
         for m in &self.monitors {
+            let Some((_, _, bo, hot)) = self.cursors.iter().find(|c| c.0 == want && c.1 == m.turn).or_else(|| self.cursors.iter().find(|c| c.0 == want && c.1 == 0)) else { continue };
+            let image = CursorImage { size: Buffer::size(bo), format: Buffer::format(bo), pitch: Buffer::pitch(bo), handle: Buffer::handle(bo) };
             self.mover.shape(m.crtc, image, *hot);
         }
         self.shown = Some(want);

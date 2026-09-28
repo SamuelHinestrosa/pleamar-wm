@@ -13,6 +13,7 @@
 //! monitor HDMI-A-1 preferred at 1920,0
 //! monitor HDMI-A-2 off
 //! monitor DP-1 highest scale 1.5 vrr
+//! monitor HDMI-A-2 preferred at 1920,0 transform 90
 //! keyboard layout es variant "" options caps:escape repeat 25 delay 400
 //! pointer accel flat speed 0
 //! touchpad tap on natural on dwt on speed 0.2
@@ -33,6 +34,10 @@ pub struct MonitorRule {
     /// Where it goes on the desktop; `None`, after the others, left to right.
     pub at: Option<(i32, i32)>,
     pub scale: Option<f64>,
+    /// How far it is turned, in quarter turns: 1 is 90°, a monitor standing
+    /// on its side. The same numbers, and the same way round, as Hyprland's
+    /// (and wlroots') `transform`: what is right there is right here.
+    pub transform: u8,
     pub vrr: bool,
     pub off: bool,
 }
@@ -183,7 +188,7 @@ pub fn parse(text: &str, c: &mut Config) {
         match w[0].as_str() {
             "monitor" => match monitor_line(rest) {
                 Some(m) => c.monitors.push(m),
-                None => eprintln!("config · line {}: a monitor line is `monitor NAME [WxH@HZ|preferred|highest] [at X,Y] [scale S] [vrr] [off]`", n + 1),
+                None => eprintln!("config · line {}: a monitor line is `monitor NAME [WxH@HZ|preferred|highest] [at X,Y] [scale S] [transform 90|180|270] [vrr] [off]`", n + 1),
             },
             "keyboard" => pairs(&mut |k, v| {
                 let v = v.cloned();
@@ -236,6 +241,21 @@ fn monitor_line(w: &[String]) -> Option<MonitorRule> {
             }
             "scale" => {
                 m.scale = w.get(k + 1).and_then(|s| s.parse().ok()).filter(|s: &f64| *s > 0.0);
+                k += 1;
+            }
+            // `transform 90` (or `rotate 90`): in degrees; Hyprland's 0–3 are
+            // taken too (`transform 1`).
+            "transform" | "rotate" => {
+                m.transform = match w.get(k + 1).map(String::as_str) {
+                    Some("90" | "1") => 1,
+                    Some("180" | "2") => 2,
+                    Some("270" | "3") => 3,
+                    Some("0" | "normal") => 0,
+                    _ => {
+                        eprintln!("config · {}: a monitor turns `transform 90`, `180` or `270`", m.name);
+                        0
+                    }
+                };
                 k += 1;
             }
             mode => m.mode = mode_wish(mode)?,
@@ -358,6 +378,11 @@ fn hypr_monitor(line: &str) -> Option<MonitorRule> {
             w.push("scale".into());
             w.push(s);
         }
+        // (4–7 are mirrored as well: only the turn is taken.)
+        if let Some(t) = field("transform").map(unq).and_then(|t| t.parse::<u8>().ok()) {
+            w.push("transform".into());
+            w.push((t % 4).to_string());
+        }
         return monitor_line(&w);
     }
     let rest = line.strip_prefix("monitor")?.trim_start().strip_prefix('=')?;
@@ -376,6 +401,13 @@ fn hypr_monitor(line: &str) -> Option<MonitorRule> {
     if let Some(s) = f.get(3).filter(|s| *s != "auto" && !s.is_empty()) {
         w.push("scale".into());
         w.push(s.clone());
+    }
+    // `monitor = DP-1, 1920x1080, 0x0, 1, transform, 1`
+    if let Some(k) = f.iter().position(|x| x == "transform") {
+        if let Some(t) = f.get(k + 1).and_then(|t| t.parse::<u8>().ok()) {
+            w.push("transform".into());
+            w.push((t % 4).to_string());
+        }
     }
     monitor_line(&w)
 }
@@ -407,6 +439,12 @@ mod tests {
         assert!(hypr_monitor(r#"hl.monitor({ output = MONITOR1, mode = "preferred" })"#).is_none());
         let m = hypr_monitor("monitor = HDMI-A-1, 1920x1080@60, 1920x0, 1").unwrap();
         assert_eq!(m.at, Some((1920, 0)));
+        assert_eq!(m.transform, 0);
+        assert_eq!(hypr_monitor("monitor = DP-2, 1920x1080, 0x0, 1, transform, 1").unwrap().transform, 1);
+        assert_eq!(hypr_monitor(r#"hl.monitor({ output = "DP-2", mode = "preferred", transform = 3 })"#).unwrap().transform, 3);
+        let mut c = Config::default();
+        parse("monitor DP-2 preferred transform 90\nmonitor DP-3 rotate 270", &mut c);
+        assert_eq!((c.monitors[0].transform, c.monitors[1].transform), (1, 3));
         assert_eq!(setting(r#"kb_layout = "es","#, "kb_layout").as_deref(), Some("es"));
     }
 }

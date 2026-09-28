@@ -4,9 +4,12 @@
 # its monitor lines, kb_layout, accel_profile, sensitivity), if there is one.
 # `pleamar-wm config` shows what comes out.
 
-# monitor NAME  WxH@HZ | preferred | highest  [at X,Y]  [scale S]  [vrr]  [off]
+# monitor NAME  WxH@HZ | preferred | highest  [at X,Y]  [scale S]  [transform 90|180|270]  [vrr]  [off]
 #monitor DP-3 1920x1080@165 at 0,0
 #monitor HDMI-A-1 preferred at 1920,0
+# A monitor standing on its side: `transform 90` (or 270, the other way round),
+# the same numbers as Hyprland's `transform` (1 = 90, 3 = 270), which is read too.
+#monitor DP-2 preferred at 1920,0 transform 90
 
 # keyboard  layout L  variant V  options O  repeat KEYS_A_SECOND  delay MS
 #keyboard layout es repeat 25 delay 400

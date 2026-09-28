@@ -46,7 +46,7 @@ impl Output for Offscreen {
                     sample_count: 1,
                     dimension: wgpu::TextureDimension::D2,
                     format: wgpu::TextureFormat::Bgra8Unorm,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
                     view_formats: &[],
                 }));
             }
@@ -117,7 +117,12 @@ fn write_png(device: &wgpu::Device, queue: &wgpu::Queue, texture: &wgpu::Texture
 
 impl pleamar::Platform for Headless {
     fn run(self: Box<Self>, surfaces: Vec<Surface>, _: u32, _: wgpu::Instance, to_render: Sender<ToRender>) {
-        let size = (1920u32, 1080u32);
+        let real = (1920u32, 1080u32);
+        // `PLEAMAR_HEADLESS_TRANSFORM=1`: monitors standing on their side, as
+        // `transform` makes them in a session; the picture is the real
+        // buffer, turned, as the monitor would get it.
+        let turn = std::env::var("PLEAMAR_HEADLESS_TRANSFORM").ok().and_then(|v| v.parse::<u8>().ok()).unwrap_or(0) % 4;
+        let size = if turn % 2 == 1 { (real.1, real.0) } else { real };
         // `PLEAMAR_HEADLESS_SCALE=1.5`: monitors of that scale, to check HiDPI.
         let scale = std::env::var("PLEAMAR_HEADLESS_SCALE").ok().and_then(|v| v.parse::<f64>().ok()).filter(|s| *s > 0.0).unwrap_or(1.0);
         let unit_w = (size.0 as f64 / scale).round() as i32;
@@ -132,8 +137,9 @@ impl pleamar::Platform for Headless {
             .map(|m| {
                 let path = if m == 0 { png.clone() } else { png.replace(".png", &format!("-{m}.png")) };
                 let own = Arc::new(std::sync::OnceLock::new());
-                let output = Offscreen { size, textures: Vec::new(), shown: None, started: Instant::now(), at, written: false, taken: 0, path, screen: own.clone(), to_render: to_render.clone(), period: Duration::from_secs_f64(1000.0 / mhz_of(m) as f64) };
-                let sc = screen::screen(format!("HEADLESS-{}", m + 1), size, Box::new(output));
+                let output = Offscreen { size: real, textures: Vec::new(), shown: None, started: Instant::now(), at, written: false, taken: 0, path, screen: own.clone(), to_render: to_render.clone(), period: Duration::from_secs_f64(1000.0 / mhz_of(m) as f64) };
+                let output: Box<dyn Output> = if turn == 0 { Box::new(output) } else { Box::new(screen::Turned::new(Box::new(output), turn, real)) };
+                let sc = screen::screen(format!("HEADLESS-{}", m + 1), size, output);
                 let _ = own.set(sc.clone());
                 sc
             })

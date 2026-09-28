@@ -285,6 +285,9 @@ plugged in and out while it runs.
   message, a file chooser— float over the rest at their own size.
 - **HiDPI**: `scale 1.5` on a monitor line; programs are told the exact scale
   (fractional-scale, viewporter) and draw sharp at it.
+- **Monitors on their side**: `transform 90` (or `180`, `270`) on a monitor
+  line, or Hyprland's `transform`; everything is laid out upright and turned
+  at the end, the cursor with it.
 - **Idleness**: `idle off-after`, or hypridle / swayidle / wlopm through
   ext-idle-notify and wlr-output-power-management; a video keeps the screen
   awake (idle-inhibit). `vrr` on a monitor line: variable refresh.

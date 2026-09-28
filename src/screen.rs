@@ -28,6 +28,139 @@ pub trait Output: Send {
     fn show(&mut self, which: usize, done: pleamar::Sent, device: &wgpu::Device, queue: &wgpu::Queue, anew: bool) -> bool;
 }
 
+/// A monitor standing on its side (or upside down): everything is put
+/// together upright, in a buffer of the size the monitor has once turned,
+/// and turned into the real one at the end. One more pass, and only on that
+/// monitor; nothing before it knows the monitor is turned. `turn` in quarter
+/// turns, the way wlroots' and Hyprland's `transform` goes: 1 puts what is
+/// upright's top left corner in the real buffer's top right.
+pub struct Turned {
+    inner: Box<dyn Output>,
+    turn: u8,
+    /// Its size upright, as everything else sees it.
+    size: (u32, u32),
+    /// One upright buffer for each of the real ones: each keeps what it had,
+    /// so only what changed is put together again, as on any monitor.
+    upright: Vec<Option<(wgpu::Texture, wgpu::Texture)>>,
+    pass: Option<(wgpu::RenderPipeline, wgpu::Sampler, wgpu::Buffer)>,
+}
+
+impl Turned {
+    /// `size`: the monitor's own, as its mode says; what is put together is
+    /// that turned, if the turn is a quarter or three.
+    pub fn new(inner: Box<dyn Output>, turn: u8, size: (u32, u32)) -> Turned {
+        let size = if turn % 2 == 1 { (size.1, size.0) } else { size };
+        Turned { inner, turn: turn % 4, size, upright: Vec::new(), pass: None }
+    }
+}
+
+/// From the real buffer's point to the upright one's, in 0..1.
+const TURN: &str = "
+struct Turn { turn: u32, _a: u32, _b: u32, _c: u32 };
+@group(0) @binding(0) var upright: texture_2d<f32>;
+@group(0) @binding(1) var nearest: sampler;
+@group(0) @binding(2) var<uniform> t: Turn;
+struct Out { @builtin(position) pos: vec4<f32>, @location(0) uv: vec2<f32> };
+@vertex
+fn vs(@builtin(vertex_index) v: u32) -> Out {
+    let p = vec2<f32>(f32((v << 1u) & 2u), f32(v & 2u));
+    var o: Out;
+    o.pos = vec4<f32>(p.x * 2.0 - 1.0, 1.0 - p.y * 2.0, 0.0, 1.0);
+    o.uv = p;
+    return o;
+}
+@fragment
+fn fs(o: Out) -> @location(0) vec4<f32> {
+    let u = o.uv.x;
+    let v = o.uv.y;
+    var q = vec2<f32>(u, v);
+    if (t.turn == 1u) { q = vec2<f32>(v, 1.0 - u); }
+    if (t.turn == 2u) { q = vec2<f32>(1.0 - u, 1.0 - v); }
+    if (t.turn == 3u) { q = vec2<f32>(1.0 - v, u); }
+    return textureSampleLevel(upright, nearest, q, 0.0);
+}
+";
+
+impl Output for Turned {
+    fn buffer(&mut self, device: &wgpu::Device, modifiers: &[u64]) -> Option<(usize, wgpu::Texture)> {
+        let (which, real) = self.inner.buffer(device, modifiers)?;
+        if self.upright.len() <= which {
+            self.upright.resize_with(which + 1, || None);
+        }
+        // A new real buffer (the monitor was set up again): a new upright one too.
+        let stale = self.upright[which].as_ref().is_none_or(|(_, r)| *r != real);
+        if stale {
+            let up = device.create_texture(&wgpu::TextureDescriptor {
+                label: Some("upright monitor"),
+                size: wgpu::Extent3d { width: self.size.0, height: self.size.1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: wgpu::TextureFormat::Bgra8Unorm,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+                view_formats: &[],
+            });
+            self.upright[which] = Some((up, real.clone()));
+        }
+        let (up, _) = self.upright[which].as_ref()?;
+        Some((which, up.clone()))
+    }
+
+    fn show(&mut self, which: usize, done: pleamar::Sent, device: &wgpu::Device, queue: &wgpu::Queue, anew: bool) -> bool {
+        let Some((up, real)) = self.upright.get(which).and_then(|u| u.clone()) else { return self.inner.show(which, done, device, queue, anew) };
+        let (pipeline, sampler, uniform) = self.pass.get_or_insert_with(|| {
+            let module = device.create_shader_module(wgpu::ShaderModuleDescriptor { label: Some("turn"), source: wgpu::ShaderSource::Wgsl(TURN.into()) });
+            let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("turn"),
+                layout: None,
+                vertex: wgpu::VertexState { module: &module, entry_point: Some("vs"), compilation_options: Default::default(), buffers: &[] },
+                primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &module,
+                    entry_point: Some("fs"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState { format: wgpu::TextureFormat::Bgra8Unorm, blend: None, write_mask: wgpu::ColorWrites::ALL })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            });
+            let sampler = device.create_sampler(&wgpu::SamplerDescriptor { mag_filter: wgpu::FilterMode::Nearest, min_filter: wgpu::FilterMode::Nearest, ..Default::default() });
+            let uniform = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: 16, usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST, mapped_at_creation: false });
+            (pipeline, sampler, uniform)
+        });
+        queue.write_buffer(uniform, 0, &[self.turn as u32, 0, 0, 0].iter().flat_map(|v: &u32| v.to_ne_bytes()).collect::<Vec<u8>>());
+        let group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &pipeline.get_bind_group_layout(0),
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&up.create_view(&Default::default())) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(sampler) },
+                wgpu::BindGroupEntry { binding: 2, resource: uniform.as_entire_binding() },
+            ],
+        });
+        let view = real.create_view(&Default::default());
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let mut rp = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("turn"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment { view: &view, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::BLACK), store: wgpu::StoreOp::Store } })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            rp.set_pipeline(pipeline);
+            rp.set_bind_group(0, &group, &[]);
+            rp.draw(0..3, 0..1);
+        }
+        drop(done);
+        queue.submit(Some(encoder.finish()));
+        self.inner.show(which, pleamar::Sent::after(queue), device, queue, anew)
+    }
+}
+
 /// One surface of the scene on a monitor.
 pub struct Layer {
     pub sheet: u32,
