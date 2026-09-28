@@ -41,6 +41,12 @@ the open windows without closing anything.
 - **Tiled or free, per monitor, in one key**: five tiled layouts (leader left or
   right, columns, rows, grid), or free windows as on KDE/Windows — edges,
   corner, maximize, the one clicked on top. `Super+W` switches with an animation.
+- **Workspaces**: nine per monitor (`Super+1…9`, `Super+Shift+1…9` to send
+  the window); changing, the windows slide out and the new ones slide in.
+- **Up to 16 windows and 4 monitors**, left to right; a window carried from
+  one to another is seen crossing.
+- **Window rules**: `window app=pavucontrol float size 820x560`, `window
+  app=discord workspace 3 monitor HDMI-A-1` in `session.conf`.
 - **Every window rides a spring**: change your mind mid-drag and it turns without a jolt.
 - **Drag with a live preview**: the others move aside as they would be; drop on
   a window to swap (also across monitors), on the other monitor to send it, or
@@ -162,6 +168,9 @@ keyboard layout es repeat 25 delay 400
 pointer accel flat
 touchpad tap on natural on
 idle off-after 600                          # the monitors go dark
+window app=pavucontrol float size 820x560   # what some windows do when they open
+window app=discord workspace 3 monitor 1
+window title="Picture in Picture" float     # `*` for anything: app=org.gnome.*
 ```
 
 In the login screen (SDDM, GDM): `pleamar-update --session` puts «pleamar-wm»
@@ -181,6 +190,8 @@ The ones that come with it (`pleamar-wm keys` prints them all), as on Hyprland:
 | `Super+W` | tiled or free windows on this monitor |
 | `Super+F` | fullscreen |
 | `Super+Tab` | everything at a glance |
+| `Super+1…9` · `Super+Shift+1…9` | show that workspace · send the window there |
+| `Super+Ctrl+Left/Right` | the workspace beside |
 | `Super+arrows` | the keyboard to the next / previous window |
 | `Super+Shift+arrows` | lead, move to the other monitor, change places |
 | `Super+-` · `Super++` | the leader narrower / wider |

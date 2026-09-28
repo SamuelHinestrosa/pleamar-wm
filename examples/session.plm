@@ -39,8 +39,8 @@
 language 0.1
 scene Session {
     // One copy per monitor: each lays out its own windows (`win.$i.screen`).
-    surface { size: full, full; screens: each max 2 }
-    windows win max 6
+    surface { size: full, full; screens: each max 4 }
+    windows win max 16
 
     let ink = #f5f7f5
     let mint = #9ed6bd
@@ -53,6 +53,12 @@ scene Session {
     let tb = 30                          // each window's title bar
     let W = screen.width
     let H = screen.height
+    // Where each monitor starts on the desktop: left to right, each one after
+    // the one before it.
+    let mx.0 = 0
+    let mx.1 = screen.0.width
+    let mx.2 = screen.0.width + screen.1.width
+    let mx.3 = screen.0.width + screen.1.width + screen.2.width
     // Where a window comes from and goes back to: the launcher on the left of the bar.
     let home.x = 24
     let home.y = 12
@@ -121,7 +127,7 @@ scene Session {
     prop lx = 750 ~slow
     prop ly = 470 ~slow
     // The monitor of the one with the keyboard: only there the light shows.
-    let fscreen = pick(win.focus, win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen)
+    let fscreen = pick(win.focus, win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen, win.6.screen, win.7.screen, win.8.screen, win.9.screen, win.10.screen, win.11.screen, win.12.screen, win.13.screen, win.14.screen, win.15.screen)
     group {
         blur: 160
         opacity: 12% * min(win.count, 1) * (fscreen == screen.index) * (win.focus >= 0)
@@ -130,7 +136,7 @@ scene Session {
     }
 
     // Where the one with the keyboard is in the order of all of them, and how many there are.
-    let focus_at = (win.order.1 == win.focus) + 2 * (win.order.2 == win.focus) + 3 * (win.order.3 == win.focus) + 4 * (win.order.4 == win.focus) + 5 * (win.order.5 == win.focus)
+    let focus_at = max(pick(max(win.focus, 0), win.0.rank, win.1.rank, win.2.rank, win.3.rank, win.4.rank, win.5.rank, win.6.rank, win.7.rank, win.8.rank, win.9.rank, win.10.rank, win.11.rank, win.12.rank, win.13.rank, win.14.rank, win.15.rank), 0)
     let all = max(win.count, 1)
 
     // ── the layouts, one for each monitor: 0 a leader on the left and the
@@ -140,11 +146,15 @@ scene Session {
     // be; let go there, and it is so (with a leader, the one carried leads).
     fact lay.0 = 0
     fact lay.1 = 0
+    fact lay.2 = 0
+    fact lay.3 = 0
     // ── or free, as on Windows or KDE: each window where it is left and as big
     // as it is made, the one touched on top. Per monitor; Super+W or the
     // Marea's menu. Each window remembers where it was free.
     fact free.0 = 0
     fact free.1 = 0
+    fact free.2 = 0
+    fact free.3 = 0
     // The last one put away: Super+Shift+M brings it back.
     fact last_min = -1
     fact stamp.top = 0
@@ -154,11 +164,11 @@ scene Session {
     fact g.w = 0
     fact g.h = 0
     fact sizing = -1
-    let lay.here = pick(mon, lay.0, lay.1)
-    let strip.x = pick(mon, screen.0.width, screen.1.width) / 2 - 5 * 60 / 2
-    let strip.y = pick(mon, win.reserved.0.top, win.reserved.1.top) + 6
+    let lay.here = pick(mon, lay.0, lay.1, lay.2, lay.3)
+    let strip.x = pick(mon, screen.0.width, screen.1.width, screen.2.width, screen.3.width) / 2 - 5 * 60 / 2
+    let strip.y = pick(mon, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top) + 6
     // (Only over a tiled monitor: a free one has no layout to pick.)
-    let on.strip = dragging >= 0 and pick(mon, free.0, free.1) < 0.5 and mouse.y >= strip.y and mouse.y < strip.y + 44 and mouse.x >= strip.x and mouse.x < strip.x + 5 * 60
+    let on.strip = dragging >= 0 and pick(mon, free.0, free.1, free.2, free.3) < 0.5 and mouse.y >= strip.y and mouse.y < strip.y + 44 and mouse.x >= strip.x and mouse.x < strip.x + 5 * 60
     let picked = if(on.strip, floor((mouse.x - strip.x) / 60), -1)
     let leads = picked == 0 or picked == 4
     // What it is over, kept: let go, `picked` is already gone (it needs the
@@ -170,15 +180,9 @@ scene Session {
 
     // ── carrying a window: how the others would be if it were let go here ──
     // Its monitor and place; each window's turn in the order of all of them.
-    let dsc = pick(max(dragging, 0), win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen)
-    let dplace = max(pick(max(dragging, 0), win.0.place, win.1.place, win.2.place, win.3.place, win.4.place, win.5.place), 0)
-    let ord.0 = 1 * (win.order.1 == 0) + 2 * (win.order.2 == 0) + 3 * (win.order.3 == 0) + 4 * (win.order.4 == 0) + 5 * (win.order.5 == 0)
-    let ord.1 = 1 * (win.order.1 == 1) + 2 * (win.order.2 == 1) + 3 * (win.order.3 == 1) + 4 * (win.order.4 == 1) + 5 * (win.order.5 == 1)
-    let ord.2 = 1 * (win.order.1 == 2) + 2 * (win.order.2 == 2) + 3 * (win.order.3 == 2) + 4 * (win.order.4 == 2) + 5 * (win.order.5 == 2)
-    let ord.3 = 1 * (win.order.1 == 3) + 2 * (win.order.2 == 3) + 3 * (win.order.3 == 3) + 4 * (win.order.4 == 3) + 5 * (win.order.5 == 3)
-    let ord.4 = 1 * (win.order.1 == 4) + 2 * (win.order.2 == 4) + 3 * (win.order.3 == 4) + 4 * (win.order.4 == 4) + 5 * (win.order.5 == 4)
-    let ord.5 = 1 * (win.order.1 == 5) + 2 * (win.order.2 == 5) + 3 * (win.order.3 == 5) + 4 * (win.order.4 == 5) + 5 * (win.order.5 == 5)
-    let ordD = pick(max(dragging, 0), ord.0, ord.1, ord.2, ord.3, ord.4, ord.5)
+    let dsc = pick(max(dragging, 0), win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen, win.6.screen, win.7.screen, win.8.screen, win.9.screen, win.10.screen, win.11.screen, win.12.screen, win.13.screen, win.14.screen, win.15.screen)
+    let dplace = max(pick(max(dragging, 0), win.0.place, win.1.place, win.2.place, win.3.place, win.4.place, win.5.place, win.6.place, win.7.place, win.8.place, win.9.place, win.10.place, win.11.place, win.12.place, win.13.place, win.14.place, win.15.place), 0)
+    let ordD = pick(max(dragging, 0), win.0.rank, win.1.rank, win.2.rank, win.3.rank, win.4.rank, win.5.rank, win.6.rank, win.7.rank, win.8.rank, win.9.rank, win.10.rank, win.11.rank, win.12.rank, win.13.rank, win.14.rank, win.15.rank)
     // Over the other monitor it would go there: there they make room for it,
     // and on its own the rest close up. Its turn there is its turn in the
     // order; first, if it is let go on a layout with a leader.
@@ -186,29 +190,71 @@ scene Session {
     // Over a window of the other monitor: they change places —and
     // monitors—; there nothing makes room, and here nothing closes up.
     let xswap = crossing and over >= 0
-    let landing.place = if(leads, 0, (win.0.open and win.0.screen == mon and ord.0 < ordD) + (win.1.open and win.1.screen == mon and ord.1 < ordD) + (win.2.open and win.2.screen == mon and ord.2 < ordD) + (win.3.open and win.3.screen == mon and ord.3 < ordD) + (win.4.open and win.4.screen == mon and ord.4 < ordD) + (win.5.open and win.5.screen == mon and ord.5 < ordD))
-    let landing.n = pick(mon, win.on.0, win.on.1) + 1
+    let landing.place = if(leads, 0, (win.0.open and win.0.screen == mon and win.0.rank >= 0 and win.0.rank < ordD) + (win.1.open and win.1.screen == mon and win.1.rank >= 0 and win.1.rank < ordD) + (win.2.open and win.2.screen == mon and win.2.rank >= 0 and win.2.rank < ordD) + (win.3.open and win.3.screen == mon and win.3.rank >= 0 and win.3.rank < ordD) + (win.4.open and win.4.screen == mon and win.4.rank >= 0 and win.4.rank < ordD) + (win.5.open and win.5.screen == mon and win.5.rank >= 0 and win.5.rank < ordD) + (win.6.open and win.6.screen == mon and win.6.rank >= 0 and win.6.rank < ordD) + (win.7.open and win.7.screen == mon and win.7.rank >= 0 and win.7.rank < ordD) + (win.8.open and win.8.screen == mon and win.8.rank >= 0 and win.8.rank < ordD) + (win.9.open and win.9.screen == mon and win.9.rank >= 0 and win.9.rank < ordD) + (win.10.open and win.10.screen == mon and win.10.rank >= 0 and win.10.rank < ordD) + (win.11.open and win.11.screen == mon and win.11.rank >= 0 and win.11.rank < ordD) + (win.12.open and win.12.screen == mon and win.12.rank >= 0 and win.12.rank < ordD) + (win.13.open and win.13.screen == mon and win.13.rank >= 0 and win.13.rank < ordD) + (win.14.open and win.14.screen == mon and win.14.rank >= 0 and win.14.rank < ordD) + (win.15.open and win.15.screen == mon and win.15.rank >= 0 and win.15.rank < ordD))
+    let landing.n = pick(mon, win.on.0, win.on.1, win.on.2, win.on.3) + 1
     let landing.lay = if(picked >= 0, picked, lay.here)
     // A window fullscreen on the monitor under the mouse: the ones below it keep off the keyboard.
-    let fs.on = (win.0.fullscreen and win.0.screen == mon) + (win.1.fullscreen and win.1.screen == mon) + (win.2.fullscreen and win.2.screen == mon) + (win.3.fullscreen and win.3.screen == mon) + (win.4.fullscreen and win.4.screen == mon) + (win.5.fullscreen and win.5.screen == mon)
+    let fs.on = (win.0.fullscreen and win.0.screen == mon and win.0.rank >= 0) + (win.1.fullscreen and win.1.screen == mon and win.1.rank >= 0) + (win.2.fullscreen and win.2.screen == mon and win.2.rank >= 0) + (win.3.fullscreen and win.3.screen == mon and win.3.rank >= 0) + (win.4.fullscreen and win.4.screen == mon and win.4.rank >= 0) + (win.5.fullscreen and win.5.screen == mon and win.5.rank >= 0) + (win.6.fullscreen and win.6.screen == mon and win.6.rank >= 0) + (win.7.fullscreen and win.7.screen == mon and win.7.rank >= 0) + (win.8.fullscreen and win.8.screen == mon and win.8.rank >= 0) + (win.9.fullscreen and win.9.screen == mon and win.9.rank >= 0) + (win.10.fullscreen and win.10.screen == mon and win.10.rank >= 0) + (win.11.fullscreen and win.11.screen == mon and win.11.rank >= 0) + (win.12.fullscreen and win.12.screen == mon and win.12.rank >= 0) + (win.13.fullscreen and win.13.screen == mon and win.13.rank >= 0) + (win.14.fullscreen and win.14.screen == mon and win.14.rank >= 0) + (win.15.fullscreen and win.15.screen == mon and win.15.rank >= 0)
 
-    repeat i in 0..6 {
+    // ── workspaces: each monitor shows one (1 to 9), and each window is on
+    // one. Super+1…9 shows that one on the monitor under the mouse,
+    // Super+Shift+1…9 sends the window with the keyboard there, and
+    // Super+Ctrl+Left/Right goes to the one beside. Changing, the windows
+    // slide: the old ones out to one side, the new ones in from the other ──
+    event workspace
+    event move_to_workspace
+    event workspace_next
+    event workspace_previous
+    on workspace(v) { workspace v }
+    on move_to_workspace(v) while win.focus >= 0 { send win(win.focus) to workspace v }
+    let ws.mon = pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3)
+    on workspace_next { workspace min(ws.mon + 1, 9) }
+    on workspace_previous { workspace max(ws.mon - 1, 1) }
+    repeat s in 0..4 {
+        // Where each monitor's windows slide to: its workspace, on a spring.
+        prop desk.$s = 1 ~glide
+        follow desk.$s = win.shown.$s
+        // And its number, for a moment, at the top of the monitor.
+        prop wsflash.$s = 0 ~160ms
+        on change win.shown.$s {
+            wsflash.$s: 1 ~120ms
+            wsflash.$s: 0 ~400ms after 900ms
+        }
+        group {
+            z: 99990
+            show: wsflash.$s > 0.01 and screen.index == s
+            opacity: wsflash.$s
+            move: 0, -8 * (1 - wsflash.$s)
+            body {
+                color: #0c0e10
+                rim: 8%
+                shadow: 0, 8, 24, 45%
+                box { at: W / 2, pick(s, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top) + 58; size: 64, 44; corner: 22 }
+            }
+            text number(win.shown.$s, 0) { at: W / 2, pick(s, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top) + 58; anchor: center; size: 20; weight: 700; color: mint }
+        }
+    }
+
+    repeat i in 0..16 {
         // A window is laid out on its own monitor: how big that one is and how
         // many windows share it. Each copy of the scene draws only its own.
         let sc = win.$i.screen
         // (Asked to close: see `seen`.)
         prop bye.$i = 0 ~0ms
-        let here = win.$i.open and sc == screen.index and not win.$i.minimized and bye.$i < 0.5
+        // On the workspace its monitor shows; or how far from it, while they slide.
+        let ws.here = win.$i.workspace == pick(sc, win.shown.0, win.shown.1, win.shown.2, win.shown.3)
+        let ws.away = win.$i.workspace - pick(sc, desk.0, desk.1, desk.2, desk.3)
+        let here = win.$i.open and sc == screen.index and not win.$i.minimized and bye.$i < 0.5 and ws.here
         // (Drawn while it goes away into the island, too.)
-        let drawn = win.$i.open and sc == screen.index
-        let n = max(pick(sc, win.on.0, win.on.1), 1)
+        let drawn = win.$i.open and sc == screen.index and abs(ws.away) < 0.999
+        let n = max(win.$i.among, 1)
         let p = max(win.$i.place, 0)
-        let L = pick(sc, lay.0, lay.1)
+        let L = pick(sc, lay.0, lay.1, lay.2, lay.3)
         // ── where it goes, in its monitor's layout ──
-        let Ws = pick(sc, screen.0.width, screen.1.width) - pick(sc, win.reserved.0.left, win.reserved.1.left) - pick(sc, win.reserved.0.right, win.reserved.1.right)
-        let Hs = pick(sc, screen.0.height, screen.1.height) - pick(sc, win.reserved.0.top, win.reserved.1.top) - pick(sc, win.reserved.0.bottom, win.reserved.1.bottom)
-        let x0 = pick(sc, win.reserved.0.left, win.reserved.1.left)
-        let y0 = pick(sc, win.reserved.0.top, win.reserved.1.top) + bar
+        let Ws = pick(sc, screen.0.width, screen.1.width, screen.2.width, screen.3.width) - pick(sc, win.reserved.0.left, win.reserved.1.left, win.reserved.2.left, win.reserved.3.left) - pick(sc, win.reserved.0.right, win.reserved.1.right, win.reserved.2.right, win.reserved.3.right)
+        let Hs = pick(sc, screen.0.height, screen.1.height, screen.2.height, screen.3.height) - pick(sc, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top) - pick(sc, win.reserved.0.bottom, win.reserved.1.bottom, win.reserved.2.bottom, win.reserved.3.bottom)
+        let x0 = pick(sc, win.reserved.0.left, win.reserved.1.left, win.reserved.2.left, win.reserved.3.left)
+        let y0 = pick(sc, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top) + bar
         let ah = Hs - bar - gap
         let lw = if(n < 1.5, Ws - 2 * gap, (Ws - 3 * gap) * ratio)
         let sw = Ws - 3 * gap - lw
@@ -224,7 +270,7 @@ scene Session {
         let th = pick(L, if(p < 0.5, ah, sh), ah, rh, gh, if(p < 0.5, ah, sh))
         // Under the mouse while another is carried —measured on where it is,
         // not where it is shown moving aside—: it would change places with it.
-        let under = dragging >= 0 and dragging != i and win.$i.open and sc == mon and not on.strip and pick(sc, free.0, free.1) < 0.5 and mouse.x >= tx and mouse.x < tx + tw and mouse.y >= ty and mouse.y < ty + th
+        let under = dragging >= 0 and dragging != i and win.$i.open and sc == mon and not on.strip and pick(sc, free.0, free.1, free.2, free.3) < 0.5 and mouse.x >= tx and mouse.x < tx + tw and mouse.y >= ty and mouse.y < ty + th
         on change under {
             over = if(under, i, if(over == i, -1, over))
         }
@@ -232,16 +278,16 @@ scene Session {
         // asked for that size too: it changes only when the mouse goes onto
         // another window, monitor or layout, so it draws itself as it would
         // be instead of being stretched)
-        let ord.me = pick(i, ord.0, ord.1, ord.2, ord.3, ord.4, ord.5)
+        let ord.me = win.$i.rank
         let swaps = over == i and sc == mon
         let promoted = leads and not crossing and sc == dsc and dragging >= 0
         let n.shown = max(if(crossing and not xswap and sc == mon, n + 1, if(crossing and not xswap and sc == dsc, n - 1, n)), 1)
         let p.shown = if(dragging == i and promoted, 0, if(promoted, p + (p < dplace), if(swaps and not crossing, dplace, if(xswap, p, if(crossing and sc == mon, p + if(leads, 1, ordD < ord.me), if(crossing and sc == dsc, p - (ord.me > ordD), p))))))
         let L.shown = if(dragging >= 0 and picked >= 0 and sc == mon, picked, L)
-        let Wsv = pick(sc, screen.0.width, screen.1.width) - pick(sc, win.reserved.0.left, win.reserved.1.left) - pick(sc, win.reserved.0.right, win.reserved.1.right)
-        let Hsv = pick(sc, screen.0.height, screen.1.height) - pick(sc, win.reserved.0.top, win.reserved.1.top) - pick(sc, win.reserved.0.bottom, win.reserved.1.bottom)
-        let x0v = pick(sc, win.reserved.0.left, win.reserved.1.left)
-        let y0v = pick(sc, win.reserved.0.top, win.reserved.1.top) + bar
+        let Wsv = pick(sc, screen.0.width, screen.1.width, screen.2.width, screen.3.width) - pick(sc, win.reserved.0.left, win.reserved.1.left, win.reserved.2.left, win.reserved.3.left) - pick(sc, win.reserved.0.right, win.reserved.1.right, win.reserved.2.right, win.reserved.3.right)
+        let Hsv = pick(sc, screen.0.height, screen.1.height, screen.2.height, screen.3.height) - pick(sc, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top) - pick(sc, win.reserved.0.bottom, win.reserved.1.bottom, win.reserved.2.bottom, win.reserved.3.bottom)
+        let x0v = pick(sc, win.reserved.0.left, win.reserved.1.left, win.reserved.2.left, win.reserved.3.left)
+        let y0v = pick(sc, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top) + bar
         let ahv = Hsv - bar - gap
         let lwv = if(n.shown < 1.5, Wsv - 2 * gap, (Wsv - 3 * gap) * ratio)
         let swv = Wsv - 3 * gap - lwv
@@ -256,10 +302,10 @@ scene Session {
         let twv = pick(L.shown, if(p.shown < 0.5, lwv, swv), cwv, Wsv - 2 * gap, gwv, if(p.shown < 0.5, lwv, swv))
         let thv = pick(L.shown, if(p.shown < 0.5, ahv, shv), ahv, rhv, ghv, if(p.shown < 0.5, ahv, shv))
         // Where the carried one would land on the other monitor.
-        let Wsg = pick(mon, screen.0.width, screen.1.width) - pick(mon, win.reserved.0.left, win.reserved.1.left) - pick(mon, win.reserved.0.right, win.reserved.1.right)
-        let Hsg = pick(mon, screen.0.height, screen.1.height) - pick(mon, win.reserved.0.top, win.reserved.1.top) - pick(mon, win.reserved.0.bottom, win.reserved.1.bottom)
-        let x0g = pick(mon, win.reserved.0.left, win.reserved.1.left)
-        let y0g = pick(mon, win.reserved.0.top, win.reserved.1.top) + bar
+        let Wsg = pick(mon, screen.0.width, screen.1.width, screen.2.width, screen.3.width) - pick(mon, win.reserved.0.left, win.reserved.1.left, win.reserved.2.left, win.reserved.3.left) - pick(mon, win.reserved.0.right, win.reserved.1.right, win.reserved.2.right, win.reserved.3.right)
+        let Hsg = pick(mon, screen.0.height, screen.1.height, screen.2.height, screen.3.height) - pick(mon, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top) - pick(mon, win.reserved.0.bottom, win.reserved.1.bottom, win.reserved.2.bottom, win.reserved.3.bottom)
+        let x0g = pick(mon, win.reserved.0.left, win.reserved.1.left, win.reserved.2.left, win.reserved.3.left)
+        let y0g = pick(mon, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top) + bar
         let ahg = Hsg - bar - gap
         let lwg = if(landing.n < 1.5, Wsg - 2 * gap, (Wsg - 3 * gap) * ratio)
         let swg = Wsg - 3 * gap - lwg
@@ -280,8 +326,8 @@ scene Session {
         let cell.h = (ah - 40 - (rows - 1) * 30) / rows
         // ── and at a glance: in a grid, each one keeping its shape ──
         let s = min(cell.w / tw, cell.h / th)
-        let ox = pick(sc, win.reserved.0.left, win.reserved.1.left) + 40 + mod(p, cols) * (cell.w + 30) + (cell.w - tw * s) / 2
-        let oy = pick(sc, win.reserved.0.top, win.reserved.1.top) + bar + 20 + floor(p / cols) * (cell.h + 30) + (cell.h - th * s) / 2
+        let ox = pick(sc, win.reserved.0.left, win.reserved.1.left, win.reserved.2.left, win.reserved.3.left) + 40 + mod(p, cols) * (cell.w + 30) + (cell.w - tw * s) / 2
+        let oy = pick(sc, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top) + bar + 20 + floor(p / cols) * (cell.h + 30) + (cell.h - th * s) / 2
 
         // ── free: where it was left, as big as it was made (all of the
         // monitor, maximized) ──
@@ -294,7 +340,7 @@ scene Session {
         // Which monitor its free place was made on: monitors differ in size,
         // so a place from the other one is not a place here.
         fact fsc.$i = -1
-        let F = pick(sc, free.0, free.1)
+        let F = pick(sc, free.0, free.1, free.2, free.3)
         // (Only once it has a place of its own on this monitor: the frame free
         // is taken, it has none yet, and it headed for the corner.)
         let fr = F > 0.5 and fw.$i > 0.5 and fsc.$i == sc and not win.$i.fullscreen and not win.$i.dialog
@@ -303,7 +349,7 @@ scene Session {
         let fgw = if(maxed.$i, Ws - 2 * gap, min(fw.$i, Ws - 2 * gap))
         let fgh = if(maxed.$i, ah, min(fh.$i, ah))
         let fgx = if(maxed.$i, x0 + gap, clamp(fx.$i, x0 + 160 - fgw, x0 + Ws - 160))
-        let fgy = if(maxed.$i, y0, clamp(fy.$i, pick(sc, win.reserved.0.top, win.reserved.1.top), y0 + ah - tb - 40))
+        let fgy = if(maxed.$i, y0, clamp(fy.$i, pick(sc, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top), y0 + ah - tb - 40))
         // Put away, it stays where it was (the others close up without it),
         // and flies from there into Marea's island.
         fact mx.$i = 0
@@ -389,7 +435,7 @@ scene Session {
         prop wave.$i = 1 ~720ms
         follow lit.$i = if(win.$i.focused and not overview, 1, if(overview, 1, 0))
 
-        let x = x.$i + dx.$i
+        let x = x.$i + dx.$i + ws.away * (pick(sc, screen.0.width, screen.1.width, screen.2.width, screen.3.width) + gap)
         let y = y.$i + dy.$i
         let w = w.$i
         let h = h.$i
@@ -608,13 +654,13 @@ scene Session {
         }
         // Free: it stays where it was let go (on the monitor it was let go on).
         // (Right there, at once: nothing to glide to.)
-        on release title.$i while pick(mon, free.0, free.1) > 0.5 and picked < 0 {
+        on release title.$i while pick(mon, free.0, free.1, free.2, free.3) > 0.5 and picked < 0 {
             fx.$i = mouse.x - grab.x
-            fy.$i = max(mouse.y - grab.y, pick(mon, win.reserved.0.top, win.reserved.1.top))
+            fy.$i = max(mouse.y - grab.y, pick(mon, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top))
             fsc.$i = mon
             maxed.$i = 0
             x.$i: mouse.x - grab.x ~0ms
-            y.$i: max(mouse.y - grab.y, pick(mon, win.reserved.0.top, win.reserved.1.top)) ~0ms
+            y.$i: max(mouse.y - grab.y, pick(mon, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top)) ~0ms
             dx.$i: 0 ~0ms
             dy.$i: 0 ~0ms
         }
@@ -656,6 +702,14 @@ scene Session {
             lay.1 = choice
             free.1 = 0
         }
+        on release title.$i while picked >= 0 and mon == 2 {
+            lay.2 = choice
+            free.2 = 0
+        }
+        on release title.$i while picked >= 0 and mon == 3 {
+            lay.3 = choice
+            free.3 = 0
+        }
         on release title.$i while leads { promote win.$i }
         on release title.$i {
             over = -1
@@ -664,7 +718,7 @@ scene Session {
         // no click needed first (Super+Q closes the one under the mouse).
         let pointed = win.$i.open and sc == mon and not win.$i.dialog and not win.$i.minimized and mouse.x >= x.$i and mouse.x < x.$i + w.$i and mouse.y >= y.$i and mouse.y < y.$i + h.$i
         // (Free, they overlap: the keyboard goes with a click, as on Windows.)
-        on change pointed while dragging < 0 and not overview and fs.on < 0.5 and pick(mon, free.0, free.1) < 0.5 {
+        on change pointed while dragging < 0 and not overview and fs.on < 0.5 and pick(mon, free.0, free.1, free.2, free.3) < 0.5 {
             focus win(if(pointed, i, -1))
         }
         on press lead_zone.$i while not fr { promote win.$i }
@@ -694,9 +748,9 @@ scene Session {
     // and see-through, so that where it will land shows below it. It goes with
     // the mouse on the whole desktop: each monitor draws its part of it, so
     // crossing from one to the other it is seen half on each.
-    repeat i in 0..6 {
+    repeat i in 0..16 {
         // Monitor 1 starts where monitor 0 ends.
-        let x = mouse.x + screen.0.width * ((mon > 0.5) - (screen.index > 0.5)) - grab.x
+        let x = mouse.x + pick(mon, mx.0, mx.1, mx.2, mx.3) - pick(screen.index, mx.0, mx.1, mx.2, mx.3) - grab.x
         let y = mouse.y - grab.y
         let w = w.$i
         let h = h.$i
@@ -744,7 +798,7 @@ scene Session {
     // monitor under the mouse, if that one is tiled. Over one, everything
     // shows how it would be ──
     prop strip = 0 ~160ms
-    follow strip = if(dragging >= 0 and pick(mon, free.0, free.1) < 0.5, 1, 0)
+    follow strip = if(dragging >= 0 and pick(mon, free.0, free.1, free.2, free.3) < 0.5, 1, 0)
     let ico = #f5f7f5
     group {
         show: strip > 0.01 and screen.index == mon
@@ -801,7 +855,7 @@ scene Session {
     // that comes with pleamar-wm, or yours in ~/.config/pleamar/keys.conf—.
     // Each is an event, so Marea or anyone can ask too
     // (`pleamar-wm --say wm "emit overview"`).
-    let fplace = pick(win.focus, win.0.place, win.1.place, win.2.place, win.3.place, win.4.place, win.5.place)
+    let fplace = pick(win.focus, win.0.place, win.1.place, win.2.place, win.3.place, win.4.place, win.5.place, win.6.place, win.7.place, win.8.place, win.9.place, win.10.place, win.11.place, win.12.place, win.13.place, win.14.place, win.15.place)
     let next = pick(mod(focus_at + 1, all), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)
     let previous = pick(mod(focus_at + all - 1, all), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)
     event close
@@ -844,18 +898,18 @@ scene Session {
     // it comes out of it the same way. Drawn on every monitor it crosses, as
     // a carried one is: monitor 1 starts where monitor 0 ends.
     fact island.screen = -1
-    repeat i in 0..6 {
+    repeat i in 0..16 {
         let sc = win.$i.screen
         let isl = if(island.screen >= 0, island.screen, sc)
         // (Eased in: the spring is quick at first, and the melting is to be seen.)
         let m = pow(mini.$i, 1.8)
-        let off = screen.0.width * (sc - screen.index)
+        let off = pick(sc, mx.0, mx.1, mx.2, mx.3) - pick(screen.index, mx.0, mx.1, mx.2, mx.3)
         let x = x.$i + off
         let y = y.$i
         let w = w.$i
         let h = h.$i
         // Where it goes, from this monitor's corner: at Marea's left, at her height.
-        let tx = screen.0.width * (isl - screen.index) + pick(isl, screen.0.width, screen.1.width) / 2 - 97
+        let tx = pick(isl, mx.0, mx.1, mx.2, mx.3) - pick(screen.index, mx.0, mx.1, mx.2, mx.3) + pick(isl, screen.0.width, screen.1.width, screen.2.width, screen.3.width) / 2 - 97
         // (Her height tucked in, as she usually is while a window is being used.)
         let ty = 30
         // On its way it melts into water: its corners round off, it turns
@@ -932,13 +986,14 @@ scene Session {
 
     // ── dialogs: a message, a file chooser, a window of another's: over the
     // rest, at the size it chooses, in the middle of its monitor ──
-    repeat i in 0..6 {
+    repeat i in 0..16 {
         let dw = max(win.$i.width, 120)
         let dh = max(win.$i.height, 40) + tb
         let dx = (W - dw) / 2
         let dy = (H - dh) / 2
         prop dlg.$i = 0 ~220ms
-        follow dlg.$i = if(win.$i.dialog and win.$i.open, 1, 0)
+        let dlg.ws = win.$i.workspace == pick(win.$i.screen, win.shown.0, win.shown.1, win.shown.2, win.shown.3)
+        follow dlg.$i = if(win.$i.dialog and win.$i.open and dlg.ws, 1, 0)
         group {
             show: dlg.$i > 0.01 and win.$i.screen == screen.index
             opacity: dlg.$i
@@ -953,7 +1008,7 @@ scene Session {
                 clip box { from: dx, dy; size: dw, dh; corner: 12 }
                 box { from: dx, dy; size: dw, tb; color: #1d2b27 }
                 text win.$i.title { at: dx + 14, dy + tb / 2; anchor: left center; size: 12; weight: 500; width: max(dw - 40, 10); lines: 1; color: ink }
-                window win.$i { at: dx, dy + tb; size: win.$i.width, win.$i.height; ask: 0, 0; show: win.$i.dialog and win.$i.open and win.$i.screen == screen.index }
+                window win.$i { at: dx, dy + tb; size: win.$i.width, win.$i.height; ask: 0, 0; show: win.$i.dialog and win.$i.open and win.$i.screen == screen.index and dlg.ws }
             }
             box { from: dx, dy; size: dw, dh; corner: 12; stroke: 1.5; color: mint; opacity: 70% * win.$i.focused }
         }
@@ -961,10 +1016,11 @@ scene Session {
 
     // ── fullscreen: one that asked (F11, a video, a game) or Super+F covers
     // its monitor, over the bar and the other programs' bars ──
-    repeat i in 0..6 {
-        let fs.here = win.$i.fullscreen and win.$i.open and win.$i.screen == screen.index
+    repeat i in 0..16 {
+        let fs.ws = win.$i.workspace == pick(win.$i.screen, win.shown.0, win.shown.1, win.shown.2, win.shown.3)
+        let fs.here = win.$i.fullscreen and win.$i.open and win.$i.screen == screen.index and fs.ws
         prop fs.$i = 0 ~160ms
-        follow fs.$i = if(win.$i.fullscreen and win.$i.open, 1, 0)
+        follow fs.$i = if(win.$i.fullscreen and win.$i.open and fs.ws, 1, 0)
         group {
             show: fs.$i > 0.01 and win.$i.screen == screen.index
             opacity: fs.$i
@@ -1009,10 +1065,14 @@ scene Session {
     // Marea follows the mouse from monitor to monitor: she is told which.
     on change mon while mon == 0 { launch "pleamar-wm --say marea 'emit pointer_monitor 0'" }
     on change mon while mon == 1 { launch "pleamar-wm --say marea 'emit pointer_monitor 1'" }
+    on change mon while mon == 2 { launch "pleamar-wm --say marea 'emit pointer_monitor 2'" }
+    on change mon while mon == 3 { launch "pleamar-wm --say marea 'emit pointer_monitor 3'" }
     // Tiled or free, on the monitor under the mouse (Super+W; Marea's menu too).
     event toggle_free
     on toggle_free while mon == 0 { free.0 = 1 - free.0 }
     on toggle_free while mon == 1 { free.1 = 1 - free.1 }
+    on toggle_free while mon == 2 { free.2 = 1 - free.2 }
+    on toggle_free while mon == 3 { free.3 = 1 - free.3 }
 
     // ── Marea rides a window ──
     // Marea asks (`emit ride`): she leaves her island by the top edge, and here
@@ -1041,15 +1101,15 @@ scene Session {
     // 5 × 13, 13 apart and 2.5 below the centre.
     let r.r = 23
     // Where Marea lives, as seen from the desktop: the island, just above the top edge.
-    let r.isl = if(island.screen >= 0, island.screen, max(pick(max(rider, 0), win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen), 0))
-    let home.rx = screen.0.width * r.isl + pick(r.isl, screen.0.width, screen.1.width) / 2 - 50
+    let r.isl = if(island.screen >= 0, island.screen, max(pick(max(rider, 0), win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen, win.6.screen, win.7.screen, win.8.screen, win.9.screen, win.10.screen, win.11.screen, win.12.screen, win.13.screen, win.14.screen, win.15.screen), 0))
+    let home.rx = pick(r.isl, mx.0, mx.1, mx.2, mx.3) + pick(r.isl, screen.0.width, screen.1.width, screen.2.width, screen.3.width) / 2 - 50
     let home.ry = -40
     on ride while win.focus >= 0 and not riding {
         riding = true
         homing = false
         falling = false
         rider = win.focus
-        from.x = screen.0.width * max(if(island.screen >= 0, island.screen, pick(win.focus, win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen)), 0) + pick(max(island.screen, 0), screen.0.width, screen.1.width) / 2 - 50
+        from.x = pick(max(if(island.screen >= 0, island.screen, pick(win.focus, win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen, win.6.screen, win.7.screen, win.8.screen, win.9.screen, win.10.screen, win.11.screen, win.12.screen, win.13.screen, win.14.screen, win.15.screen)), 0), mx.0, mx.1, mx.2, mx.3) + pick(max(if(island.screen >= 0, island.screen, pick(win.focus, win.0.screen, win.1.screen, win.2.screen, win.3.screen, win.4.screen, win.5.screen, win.6.screen, win.7.screen, win.8.screen, win.9.screen, win.10.screen, win.11.screen, win.12.screen, win.13.screen, win.14.screen, win.15.screen)), 0), screen.0.width, screen.1.width, screen.2.width, screen.3.width) / 2 - 50
         from.y = -40
         hop: 0 ~0ms
         hop: 1 ~800ms after 16ms
@@ -1069,12 +1129,14 @@ scene Session {
         rider = -1
     }
     on still drop for 60ms while falling and drop > 0.97 and screen.index == 0 { launch "pleamar-wm --say marea 'emit ride_back'" }
-    repeat i in 0..6 {
+    repeat i in 0..16 {
         let sc = win.$i.screen
         let carried = dragging == i or (landing == i and win.$i.screen != landing.to)
+        // (On a workspace sliding away, she slides away with it.)
+        let ride.slide = (win.$i.workspace - pick(sc, desk.0, desk.1, desk.2, desk.3)) * (pick(sc, screen.0.width, screen.1.width, screen.2.width, screen.3.width) + gap)
         // The window's corner on the desktop: where it is laid out, or where
         // the hand carries it.
-        let wx = if(carried, mouse.x + screen.0.width * (mon > 0.5) - grab.x, x.$i + dx.$i + screen.0.width * sc)
+        let wx = if(carried, mouse.x + pick(mon, mx.0, mx.1, mx.2, mx.3) - grab.x, x.$i + dx.$i + ride.slide + pick(sc, mx.0, mx.1, mx.2, mx.3))
         let wy = if(carried, mouse.y - grab.y, y.$i + dy.$i)
         // Her seat: on the top edge, left of the buttons; with no room above
         // it (tiled, against the top of the monitor), in the title bar itself.
@@ -1085,7 +1147,7 @@ scene Session {
         // On her way she goes up and comes down, like something with weight.
         let at.x = from.x + (to.x - from.x) * hop
         let at.y = from.y + (to.y - from.y) * hop - 130 * 4 * hop * (1 - hop)
-        let off = screen.0.width * screen.index
+        let off = pick(screen.index, mx.0, mx.1, mx.2, mx.3)
         // Settling on another window: she hops over to it.
         on still win.focus for 350ms while riding and not homing and not falling and rider == i and win.focus >= 0 and win.focus != i and not win.$i.minimized {
             from.x = at.x

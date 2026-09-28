@@ -119,10 +119,13 @@ impl Route {
     }
 
     /// A key, by its keysym's name, what it types (if anything) and its evdev code.
-    pub fn key(&mut self, screens: &[Screen], name: &str, typed: Option<String>, mods: Mods, evdev: u32, down: bool) {
+    /// `base`: the key's own name, without what Shift makes of it (`1` where
+    /// it types `!`): a binding says `Super+Shift+1`, whatever the layout.
+    pub fn key(&mut self, screens: &[Screen], name: &str, base: Option<&str>, typed: Option<String>, mods: Mods, evdev: u32, down: bool) {
         // A binding (keys.conf) takes the key before anyone —not while locked—.
         if down && !layers::locked() {
-            if let Some(action) = crate::keys::get().find(name, mods) {
+            let keys = crate::keys::get();
+            if let Some(action) = keys.find(name, mods).or_else(|| base.and_then(|b| keys.find(b, mods))) {
                 println!("session · key {}{}{}{}{name} → {action:?}", if mods.ctrl { "Ctrl+" } else { "" }, if mods.alt { "Alt+" } else { "" }, if mods.shift { "Shift+" } else { "" }, if mods.logo { "Super+" } else { "" });
                 self.perform(action);
                 self.bound.push(evdev);
@@ -167,8 +170,8 @@ impl Route {
     pub fn perform(&self, action: &crate::keys::Action) {
         match action {
             crate::keys::Action::Launch(command) => layers::tell(ToLayers::Launch(command.clone())),
-            crate::keys::Action::Emit(event) => {
-                let _ = self.to_render.send(ToRender::ExternalSignal(pleamar::scene::intern(event), None));
+            crate::keys::Action::Emit(event, n) => {
+                let _ = self.to_render.send(ToRender::ExternalSignal(pleamar::scene::intern(event), *n));
             }
         }
     }

@@ -979,8 +979,11 @@ impl State {
                 return;
             }
         }
+        // The key's own symbol, as if nothing were held (for the bindings).
+        let km = self.keymap.get_keymap();
+        let base = km.key_get_syms_by_level(code, self.keymap.key_get_layout(code), 0).first().map(|s| xkb::keysym_get_name(*s));
         let screens = self.screens();
-        self.route.key(&screens, &name, typed, mods, evdev, down);
+        self.route.key(&screens, &name, base.as_deref(), typed, mods, evdev, down);
     }
 
     /// Someone is there: the compositor tells whoever watches for idleness

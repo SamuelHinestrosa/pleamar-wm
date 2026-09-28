@@ -258,8 +258,8 @@ impl pleamar::Platform for Headless {
                                     }
                                 }
                             }
-                            route.key(&screens, name, typed, mods, code, true);
-                            route.key(&screens, name, None, mods, code, false);
+                            route.key(&screens, name, None, typed, mods, code, true);
+                            route.key(&screens, name, None, None, mods, code, false);
                         }
                         _ => {
                             let Some((x, y)) = what.split_once(',').and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?))) else { continue };

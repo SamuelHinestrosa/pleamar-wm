@@ -6,6 +6,7 @@
 //! bind Super+Return launch kitty      a program
 //! bind Super+q close                  an action of the window manager's scene (its events)
 //! unbind Super+t                      one of the defaults, gone
+//! bind Super+3 workspace 3            an action with a number (its payload)
 //! gesture swipe3_down close           a touchpad gesture, the same way
 //! ```
 //!
@@ -20,7 +21,9 @@ use std::sync::OnceLock;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Action {
     Launch(String),
-    Emit(String),
+    /// An event of the scene, with a number if the line gives one:
+    /// `bind Super+3 workspace 3`.
+    Emit(String, Option<f32>),
 }
 
 #[derive(Clone, Debug)]
@@ -112,7 +115,7 @@ pub fn parse(text: &str, k: &mut Keys) {
 fn combo(s: &str) -> Option<Bind> {
     let parts: Vec<&str> = s.split('+').filter(|p| !p.is_empty()).collect();
     let (key, mods) = parts.split_last()?;
-    let mut b = Bind { ctrl: false, alt: false, shift: false, logo: false, key: key.to_lowercase(), action: Action::Emit(String::new()) };
+    let mut b = Bind { ctrl: false, alt: false, shift: false, logo: false, key: key.to_lowercase(), action: Action::Emit(String::new(), None) };
     for m in mods {
         match m.to_lowercase().as_str() {
             "super" | "logo" | "mod4" | "win" => b.logo = true,
@@ -129,7 +132,8 @@ fn action(s: &str) -> Option<Action> {
     let s = s.trim();
     match s.split_once(char::is_whitespace) {
         Some(("launch", cmd)) if !cmd.trim().is_empty() => Some(Action::Launch(cmd.trim().to_owned())),
-        None if !s.is_empty() && s != "launch" => Some(Action::Emit(s.to_owned())),
+        None if !s.is_empty() && s != "launch" => Some(Action::Emit(s.to_owned(), None)),
+        Some((event, n)) if event != "launch" => n.trim().parse::<f32>().ok().map(|n| Action::Emit(event.to_owned(), Some(n))),
         _ => None,
     }
 }
@@ -143,11 +147,11 @@ mod tests {
         let mut k = Keys::default();
         parse("bind Super+q close\nbind Super+Return launch kitty --single\nbind Shift+Super+m restore_last\ngesture swipe3_down close\n", &mut k);
         let sup = Mods { logo: true, ..Default::default() };
-        assert_eq!(k.find("q", sup), Some(&Action::Emit("close".into())));
+        assert_eq!(k.find("q", sup), Some(&Action::Emit("close".into(), None)));
         assert_eq!(k.find("Return", sup), Some(&Action::Launch("kitty --single".into())));
-        assert_eq!(k.find("M", Mods { logo: true, shift: true, ..Default::default() }), Some(&Action::Emit("restore_last".into())));
+        assert_eq!(k.find("M", Mods { logo: true, shift: true, ..Default::default() }), Some(&Action::Emit("restore_last".into(), None)));
         assert_eq!(k.find("q", Mods::default()), None);
-        assert_eq!(k.gesture("swipe3_down"), Some(&Action::Emit("close".into())));
+        assert_eq!(k.gesture("swipe3_down"), Some(&Action::Emit("close".into(), None)));
         parse("unbind Super+q\n", &mut k);
         assert_eq!(k.find("q", sup), None);
     }

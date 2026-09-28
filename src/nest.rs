@@ -266,6 +266,10 @@ struct Window {
     fullscreen: bool,
     /// A dialog floats: it is not in the layout's order.
     dialog: bool,
+    /// A rule says it floats (`window app=… float`): as a dialog does.
+    floating: bool,
+    /// What the rules said of it, once one matched (its size, if they gave one).
+    ruled: Option<Option<(i32, i32)>>,
     /// Put away (minimized): out of the order too, and where it was in it,
     /// to go back there.
     minimized: bool,
@@ -807,6 +811,11 @@ impl State {
                     *a = Some((w, h));
                 }
                 if let Some(Some(win)) = self.slots.get(slot) {
+                    // Floating at its own size (`ask: 0, 0`) with a rule that gives it one: that one.
+                    let (w, h) = match win.ruled {
+                        Some(Some(size)) if (w, h) == (0, 0) => size,
+                        _ => (w, h),
+                    };
                     win.toplevel.resize(w, h);
                 }
             }
@@ -901,6 +910,8 @@ impl State {
                 }
             }
             ToNest::Launch(command) => self.launch(&command),
+            // Its workspace is no longer shown: nobody has the keyboard.
+            ToNest::Blur => self.set_focus(None),
             ToNest::Minimize(slot, yes) => self.set_minimized(slot, yes),
             ToNest::Fullscreen(slot) => {
                 let now = self.slots.get(slot).and_then(Option::as_ref).is_some_and(|w| w.fullscreen);
@@ -1101,6 +1112,42 @@ impl State {
             h.done();
         }
         self.tell(NestEvent::Title(slot, title));
+        self.apply_rules(slot);
+    }
+
+    /// What `window` lines in session.conf say of it: floating, a size, a
+    /// monitor, a workspace. A program says who it is only after its window
+    /// exists, so this is looked at again as its app and title arrive, until
+    /// one rule matches; then once.
+    fn apply_rules(&mut self, slot: usize) {
+        let Some(Some(w)) = self.slots.get(slot) else { return };
+        if w.ruled.is_some() || (w.app.is_empty() && w.title.is_empty()) {
+            return;
+        }
+        let rules = crate::config::get().for_window(&w.app, &w.title);
+        if rules == crate::config::ForWindow::default() {
+            return;
+        }
+        println!("windows · {} «{}»: {rules:?}", w.app, w.title);
+        let size = rules.size.map(|(a, b)| (a as i32, b as i32));
+        let screen = w.screen;
+        if let Some(Some(w)) = self.slots.get_mut(slot) {
+            w.ruled = Some(size);
+            w.floating |= rules.float;
+            if let Some((a, b)) = size {
+                w.toplevel.resize(a, b);
+            }
+        }
+        if rules.float {
+            self.set_dialog(slot, true);
+        }
+        let to = rules.monitor.as_deref().and_then(|m| m.parse::<usize>().ok().or_else(|| layers::monitors().iter().position(|x| x.name == m))).filter(|k| *k < self.outputs.len());
+        if let Some(to) = to.filter(|k| *k != screen) {
+            self.handle(ToNest::Send(slot, to));
+        }
+        if let Some(ws) = rules.workspace {
+            self.tell(NestEvent::Workspace(slot, ws));
+        }
     }
 
     /// Which program it is (its app id; an X11 one's class).
@@ -1115,6 +1162,7 @@ impl State {
             h.done();
         }
         self.tell(NestEvent::App(slot, app));
+        self.apply_rules(slot);
     }
 
     /// A window to fullscreen or back: the program is told (it hides its own
@@ -1766,6 +1814,7 @@ impl State {
             }),
             Toplevel::X11(x) => (x.title(), x.class()),
         };
+        let screen = self.on_screen;
         // Its size, the one the scene already has for that slot; tiled on all
         // sides, so it does not draw a shadow or round corners of its own: the
         // scene decides how it looks.
@@ -1783,12 +1832,13 @@ impl State {
                 }
             }
         }
-        self.outputs[self.on_screen.min(self.outputs.len() - 1)].enter(&surface);
+        self.outputs[screen.min(self.outputs.len() - 1)].enter(&surface);
         let listed = self.toplevel_list.new_toplevel::<State>(title.clone(), app.clone());
-        self.slots[slot] = Some(Window { toplevel, surface, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen: self.on_screen, shown: None, listed, fullscreen: false, dialog: false, minimized: false, was_at: 0 });
+        self.slots[slot] = Some(Window { toplevel, surface, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen, shown: None, listed, fullscreen: false, dialog: false, floating: false, ruled: None, minimized: false, was_at: 0 });
         self.order.push(slot);
-        self.tell(NestEvent::Opened { slot, title, app, screen: self.on_screen });
+        self.tell(NestEvent::Opened { slot, title, app, screen });
         self.tell(NestEvent::Order(self.order.clone()));
+        self.apply_rules(slot);
         for m in self.toplevel_managers.clone() {
             self.announce(&m, slot);
         }
@@ -1944,7 +1994,7 @@ impl State {
             }
             let Some(slot) = self.window_of(&root) else { continue };
             // It may say it is a dialog only now (a parent, a fixed size).
-            if let Some(dialog) = self.slots[slot].as_ref().map(|w| w.toplevel.is_dialog(&root)) {
+            if let Some(dialog) = self.slots[slot].as_ref().map(|w| w.floating || w.toplevel.is_dialog(&root)) {
                 self.set_dialog(slot, dialog);
             }
             let Some((w, h)) = content_of(&root, |c| c.size) else { continue };

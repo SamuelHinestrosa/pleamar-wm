@@ -11,6 +11,13 @@
 # the same numbers as Hyprland's `transform` (1 = 90, 3 = 270), which is read too.
 #monitor DP-2 preferred at 1920,0 transform 90
 
+# What some windows do when they open: by their program (`app=`, its app id or
+# X11 class) and/or their title (`title=`), no case, `*` for anything.
+#   window app=NAME|title=TEXT [float] [size WxH] [monitor N|NAME] [workspace N]
+#window app=pavucontrol float size 820x560
+#window app=discord workspace 3 monitor HDMI-A-1
+#window title="Picture in Picture" float
+
 # keyboard  layout L  variant V  options O  repeat KEYS_A_SECOND  delay MS
 #keyboard layout es repeat 25 delay 400
 

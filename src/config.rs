@@ -18,6 +18,9 @@
 //! pointer accel flat speed 0
 //! touchpad tap on natural on dwt on speed 0.2
 //! idle off-after 600
+//! window app=pavucontrol float size 820x560
+//! window app=discord workspace 3 monitor HDMI-A-1
+//! window title="Picture-in-Picture" float
 //! ```
 //!
 //! What it does not say is looked for in Hyprland's own configuration
@@ -82,6 +85,69 @@ pub struct Config {
     pub touchpad: Pointing,
     /// Seconds without input before the monitors go dark (none: never).
     pub off_after: Option<u64>,
+    /// What some windows do when they open: `window app=… [float] [size WxH]
+    /// [monitor N|NAME] [workspace N]`.
+    pub windows: Vec<WindowRule>,
+}
+
+/// A rule for the windows that match it: by their program (`app=`, the
+/// app_id or the X11 class) and/or their title (`title=`), with no case, and
+/// `*` for anything (`app=org.gnome.*`). Several may match: each says what it says.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct WindowRule {
+    pub app: Option<String>,
+    pub title: Option<String>,
+    /// It floats over the layout, at its own size, as a dialog does.
+    pub float: bool,
+    pub size: Option<(u32, u32)>,
+    /// A monitor by its number (0 the leftmost) or its name.
+    pub monitor: Option<String>,
+    pub workspace: Option<usize>,
+}
+
+/// What the rules say for a window: float, size, monitor, workspace.
+#[derive(Default, Debug, PartialEq)]
+pub struct ForWindow {
+    pub float: bool,
+    pub size: Option<(u32, u32)>,
+    pub monitor: Option<String>,
+    pub workspace: Option<usize>,
+}
+
+/// `*` for anything, no case: `org.gnome.*`, `*Picture*`, `firefox`.
+fn matches(pattern: &str, text: &str) -> bool {
+    let (p, t) = (pattern.to_lowercase(), text.to_lowercase());
+    let parts: Vec<&str> = p.split('*').collect();
+    if parts.len() == 1 {
+        return p == t;
+    }
+    let mut at = 0;
+    for (k, part) in parts.iter().enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        match t[at..].find(part) {
+            Some(i) if k > 0 || i == 0 => at += i + part.len(),
+            _ => return false,
+        }
+    }
+    parts.last().is_some_and(|l| l.is_empty()) || at == t.len()
+}
+
+impl Config {
+    pub fn for_window(&self, app: &str, title: &str) -> ForWindow {
+        let mut out = ForWindow::default();
+        for r in &self.windows {
+            if r.app.as_deref().is_some_and(|p| !matches(p, app)) || r.title.as_deref().is_some_and(|p| !matches(p, title)) {
+                continue;
+            }
+            out.float |= r.float;
+            out.size = r.size.or(out.size);
+            out.monitor = r.monitor.clone().or(out.monitor);
+            out.workspace = r.workspace.or(out.workspace);
+        }
+        out
+    }
 }
 
 impl Config {
@@ -148,13 +214,18 @@ fn words(line: &str) -> Vec<String> {
             chars.next();
             out.push(chars.by_ref().take_while(|c| *c != '"').collect());
         } else {
+            // `title="Some title"`: quotes inside a word keep its spaces, and go.
             let mut w = String::new();
             while let Some(&c) = chars.peek() {
                 if c.is_whitespace() {
                     break;
                 }
-                w.push(c);
                 chars.next();
+                if c == '"' {
+                    w.extend(chars.by_ref().take_while(|c| *c != '"'));
+                } else {
+                    w.push(c);
+                }
             }
             out.push(w);
         }
@@ -215,6 +286,41 @@ pub fn parse(text: &str, c: &mut Config) {
                     c.pointer = p;
                 } else {
                     c.touchpad = p;
+                }
+            }
+            "window" => {
+                let mut r = WindowRule::default();
+                let mut k = 0;
+                let mut ok = true;
+                while k < rest.len() {
+                    let w = rest[k].as_str();
+                    if let Some(v) = w.strip_prefix("app=") {
+                        r.app = Some(v.to_owned());
+                    } else if let Some(v) = w.strip_prefix("title=") {
+                        r.title = Some(v.to_owned());
+                    } else if w == "float" {
+                        r.float = true;
+                    } else if w == "size" {
+                        r.size = rest.get(k + 1).and_then(|s| s.split_once('x')).and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?)));
+                        ok &= r.size.is_some();
+                        k += 1;
+                    } else if w == "monitor" {
+                        r.monitor = rest.get(k + 1).cloned();
+                        ok &= r.monitor.is_some();
+                        k += 1;
+                    } else if w == "workspace" {
+                        r.workspace = rest.get(k + 1).and_then(|s| s.parse().ok()).filter(|n: &usize| *n >= 1);
+                        ok &= r.workspace.is_some();
+                        k += 1;
+                    } else {
+                        ok = false;
+                    }
+                    k += 1;
+                }
+                if ok && (r.app.is_some() || r.title.is_some()) {
+                    c.windows.push(r);
+                } else {
+                    eprintln!("config · line {}: a window rule is `window app=NAME|title=TEXT [float] [size WxH] [monitor N|NAME] [workspace N]`", n + 1);
                 }
             }
             "idle" => pairs(&mut |k, v| match k {
@@ -427,6 +533,19 @@ mod tests {
         assert_eq!(c.repeat(), (30, 400));
         assert_eq!(c.touchpad.tap, Some(true));
         assert_eq!(c.off_after, Some(600));
+    }
+
+    #[test]
+    fn window_rules() {
+        let mut c = Config::default();
+        parse("window app=pavucontrol float size 820x560\nwindow app=org.gnome.* workspace 2\nwindow title=\"Picture in Picture\" float monitor HDMI-A-1\nwindow float", &mut c);
+        assert_eq!(c.windows.len(), 3);
+        let r = c.for_window("pavucontrol", "Volume");
+        assert!(r.float && r.size == Some((820, 560)));
+        assert_eq!(c.for_window("org.gnome.Calculator", "").workspace, Some(2));
+        assert_eq!(c.for_window("firefox", "picture in picture").monitor.as_deref(), Some("HDMI-A-1"));
+        assert_eq!(c.for_window("kitty", "zsh"), ForWindow::default());
+        assert!(matches("*picture*", "Picture-in-Picture") && !matches("fire", "firefox") && matches("fire*", "firefox"));
     }
 
     #[test]
