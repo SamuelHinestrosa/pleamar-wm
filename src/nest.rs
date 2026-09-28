@@ -1407,8 +1407,14 @@ impl State {
         if p.damage && p.frame.version() >= 2 {
             p.frame.damage(0, 0, w as u32, h as u32);
         }
-        let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default();
-        p.frame.ready((t.as_secs() >> 32) as u32, t.as_secs() as u32, t.subsec_nanos());
+        // On the presentation clock, CLOCK_MONOTONIC, as the protocol asks: a
+        // recorder (wf-recorder) times its frames by it, and with the wall
+        // clock a ten-second video said it lasted fifty-six years.
+        let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+        // SAFETY: a valid timespec for the call to fill.
+        unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
+        let secs = ts.tv_sec as u64;
+        p.frame.ready((secs >> 32) as u32, secs as u32, ts.tv_nsec as u32);
     }
 
     fn release(&mut self, numbers: Vec<u64>) {
