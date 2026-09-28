@@ -20,14 +20,19 @@ pub struct Route {
     scene_held: bool,
     /// The program's surface that took the keyboard when clicked.
     key_client: Option<u64>,
-    /// Keys held down that went to a binding: their release is the binding's too.
-    bound: Vec<u32>,
+    /// Keys held down that went to a binding: their release is the binding's
+    /// too, and does what its `release` says, if it has one.
+    bound: Vec<(u32, Option<crate::keys::Action>)>,
+    /// The binding held down that repeats, by its key; and whether its
+    /// repetition still has to be started (the loop that holds the timers does it).
+    repeating: Option<(u32, crate::keys::Action)>,
+    repeat_new: bool,
     to_render: Sender<ToRender>,
 }
 
 impl Route {
     pub fn new(to_render: Sender<ToRender>) -> Route {
-        Route { hit: Hit::Scene(None), grab: None, scene_held: false, key_client: None, bound: Vec::new(), to_render }
+        Route { hit: Hit::Scene(None), grab: None, scene_held: false, key_client: None, bound: Vec::new(), repeating: None, repeat_new: false, to_render }
     }
 
     /// The pointer at that point of a monitor, in its pixels. Says whether it
@@ -140,19 +145,35 @@ impl Route {
     /// `base`: the key's own name, without what Shift makes of it (`1` where
     /// it types `!`): a binding says `Super+Shift+1`, whatever the layout.
     pub fn key(&mut self, screens: &[Screen], name: &str, base: Option<&str>, typed: Option<String>, mods: Mods, evdev: u32, down: bool) {
-        // A binding (keys.conf) takes the key before anyone —not while locked—.
-        if down && !layers::locked() {
+        // A binding (keys.conf) takes the key before anyone —while locked,
+        // only the ones marked `locked`—.
+        if down {
             let keys = crate::keys::get();
-            if let Some(action) = keys.find(name, mods).or_else(|| base.and_then(|b| keys.find(b, mods))) {
-                println!("session · key {}{}{}{}{name} → {action:?}", if mods.ctrl { "Ctrl+" } else { "" }, if mods.alt { "Alt+" } else { "" }, if mods.shift { "Shift+" } else { "" }, if mods.logo { "Super+" } else { "" });
-                self.perform(action);
-                self.bound.push(evdev);
+            let open = |b: &&crate::keys::Bind| b.locked || !layers::locked();
+            let bind = keys.bind(name, mods).or_else(|| base.and_then(|b| keys.bind(b, mods))).filter(open);
+            //  What letting it go does is decided now: by then the modifiers may be up.
+            let later = keys.on_release(name, mods).or_else(|| base.and_then(|b| keys.on_release(b, mods))).filter(open);
+            if bind.is_some() || later.is_some() {
+                if let Some(b) = bind {
+                    println!("session · key {}{}{}{}{name} → {:?}", if mods.ctrl { "Ctrl+" } else { "" }, if mods.alt { "Alt+" } else { "" }, if mods.shift { "Shift+" } else { "" }, if mods.logo { "Super+" } else { "" }, b.action);
+                    self.perform(&b.action);
+                    if b.repeat {
+                        self.repeating = Some((evdev, b.action.clone()));
+                        self.repeat_new = true;
+                    }
+                }
+                self.bound.push((evdev, later.map(|b| b.action.clone())));
                 return;
             }
         }
         if !down {
-            if let Some(k) = self.bound.iter().position(|c| *c == evdev) {
-                self.bound.remove(k);
+            if self.repeating.as_ref().is_some_and(|(c, _)| *c == evdev) {
+                self.repeating = None;
+            }
+            if let Some(k) = self.bound.iter().position(|(c, _)| *c == evdev) {
+                if let (_, Some(action)) = self.bound.remove(k) {
+                    self.perform(&action);
+                }
                 return;
             }
         }
@@ -181,6 +202,25 @@ impl Route {
                 return;
             }
             let _ = self.to_render.send(ToRender::KeyReleased(name.to_owned(), evdev));
+        }
+    }
+
+    /// A repeating binding just pressed: its key, once, for the loop to start its timer.
+    pub fn take_new_repeat(&mut self) -> Option<u32> {
+        if !std::mem::take(&mut self.repeat_new) {
+            return None;
+        }
+        self.repeating.as_ref().map(|(c, _)| *c)
+    }
+
+    /// The timer of a repeating binding: acts again if that key is still held.
+    pub fn repeat(&self, evdev: u32) -> bool {
+        match &self.repeating {
+            Some((c, action)) if *c == evdev => {
+                self.perform(action);
+                true
+            }
+            _ => false,
         }
     }
 

@@ -7,3 +7,7 @@
 wm: swaybg -i "${PLEAMAR_WALLPAPER:-/usr/share/wallpapers/cachyos-wallpapers/GreenFeathers.png}" -m fill
 # Marea, as a program of the session (layer-shell), as she is on Hyprland.
 marea start
+# Whoever asks for your password when a program needs root (mounting a disk,
+# a system tool): the first polkit agent installed. With none, those programs
+# fail without asking. On another compositor you already start your own.
+wm: for a in /usr/lib/hyprpolkitagent/hyprpolkitagent /usr/libexec/hyprpolkitagent /usr/lib/polkit-gnome/polkit-gnome-authentication-agent-1 /usr/libexec/polkit-gnome-authentication-agent-1 /usr/lib/polkit-kde-authentication-agent-1 /usr/libexec/polkit-kde-authentication-agent-1 /usr/lib/mate-polkit/polkit-mate-authentication-agent-1 /usr/bin/lxqt-policykit-agent; do [ -x "$a" ] && exec "$a"; done; echo "autostart · no polkit agent installed (hyprpolkitagent, polkit-gnome…)" >&2

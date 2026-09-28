@@ -224,6 +224,8 @@ struct State {
     dark_for_idle: bool,
     /// Where the pointer and the keys go: the scene or a program's surface.
     route: Route,
+    /// The loop's handle: to start the timer of a key binding that repeats.
+    handle: smithay::reexports::calloop::LoopHandle<'static, State>,
     /// What is needed to put monitors up when they are plugged in: the card's
     /// buffers, the scene's surfaces, and the sheets given to the render.
     gbm: Arc<Mutex<gbm::Device<DrmDeviceFd>>>,
@@ -344,7 +346,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     layers::set_card(drm.clone());
     layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz, scale: m.scale }, m.screen.clone())).collect());
     let mover = CursorMover::new(drm.clone());
-    let mut state = State { mover, session, drm, monitors, libinput, to_render: to_render.clone(), keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, route: Route::new(to_render), gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
+    let mut state = State { mover, session, drm, monitors, libinput, to_render: to_render.clone(), keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, route: Route::new(to_render), handle: event_loop.handle(), gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
     state.make_cursors(&gbm);
     // The cursor the scene and the programs ask for, whenever it changes.
     let (cursor_tx, cursor_rx) = smithay::reexports::calloop::channel::channel::<(bool, Cursor)>();
@@ -984,6 +986,18 @@ impl State {
         let base = km.key_get_syms_by_level(code, self.keymap.key_get_layout(code), 0).first().map(|s| xkb::keysym_get_name(*s));
         let screens = self.screens();
         self.route.key(&screens, &name, base.as_deref(), typed, mods, evdev, down);
+        // Held, it acts again: after the keyboard's delay, at its rate.
+        if let Some(held) = self.route.take_new_repeat() {
+            let (rate, delay) = config::get().repeat();
+            let every = Duration::from_millis((1000 / rate).max(1) as u64);
+            let _ = self.handle.insert_source(smithay::reexports::calloop::timer::Timer::from_duration(Duration::from_millis(delay as u64)), move |_, _, state: &mut State| {
+                if state.route.repeat(held) {
+                    smithay::reexports::calloop::timer::TimeoutAction::ToDuration(every)
+                } else {
+                    smithay::reexports::calloop::timer::TimeoutAction::Drop
+                }
+            });
+        }
     }
 
     /// Someone is there: the compositor tells whoever watches for idleness
