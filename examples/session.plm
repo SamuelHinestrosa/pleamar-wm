@@ -90,9 +90,30 @@ scene Session {
     shader rain = file "shaders/rain.wgsl"
     fact rain = false
     event toggle_rain
-    on toggle_rain { toggle rain }
+    on toggle_rain {
+        snow = false
+        toggle rain
+    }
     prop wet = 0 ~2500ms
     follow wet = if(rain, 1, 0)
+    // ── or snow: frost creeping in from the edges, snow piling up on top of
+    // each window, flakes stuck to the glass and falling (`emit toggle_snow`).
+    // One weather at a time ──
+    shader snow = file "shaders/snow.wgsl"
+    fact snow = false
+    event toggle_snow
+    on toggle_snow {
+        rain = false
+        toggle snow
+    }
+    prop cold = 0 ~3000ms
+    follow cold = if(snow, 1, 0)
+    // How far the window being carried is behind the mouse: its water lags
+    // behind, as water on a pane that is moved does.
+    prop lag.x = 0 ~140ms
+    prop lag.y = 0 ~140ms
+    follow lag.x = mouse.x
+    follow lag.y = mouse.y
 
     // ── the desk ──
     // Nothing: the wallpaper is a program's (swaybg, below everything). Only
@@ -432,13 +453,13 @@ scene Session {
             }
             // Without the keyboard, grey and a step back.
             group {
-                show: wet <= 0.001
+                show: wet <= 0.001 and cold <= 0.001
                 saturation: 0.3 + 0.7 * lit.$i
                 brightness: 0.72 + 0.28 * lit.$i
                 clip box { from: x, y; size: w, h; corner: 12 }
                 box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: goal.w, goal.h - tb; show: drawn and not win.$i.fullscreen and wet <= 0.001 }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: goal.w, goal.h - tb; show: drawn and not win.$i.fullscreen and wet <= 0.001 and cold <= 0.001 }
             }
             // The same, in the rain: the window seen through wet glass.
             group {
@@ -450,6 +471,17 @@ scene Session {
                 box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
                 window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: goal.w, goal.h - tb; show: drawn and not win.$i.fullscreen and wet > 0.001 }
+            }
+            // And in the snow: frosted glass with snow on top.
+            group {
+                show: cold > 0.001 and wet <= 0.001
+                saturation: 0.3 + 0.7 * lit.$i
+                brightness: 0.72 + 0.28 * lit.$i
+                shader: snow, cold
+                clip box { from: x, y; size: w, h; corner: 12 }
+                box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
+                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: goal.w, goal.h - tb; show: drawn and not win.$i.fullscreen and cold > 0.001 and wet <= 0.001 }
             }
             // (The wave: two soft crests of light, the second behind the first.)
             group {
@@ -678,11 +710,31 @@ scene Session {
                 shadow: 0, 26, 50, 60%
                 box { from: x, y; size: w, h; corner: 12 }
             }
+            let carried = dragging == i or (landing == i and win.$i.screen != landing.to)
             group {
+                show: wet <= 0.001 and cold <= 0.001
                 clip box { from: x, y; size: w, h; corner: 12 }
                 box { from: x, y; size: w, tb; color: #1d2b27 }
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); show: dragging == i or (landing == i and win.$i.screen != landing.to) }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); show: carried and wet <= 0.001 and cold <= 0.001 }
+            }
+            // Carried in the rain, its water goes with it, lagging behind.
+            group {
+                show: wet > 0.001
+                shader: rain, wet, mouse.x - lag.x, mouse.y - lag.y
+                clip box { from: x, y; size: w, h; corner: 12 }
+                box { from: x, y; size: w, tb; color: #1d2b27 }
+                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); show: carried and wet > 0.001 }
+            }
+            // And in the snow, its snow and its frost.
+            group {
+                show: cold > 0.001 and wet <= 0.001
+                shader: snow, cold, mouse.x - lag.x, mouse.y - lag.y
+                clip box { from: x, y; size: w, h; corner: 12 }
+                box { from: x, y; size: w, tb; color: #1d2b27 }
+                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); show: carried and cold > 0.001 and wet <= 0.001 }
             }
             box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: 80% }
         }
@@ -931,6 +983,27 @@ scene Session {
             direction: 100deg; spread: 3deg; gravity: 0, 0
             size: 1.2, 0.9; colors: #e4f0ff, #c8dcf0; opacity: 24%, 12%
             shape: spark; emit: rain
+        }
+    }
+    // And the snow, drifting down in front of everything: big slow flakes and
+    // small quick ones.
+    group {
+        z: 100001
+        show: cold > 0.001
+        opacity: cold
+        particles {
+            at: W / 2, -20; area: W + 200, 1; count: 500
+            life: 9s .. 12s; speed: 120 .. 170
+            direction: 95deg; spread: 30deg; gravity: 0, 4
+            size: 3.2, 2.6; colors: #ffffff, #e8f2ff; opacity: 85%, 60%
+            shape: dot; emit: snow
+        }
+        particles {
+            at: W / 2, -20; area: W + 200, 1; count: 700
+            life: 7s .. 10s; speed: 150 .. 220
+            direction: 100deg; spread: 20deg; gravity: 0, 6
+            size: 1.8, 1.4; colors: #ffffff, #dfeaf7; opacity: 70%, 45%
+            shape: dot; emit: snow
         }
     }
     // Marea follows the mouse from monitor to monitor: she is told which.

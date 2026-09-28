@@ -4,6 +4,8 @@
 // the sides. It is a group's shader: `inside(s, at)` is what the window holds.
 //
 // s.a.x  how much rain: 0 dry, 1 raining (drops come and go with it)
+// s.a.y, s.a.z  how far the window is behind the hand carrying it, in pixels:
+//        its water lags behind the move and catches up when it stops
 
 fn hash1(p: vec2<f32>) -> f32 {
     let q = fract(p * vec2<f32>(123.34, 456.21));
@@ -118,11 +120,13 @@ fn shade(s: Shader) -> vec4<f32> {
         }
     }
 
-    var b = still(p, t, amount, 24.0, 0.0);
+    // Carried, the water lags behind the move: the heavier, the more.
+    let lag = clamp(s.a.yz, vec2<f32>(-80.0), vec2<f32>(80.0));
+    var b = still(p + lag * 0.25, t, amount, 24.0, 0.0);
     // A few bigger ones, further apart.
-    let fat = still(p, t * 0.6, amount * 0.5, 70.0, 1.2);
+    let fat = still(p + lag * 0.45, t * 0.6, amount * 0.5, 70.0, 1.2);
     if (fat.cover > b.cover) { b = fat; }
-    let big = sliding(p, s.size, t, amount);
+    let big = sliding(p + lag * 0.6, s.size, t, amount);
     if (big.cover > b.cover) { b = big; }
     if (drip.cover > b.cover) { b = drip; }
     if (rim.cover > b.cover) { b = rim; }

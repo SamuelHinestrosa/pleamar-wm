@@ -167,7 +167,10 @@ fn init() -> i32 {
 /// pleamar-wm has no source folder next to it.
 const DEFAULT_SCENE: &str = include_str!("../examples/session.plm");
 /// And the shaders it reads, relative to it.
-const DEFAULT_SHADERS: &[(&str, &str)] = &[("shaders/rain.wgsl", include_str!("../examples/shaders/rain.wgsl"))];
+const DEFAULT_SHADERS: &[(&str, &str)] = &[
+    ("shaders/rain.wgsl", include_str!("../examples/shaders/rain.wgsl")),
+    ("shaders/snow.wgsl", include_str!("../examples/shaders/snow.wgsl")),
+];
 
 /// The scene and its shaders into `dir`. `refresh`: the runtime copy, kept the
 /// same as the one inside; otherwise someone's folder, where nothing is overwritten.
