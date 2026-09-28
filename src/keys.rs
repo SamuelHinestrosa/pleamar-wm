@@ -9,6 +9,7 @@
 //! bind Super+3 workspace 3            an action with a number (its payload)
 //! gesture swipe3_down close           a touchpad gesture, the same way
 //! bind XF86AudioRaiseVolume repeat locked launch marea volume_up
+//! shortcut push-to-talk Super+F9      a program's global shortcut, on that key
 //! ```
 //!
 //! Before the action, `repeat` makes a held key act again at the keyboard's
@@ -30,6 +31,9 @@ pub enum Action {
     /// An event of the scene, with a number if the line gives one:
     /// `bind Super+3 workspace 3`.
     Emit(String, Option<f32>),
+    /// A program's global shortcut let go (its session and its id): the
+    /// portal tells it.
+    ShortcutUp(String, String),
 }
 
 #[derive(Clone, Debug)]
@@ -58,6 +62,9 @@ impl Bind {
 pub struct Keys {
     binds: Vec<Bind>,
     gestures: Vec<(String, Action)>,
+    /// Which key a program's global shortcut goes on, whatever it asked for:
+    /// `shortcut [app:]id Mods+key`.
+    shortcuts: Vec<(Option<String>, String, Bind)>,
 }
 
 impl Keys {
@@ -75,6 +82,11 @@ impl Keys {
     fn find(&self, name: &str, mods: Mods, release: bool) -> Option<&Bind> {
         let name = name.to_lowercase();
         self.binds.iter().rev().find(|b| b.key == name && b.ctrl == mods.ctrl && b.alt == mods.alt && b.shift == mods.shift && b.logo == mods.logo && b.release == release)
+    }
+
+    /// The key the user gave a program's shortcut, if any (`shortcut`).
+    pub fn shortcut(&self, app: &str, id: &str) -> Option<Bind> {
+        self.shortcuts.iter().rev().find(|(a, i, _)| i == id && a.as_deref().is_none_or(|a| a == app)).map(|(_, _, b)| b.clone())
     }
 
     pub fn gesture(&self, name: &str) -> Option<&Action> {
@@ -126,6 +138,19 @@ pub fn parse(text: &str, k: &mut Keys) {
                 Some(b) => k.binds.retain(|o| !(o.key == b.key && o.ctrl == b.ctrl && o.alt == b.alt && o.shift == b.shift && o.logo == b.logo)),
                 None => eprintln!("keys · line {}: «{line}» is not «unbind Mods+key»", n + 1),
             },
+            "shortcut" => {
+                let (id, key) = (first, rest.split_whitespace().next().unwrap_or(""));
+                match combo(key).filter(|_| !id.is_empty()) {
+                    Some(b) => {
+                        let (app, id) = match id.split_once(':') {
+                            Some((a, i)) => (Some(a.to_owned()), i.to_owned()),
+                            None => (None, id.to_owned()),
+                        };
+                        k.shortcuts.push((app, id, b));
+                    }
+                    None => eprintln!("keys · line {}: «{line}» is not «shortcut [app:]id Mods+key»", n + 1),
+                }
+            }
             "gesture" => match action(rest) {
                 Some(a) if !first.is_empty() => {
                     k.gestures.retain(|(g, _)| g != first);
@@ -140,6 +165,29 @@ pub fn parse(text: &str, k: &mut Keys) {
 
 /// `Super+Shift+Left`: the modifiers in any order, and the key last, by its
 /// keysym's name (`q`, `Return`, `Left`, `space`, `Print`, `minus`).
+/// A key as the portals write it (`CTRL+SHIFT+a`, `LOGO+F9`): the same as here.
+pub fn trigger(s: &str) -> Option<Bind> {
+    combo(s)
+}
+
+impl Bind {
+    /// Whether that key, with those modifiers held, is this one.
+    pub fn fits(&self, name: &str, mods: Mods) -> bool {
+        self.key == name.to_lowercase() && self.ctrl == mods.ctrl && self.alt == mods.alt && self.shift == mods.shift && self.logo == mods.logo
+    }
+
+    /// How it is written, for whoever shows it: `Super+Shift+F9`.
+    pub fn describe(&self) -> String {
+        let mut s = String::new();
+        for (on, m) in [(self.ctrl, "Ctrl+"), (self.alt, "Alt+"), (self.shift, "Shift+"), (self.logo, "Super+")] {
+            if on {
+                s.push_str(m);
+            }
+        }
+        s + &self.key
+    }
+}
+
 fn combo(s: &str) -> Option<Bind> {
     let parts: Vec<&str> = s.split('+').filter(|p| !p.is_empty()).collect();
     let (key, mods) = parts.split_last()?;
@@ -213,6 +261,17 @@ mod tests {
         let r = k.on_release("v", m).expect("the release is its own binding");
         assert!(r.release && !r.repeat);
         assert_eq!(r.action, Action::Launch("voxtype record stop".into()));
+    }
+
+    #[test]
+    fn shortcuts() {
+        let mut k = Keys::default();
+        parse("shortcut push-to-talk Super+F9\nshortcut com.discordapp.Discord:mute Ctrl+m\n", &mut k);
+        let ptt = k.shortcut("anything", "push-to-talk").expect("for any program");
+        assert!(ptt.fits("F9", Mods { logo: true, ..Default::default() }));
+        assert!(k.shortcut("com.discordapp.Discord", "mute").is_some());
+        assert!(k.shortcut("org.other", "mute").is_none());
+        assert_eq!(trigger("CTRL+SHIFT+p").map(|b| b.describe()).as_deref(), Some("Ctrl+Shift+p"));
     }
 
     #[test]

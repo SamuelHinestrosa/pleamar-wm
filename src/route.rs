@@ -165,6 +165,12 @@ impl Route {
                 self.bound.push((evdev, later.map(|b| b.action.clone())));
                 return;
             }
+            // A program's global shortcut (the portal): down now, up when let go.
+            if let Some((session, id)) = crate::portal::shortcut_at(name, base, mods) {
+                crate::portal::shortcut_signal(&session, &id, true);
+                self.bound.push((evdev, Some(crate::keys::Action::ShortcutUp(session, id))));
+                return;
+            }
         }
         if !down {
             if self.repeating.as_ref().is_some_and(|(c, _)| *c == evdev) {
@@ -231,6 +237,7 @@ impl Route {
             crate::keys::Action::Emit(event, n) => {
                 let _ = self.to_render.send(ToRender::ExternalSignal(pleamar::scene::intern(event), *n));
             }
+            crate::keys::Action::ShortcutUp(session, id) => crate::portal::shortcut_signal(session, id, false),
         }
     }
 

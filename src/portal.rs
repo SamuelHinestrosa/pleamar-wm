@@ -251,6 +251,111 @@ async fn choose(types: u32) -> Option<Picked> {
     .await
 }
 
+// ── global shortcuts: a program's keys, wherever the keyboard is ─────────
+
+/// A program's shortcut: its session, its id, what it says it does, and the
+/// key it is on (the one it asked for, or the one `keys.conf` gave it).
+struct Shortcut {
+    session: String,
+    id: String,
+    description: String,
+    key: Option<crate::keys::Bind>,
+}
+
+static SHORTCUTS: Mutex<Vec<Shortcut>> = Mutex::new(Vec::new());
+static CONNECTION: std::sync::OnceLock<zbus::blocking::Connection> = std::sync::OnceLock::new();
+/// Which program each session is, for `keys.conf`'s `shortcut app:id`.
+static APPS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+
+/// The program's shortcut on that key, if there is one: its session and id.
+pub fn shortcut_at(name: &str, base: Option<&str>, mods: pleamar::scene::Mods) -> Option<(String, String)> {
+    let all = SHORTCUTS.lock().unwrap();
+    all.iter()
+        .find(|s| s.key.as_ref().is_some_and(|k| k.fits(name, mods) || base.is_some_and(|b| k.fits(b, mods))))
+        .map(|s| (s.session.clone(), s.id.clone()))
+}
+
+/// Tells the program its shortcut went down (true) or up.
+pub fn shortcut_signal(session: &str, id: &str, down: bool) {
+    let Some(c) = CONNECTION.get() else { return };
+    let Ok(path) = zbus::zvariant::ObjectPath::try_from(session) else { return };
+    let ms = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+    let options: HashMap<String, OwnedValue> = HashMap::new();
+    let _ = c.emit_signal(None::<&str>, PATH, "org.freedesktop.impl.portal.GlobalShortcuts", if down { "Activated" } else { "Deactivated" }, &(path, id, ms, options));
+}
+
+fn shortcuts_of(session: &str) -> Vec<(String, HashMap<String, OwnedValue>)> {
+    SHORTCUTS
+        .lock()
+        .unwrap()
+        .iter()
+        .filter(|s| s.session == session)
+        .map(|s| {
+            let mut props = HashMap::from([("description".to_owned(), owned(ZValue::from(s.description.clone())))]);
+            if let Some(k) = &s.key {
+                props.insert("trigger_description".to_owned(), owned(ZValue::from(k.describe())));
+            }
+            (s.id.clone(), props)
+        })
+        .collect()
+}
+
+struct GlobalShortcuts {
+    sessions: Sessions,
+}
+
+#[zbus::interface(name = "org.freedesktop.impl.portal.GlobalShortcuts")]
+impl GlobalShortcuts {
+    async fn create_session(
+        &self,
+        _handle: OwnedObjectPath,
+        session_handle: OwnedObjectPath,
+        app_id: String,
+        _options: HashMap<String, OwnedValue>,
+        #[zbus(object_server)] server: &zbus::ObjectServer,
+    ) -> Answer {
+        let path = session_handle.to_string();
+        APPS.lock().unwrap().get_or_insert_with(HashMap::new).insert(path.clone(), app_id);
+        self.sessions.lock().unwrap().insert(path.clone(), Choices::default());
+        let session = Session { path: path.clone(), sessions: self.sessions.clone() };
+        if server.at(session_handle.as_ref(), session).await.is_err() {
+            return (2, HashMap::new());
+        }
+        (0, HashMap::new())
+    }
+
+    /// Each on the key the user gave it in `keys.conf`, or the one it asks
+    /// for (`preferred_trigger`); with neither, it is there but on no key.
+    async fn bind_shortcuts(&self, _handle: OwnedObjectPath, session_handle: OwnedObjectPath, shortcuts: Vec<(String, HashMap<String, OwnedValue>)>, _parent_window: String, _options: HashMap<String, OwnedValue>) -> Answer {
+        let session = session_handle.to_string();
+        let app = APPS.lock().unwrap().as_ref().and_then(|a| a.get(&session).cloned()).unwrap_or_default();
+        let keys = crate::keys::get();
+        {
+            let mut all = SHORTCUTS.lock().unwrap();
+            all.retain(|s| s.session != session);
+            for (id, props) in shortcuts {
+                let text = |k: &str| props.get(k).and_then(|v| String::try_from(v.clone()).ok()).unwrap_or_default();
+                let key = keys.shortcut(&app, &id).or_else(|| crate::keys::trigger(&text("preferred_trigger")));
+                println!("portal · {} binds «{id}» on {}", if app.is_empty() { "a program" } else { &app }, key.as_ref().map_or("no key".to_owned(), |k| k.describe()));
+                all.push(Shortcut { session: session.clone(), id, description: text("description"), key });
+            }
+        }
+        (0, HashMap::from([("shortcuts".to_owned(), owned(ZValue::from(shortcuts_of(&session))))]))
+    }
+
+    async fn list_shortcuts(&self, _handle: OwnedObjectPath, session_handle: OwnedObjectPath) -> Answer {
+        (0, HashMap::from([("shortcuts".to_owned(), owned(ZValue::from(shortcuts_of(session_handle.as_str()))))]))
+    }
+
+    /// Their keys are changed in `keys.conf` (`shortcut id Mods+key`): no window for it.
+    async fn configure_shortcuts(&self, _session_handle: OwnedObjectPath, _parent_window: String, _options: HashMap<String, OwnedValue>) {}
+
+    #[zbus(property, name = "version")]
+    fn version(&self) -> u32 {
+        2
+    }
+}
+
 struct Screenshot;
 
 #[zbus::interface(name = "org.freedesktop.impl.portal.Screenshot")]
@@ -328,13 +433,15 @@ pub fn start(to_render: Sender<ToRender>) {
     let _ = std::thread::Builder::new().name("portal-dbus".into()).spawn(|| {
         let sessions: Sessions = Default::default();
         let built = zbus::blocking::connection::Builder::session()
-            .and_then(|b| b.serve_at(PATH, ScreenCast { sessions }))
+            .and_then(|b| b.serve_at(PATH, ScreenCast { sessions: sessions.clone() }))
+            .and_then(|b| b.serve_at(PATH, GlobalShortcuts { sessions }))
             .and_then(|b| b.serve_at(PATH, Screenshot))
             .and_then(|b| b.name(NAME))
             .and_then(|b| b.build());
         match built {
             Ok(connection) => {
                 println!("portal · {NAME}: sharing the screen is this session's");
+                let _ = CONNECTION.set(connection.clone());
                 // The connection answers on its own thread; this one keeps it alive.
                 loop {
                     std::thread::park();
@@ -469,6 +576,10 @@ struct Session {
 impl Session {
     async fn close(&self, #[zbus(object_server)] server: &zbus::ObjectServer) {
         self.sessions.lock().unwrap().remove(&self.path);
+        SHORTCUTS.lock().unwrap().retain(|s| s.session != self.path);
+        if let Some(a) = APPS.lock().unwrap().as_mut() {
+            a.remove(&self.path);
+        }
         // Closed while the scene was still choosing (the program gave up): it stops.
         if CHOOSING.lock().unwrap().is_some() {
             picked(None);
