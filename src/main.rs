@@ -5,6 +5,7 @@
 
 mod config;
 mod nest;
+mod portal;
 mod headless;
 mod layers;
 mod keys;

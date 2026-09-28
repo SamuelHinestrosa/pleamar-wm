@@ -619,6 +619,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
     // What the session and the monitors tell about the programs' surfaces.
     let (layers_tx, layers_rx) = channel::channel::<ToLayers>();
     layers::set_nest(layers_tx);
+    crate::portal::start();
     event_loop
         .handle()
         .insert_source(layers_rx, |event, _, state: &mut State| {
@@ -1429,6 +1430,10 @@ impl State {
 
     /// A picture taken: into the program's memory, and told it is ready.
     fn hand_picture(&mut self, id: u64, pixels: Option<Vec<u8>>) {
+        // One the portal asked for (sharing the screen): its, not a program's.
+        if crate::portal::deliver(id, pixels.clone()) {
+            return;
+        }
         let Some(p) = self.pictures.remove(&id) else { return };
         let (w, h) = (p.piece[2] as usize, p.piece[3] as usize);
         let written = match (&p.buffer, pixels) {

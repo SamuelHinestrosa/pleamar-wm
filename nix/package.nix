@@ -19,6 +19,7 @@
   xwayland,
   swaybg,
   pam,
+  pipewire,
 }:
 let
   version = (lib.importTOML ../Cargo.toml).package.version;
@@ -39,6 +40,8 @@ rustPlatform.buildRustPackage {
   nativeBuildInputs = [
     pkg-config
     makeWrapper
+    # PipeWire's bindings are made from its headers (sharing the screen).
+    rustPlatform.bindgenHook
   ];
   buildInputs = [
     wayland
@@ -49,6 +52,7 @@ rustPlatform.buildRustPackage {
     libgbm
     libdrm
     pam
+    pipewire
   ];
 
   doCheck = false;
@@ -67,6 +71,8 @@ rustPlatform.buildRustPackage {
     substituteInPlace $out/share/wayland-sessions/pleamar-wm.desktop \
       --replace-fail "Exec=pleamar-wm-session" "Exec=$out/bin/pleamar-wm-session"
     install -Dm644 pleamar-portals.conf $out/share/xdg-desktop-portal/pleamar-portals.conf
+    # Its own portal: sharing the screen, answered by pleamar-wm itself.
+    install -Dm644 pleamar.portal $out/share/xdg-desktop-portal/portals/pleamar.portal
   '';
 
   postFixup = ''

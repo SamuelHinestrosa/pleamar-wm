@@ -43,6 +43,8 @@ in
     xdg.portal = {
       enable = lib.mkDefault true;
       extraPortals = [
+        # Its own (sharing the screen), and the others' for the rest.
+        cfg.package
         pkgs.xdg-desktop-portal-gtk
         pkgs.xdg-desktop-portal-hyprland
       ];

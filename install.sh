@@ -10,7 +10,7 @@ set -e
 here=$(dirname "$(readlink -f "$0")")
 [ "$(id -u)" = 0 ] || { echo "run it with sudo: sudo $0 $*"; exit 1; }
 if [ "$1" = remove ]; then
-    rm -f /usr/local/bin/pleamar-wm-session /usr/share/wayland-sessions/pleamar-wm.desktop /usr/share/xdg-desktop-portal/pleamar-portals.conf
+    rm -f /usr/local/bin/pleamar-wm-session /usr/share/wayland-sessions/pleamar-wm.desktop /usr/share/xdg-desktop-portal/pleamar-portals.conf /usr/share/xdg-desktop-portal/portals/pleamar.portal
     echo "pleamar-wm · out of the login screen"
     exit 0
 fi
@@ -27,4 +27,6 @@ SCRIPT
 chmod 755 /usr/local/bin/pleamar-wm-session
 install -Dm644 "$here/pleamar-wm.desktop" /usr/share/wayland-sessions/pleamar-wm.desktop
 install -Dm644 "$here/pleamar-portals.conf" /usr/share/xdg-desktop-portal/pleamar-portals.conf
+# Its own portal (sharing the screen), answered by pleamar-wm itself.
+install -Dm644 "$here/pleamar.portal" /usr/share/xdg-desktop-portal/portals/pleamar.portal
 echo "pleamar-wm · in the login screen's list: log out and choose «pleamar-wm»"

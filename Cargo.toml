@@ -16,3 +16,6 @@ smithay = { version = "0.7", default-features = false, features = ["wayland_fron
 xkbcommon = "0.8"
 # The cursor theme the system has (Xcursor files), for the card's cursor plane.
 xcursor = "0.3"
+pipewire = { version = "0.10", features = ["v0_3_77"] }
+zbus = "5"
+async-channel = "2"

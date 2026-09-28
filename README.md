@@ -175,8 +175,12 @@ window title="Picture in Picture" float     # `*` for anything: app=org.gnome.*
 
 In the login screen (SDDM, GDM): `pleamar-update --session` puts «pleamar-wm»
 in the list of sessions. There, dbus and systemd are told where the desktop is,
-and the portals (`pleamar-portals.conf`) share the screen through Hyprland's
-portal and do the rest through GTK's.
+and the portals (`pleamar-portals.conf`) do the rest through GTK's.
+
+**Sharing the screen is pleamar-wm's own**: it is its own portal
+(`pleamar.portal`, `org.freedesktop.impl.portal.ScreenCast`), so Discord, a
+browser or OBS get the monitor straight from the compositor, through PipeWire,
+and only when something on it changes.
 
 # Keys
 
@@ -325,7 +329,8 @@ Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
   hardware decoder (Firefox with VA-API) and RGBA tiles are read on the card.
 
 Not yet: touch screens and tablets, dragging out of the window manager's
-own scene (its `carries:` zones), screen sharing tested end to end.
+own scene (its `carries:` zones), choosing which monitor or window to share
+(today it is the first monitor).
 
 # Special Thanks
 
