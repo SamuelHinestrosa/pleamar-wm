@@ -76,6 +76,54 @@ pub enum Hold {
 
 static HOLD: Mutex<Option<Hold>> = Mutex::new(None);
 
+/// The pointer as the card shows it —its picture, 64 × 64 BGRA premultiplied,
+/// and its tip— and where it is on the desktop, in units; with a count of
+/// its moves. For whoever puts it into a picture (sharing the screen).
+#[derive(Clone, Default)]
+pub struct PointerSeen {
+    pub picture: Option<std::sync::Arc<(Vec<u8>, (i32, i32))>>,
+    pub at: (f64, f64),
+    pub moves: u64,
+}
+
+static POINTER_SEEN: Mutex<Option<PointerSeen>> = Mutex::new(None);
+
+pub fn set_pointer_picture(picture: Option<std::sync::Arc<(Vec<u8>, (i32, i32))>>) {
+    let mut p = POINTER_SEEN.lock().unwrap();
+    let seen = p.get_or_insert_with(PointerSeen::default);
+    seen.picture = picture;
+    seen.moves += 1;
+}
+
+pub fn set_pointer_at(at: (f64, f64)) {
+    let mut p = POINTER_SEEN.lock().unwrap();
+    let seen = p.get_or_insert_with(PointerSeen::default);
+    if seen.at != at {
+        seen.at = at;
+        seen.moves += 1;
+    }
+}
+
+/// None where there is no pointer of the card's (headless).
+pub fn pointer_seen() -> Option<PointerSeen> {
+    POINTER_SEEN.lock().unwrap().clone()
+}
+
+/// Where each window is seen: on which monitor (its name) and its box there, in pixels.
+static SHOWN: Mutex<Vec<Option<(String, [i32; 4])>>> = Mutex::new(Vec::new());
+
+pub fn set_shown(slot: usize, monitor: String, rect: [i32; 4]) {
+    let mut s = SHOWN.lock().unwrap();
+    if s.len() <= slot {
+        s.resize(slot + 1, None);
+    }
+    s[slot] = Some((monitor, rect));
+}
+
+pub fn shown(slot: usize) -> Option<(String, [i32; 4])> {
+    SHOWN.lock().unwrap().get(slot).cloned().flatten()
+}
+
 /// A program dragging something: its icon, one surface per monitor (which
 /// one, and its id there), and where the pointer is on the desktop, in units.
 static DRAG: Mutex<(Vec<(usize, u64)>, (f64, f64))> = Mutex::new((Vec::new(), (0.0, 0.0)));

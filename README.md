@@ -178,9 +178,12 @@ in the list of sessions. There, dbus and systemd are told where the desktop is,
 and the portals (`pleamar-portals.conf`) do the rest through GTK's.
 
 **Sharing the screen is pleamar-wm's own**: it is its own portal
-(`pleamar.portal`, `org.freedesktop.impl.portal.ScreenCast`), so Discord, a
-browser or OBS get the monitor straight from the compositor, through PipeWire,
-and only when something on it changes.
+(`pleamar.portal`, `org.freedesktop.impl.portal.ScreenCast`). When Discord, a
+browser or OBS ask, the overview opens to choose: press a window, or «This
+whole screen» on a monitor's band (Escape or «Cancel», nothing). A window is
+read from its own buffers, so it is shared whole even with another on top;
+it goes through PipeWire only when something changes, with the pointer drawn
+in if the program asks for it.
 
 # Keys
 
@@ -329,8 +332,7 @@ Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
   hardware decoder (Firefox with VA-API) and RGBA tiles are read on the card.
 
 Not yet: touch screens and tablets, dragging out of the window manager's
-own scene (its `carries:` zones), choosing which monitor or window to share
-(today it is the first monitor).
+own scene (its `carries:` zones).
 
 # Special Thanks
 

@@ -207,6 +207,17 @@ impl pleamar::Platform for Headless {
         // key by its keysym's name and evdev code (it types itself if the name
         // is one character).
         if let Ok(script) = std::env::var("PLEAMAR_HEADLESS_INPUT") {
+            // A pointer to be seen where one is drawn into a picture (sharing
+            // the screen): an arrow, white with a dark edge, its tip at 0, 0.
+            let mut arrow = vec![0u8; 64 * 64 * 4];
+            for y in 0..20usize {
+                for x in 0..=(y * 3 / 5) {
+                    let edge = x == 0 || x == y * 3 / 5 || y == 19;
+                    let v = if edge { [20, 20, 20, 255] } else { [255, 255, 255, 255] };
+                    arrow[(y * 64 + x) * 4..(y * 64 + x) * 4 + 4].copy_from_slice(&v);
+                }
+            }
+            crate::layers::set_pointer_picture(Some(std::sync::Arc::new((arrow, (0, 0)))));
             let (tx, screens) = (to_render.clone(), screens.clone());
             std::thread::spawn(move || {
                 let start = Instant::now();
@@ -266,6 +277,7 @@ impl pleamar::Platform for Headless {
                             let m = ((x / unit_w as f64).floor().max(0.0) as usize).min(screens.len() - 1);
                             let (mx, my) = ((x - (m as i32 * unit_w) as f64) * scale, y * scale);
                             route.pointer(&screens[m], (mx, my));
+                            crate::layers::set_pointer_at((x, y));
                             println!("headless · pointer {x},{y} → {:?}", route.hit);
                         }
                     }

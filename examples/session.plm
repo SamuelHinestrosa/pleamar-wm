@@ -579,6 +579,25 @@ scene Session {
                 box { at: x + w - 20, by + 0.3; size: 7.5, 1.6; corner: 0.8; rotate: -45deg; color: #4a140b; opacity: close_zone.$i.hover }
             }
             box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: lit.$i * 70% * (1 - ov) }
+            // Choosing what to share: the one under the pointer lights up and says so.
+            group {
+                show: share.windows and share.in > 0.01
+                opacity: share.in
+                box { from: x - 3, y - 3; size: w + 6, h + 6; corner: 15; stroke: 2.5; color: mint; opacity: choose.$i.hover }
+                group {
+                    opacity: choose.$i.hover
+                    scale: 0.9 + 0.1 * choose.$i.hover
+                    pivot: x + w / 2, y + h / 2
+                    body {
+                        color: #0c0e10
+                        rim: 10%
+                        shadow: 0, 6, 18, 45%
+                        box { at: x + w / 2, y + h / 2; size: 176, 40; corner: 20 }
+                    }
+                    ellipse { at: x + w / 2 - 66, y + h / 2; radius: 5; color: #ef7a66 }
+                    text "Share this window" { at: x + w / 2 + 8, y + h / 2; anchor: center; size: 13; weight: 600; color: ink }
+                }
+            }
         }
         // Taken by an edge or the corner: where it was and how big.
         on press left_edge.$i {
@@ -732,10 +751,12 @@ scene Session {
             bye.$i: 0 after 2500ms
         }
         on press mini_zone.$i { minimize win.$i }
-        on press choose.$i {
+        on press choose.$i while not sharing {
             focus win.$i
             overview = false
         }
+        // Sharing the screen: the window pressed is the one shared.
+        on press choose.$i while share.windows { pick win.$i }
         // The light goes where the keyboard is.
         on change win.$i.focused while win.$i.focused {
             lx: tx + tw / 2
@@ -878,6 +899,58 @@ scene Session {
     on fullscreen { fullscreen win(win.focus) }
     on overview { toggle overview }
     on key Escape while overview { overview = false }
+
+    // ── sharing the screen: what a program in a call wants to show ──
+    // The compositor asks (`win.picking`: 1 a monitor, 2 a window, 3 either):
+    // the overview opens, a window is chosen by pressing it, a whole monitor
+    // by the band on top of it, and nothing with Escape or «Cancel».
+    let sharing = win.picking > 0
+    let share.windows = win.picking >= 2
+    let share.screens = win.picking == 1 or win.picking == 3
+    on change win.picking while win.picking > 0 { overview = true }
+    on change win.picking while win.picking < 1 { overview = false }
+    on key Escape while sharing { pick none }
+    prop share.in = 0 ~160ms
+    follow share.in = if(sharing, 1, 0)
+    repeat s in 0..4 {
+        let band.y = pick(s, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top) + 52
+        let band.w = if(share.screens, 560, 420)
+        prop screen_glow.$s = 0 ~140ms
+        prop cancel_glow.$s = 0 ~140ms
+        group {
+            z: 99995
+            show: share.in > 0.01 and screen.index == s
+            opacity: share.in
+            move: 0, -14 * (1 - share.in)
+            body {
+                color: #0c0e10
+                rim: 8%
+                shadow: 0, 10, 30, 50%
+                box { at: W / 2, band.y; size: band.w, 56; corner: 28 }
+            }
+            // A red dot, as a camera that is about to see.
+            ellipse { at: W / 2 - band.w / 2 + 28, band.y; radius: 6; color: #ef7a66 }
+            ellipse { at: W / 2 - band.w / 2 + 28, band.y; radius: 10; stroke: 1.5; color: #ef7a66; opacity: 40% }
+            text pick(win.picking - 1, "Share a screen", "Choose a window", "Choose what to share") { at: W / 2 - band.w / 2 + 48, band.y - 8; anchor: left center; size: 13.5; weight: 600; color: ink }
+            text pick(win.picking - 1, "This one, or another", "Press the one to share", "Press a window, or share a whole screen") { at: W / 2 - band.w / 2 + 48, band.y + 10; anchor: left center; size: 11; color: #8b8f95 }
+            group {
+                show: share.screens
+                box { at: W / 2 + band.w / 2 - 190, band.y; size: 150, 36; corner: 18; color: mix(#1a2a25, #24524a, screen_glow.$s) }
+                box { at: W / 2 + band.w / 2 - 190, band.y; size: 150, 36; corner: 18; stroke: 1.2; color: mint; opacity: 50% + 50% * screen_glow.$s }
+                text "This whole screen" { at: W / 2 + band.w / 2 - 190, band.y; anchor: center; size: 12; weight: 600; color: ink }
+                zone box share_screen.$s { at: W / 2 + band.w / 2 - 190, band.y; size: 150, 36; corner: 18; cursor: pointer }
+            }
+            box { at: W / 2 + band.w / 2 - 62, band.y; size: 88, 36; corner: 18; color: mix(#1c1d1f, #3a2424, cancel_glow.$s) }
+            text "Cancel" { at: W / 2 + band.w / 2 - 62, band.y; anchor: center; size: 12; weight: 500; color: ink }
+            zone box share_cancel.$s { at: W / 2 + band.w / 2 - 62, band.y; size: 88, 36; corner: 18; cursor: pointer }
+        }
+        on enter share_screen.$s { screen_glow.$s: 1 }
+        on leave share_screen.$s { screen_glow.$s: 0 }
+        on enter share_cancel.$s { cancel_glow.$s: 1 }
+        on leave share_cancel.$s { cancel_glow.$s: 0 }
+        on press share_screen.$s { pick screen s }
+        on press share_cancel.$s { pick none }
+    }
     // The keyboard to the next one, or the one before.
     on focus_next { focus win(next) }
     on focus_previous { focus win(previous) }

@@ -619,7 +619,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
     // What the session and the monitors tell about the programs' surfaces.
     let (layers_tx, layers_rx) = channel::channel::<ToLayers>();
     layers::set_nest(layers_tx);
-    crate::portal::start();
+    crate::portal::start(to_render.clone());
     event_loop
         .handle()
         .insert_source(layers_rx, |event, _, state: &mut State| {
@@ -925,6 +925,7 @@ impl State {
                 }
             }
             ToNest::Shown { slot, monitor, rect } => {
+                layers::set_shown(slot, monitor.clone(), rect);
                 if let Some(m) = layers::monitors().iter().find(|m| m.name == monitor) {
                     self.x11_shown_at(slot, (m.x + rect[0], m.y + rect[1]));
                 }
@@ -1002,6 +1003,7 @@ impl State {
                 }
             }
             ToNest::Released(numbers) => self.release(numbers),
+            ToNest::Picked(what) => crate::portal::picked(what),
             ToNest::Quit => self.quit = true,
         }
     }

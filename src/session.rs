@@ -224,6 +224,9 @@ struct State {
     dark_for_idle: bool,
     /// Where the pointer and the keys go: the scene or a program's surface.
     route: Route,
+    /// Each shape's picture as it is on the card, unturned, with its tip: for
+    /// whoever puts the pointer into a picture (sharing the screen).
+    cursor_pictures: Vec<(Cursor, std::sync::Arc<(Vec<u8>, (i32, i32))>)>,
     /// The loop's handle: to start the timer of a key binding that repeats.
     handle: smithay::reexports::calloop::LoopHandle<'static, State>,
     /// What is needed to put monitors up when they are plugged in: the card's
@@ -346,7 +349,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     layers::set_card(drm.clone());
     layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz, scale: m.scale }, m.screen.clone())).collect());
     let mover = CursorMover::new(drm.clone());
-    let mut state = State { mover, session, drm, monitors, libinput, to_render: to_render.clone(), keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, route: Route::new(to_render), handle: event_loop.handle(), gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
+    let mut state = State { mover, session, drm, monitors, libinput, to_render: to_render.clone(), keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, route: Route::new(to_render), cursor_pictures: Vec::new(), handle: event_loop.handle(), gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
     state.make_cursors(&gbm);
     // The cursor the scene and the programs ask for, whenever it changes.
     let (cursor_tx, cursor_rx) = smithay::reexports::calloop::channel::channel::<(bool, Cursor)>();
@@ -677,6 +680,7 @@ impl State {
         };
         self.pointer = (px, py);
         layers::move_drag((px, py));
+        layers::set_pointer_at((px, py));
         // The monitor is put together in its pixels: from units to them, and
         // on one standing on its side, turned the way it stands.
         for (k, m) in self.monitors.iter().enumerate() {
@@ -772,6 +776,7 @@ impl State {
             if bo.write(&px).is_err() {
                 continue;
             }
+            self.cursor_pictures.push((kind, std::sync::Arc::new((px.clone(), hot))));
             self.cursors.push((kind, 0, bo, hot));
             // And turned, for the monitors that stand on their side.
             let mut turns: Vec<u8> = self.monitors.iter().map(|m| m.turn).filter(|t| *t != 0).collect();
@@ -815,6 +820,7 @@ impl State {
             self.mover.shape(m.crtc, image, *hot);
         }
         self.shown = Some(want);
+        layers::set_pointer_picture(self.cursor_pictures.iter().find(|c| c.0 == want).map(|c| c.1.clone()));
         // Its tip where the pointer is (told again: a new shape may have
         // put the plane back anywhere).
         self.mover.sent.clear();
