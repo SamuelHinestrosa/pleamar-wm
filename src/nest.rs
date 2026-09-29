@@ -326,6 +326,9 @@ struct Picture {
 struct Lent {
     buffer: WlBuffer,
     release: Option<DrmSyncPoint>,
+    /// Since when, and whether it was said that it is taking long.
+    since: std::time::Instant,
+    told: bool,
 }
 
 impl Lent {
@@ -753,6 +756,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
     let mut last_done = Instant::now();
     while !state.quit {
         event_loop.dispatch(Some(Duration::from_millis(100)), &mut state).map_err(|e| e.to_string())?;
+        state.tell_held();
         state.popups.cleanup();
         state.prune_menus();
         state.compose_dirty();
@@ -1000,8 +1004,11 @@ impl State {
                     Ok(feedback) => {
                         self.dmabuf_global = Some(self.dmabuf.create_global_with_default_feedback::<State>(&self.dh, &feedback));
                         println!("windows · programs hand over their frames on the card");
-                        // Explicit sync, with the session's card or that card's render node.
-                        let card = layers::card().or_else(|| render_node(device));
+                        // Explicit sync on the render node the programs draw with (the
+                        // same as headless): with the session's card —the one that
+                        // drives the screens— Chromium (Discord) stopped painting after
+                        // its first frames, waiting for points that never arrived.
+                        let card = render_node(device).or_else(layers::card);
                         match card {
                             Some(card) if supports_syncobj_eventfd(&card) => {
                                 self.syncobj = Some(DrmSyncobjState::new::<State>(&self.dh, card));
@@ -1290,6 +1297,9 @@ impl State {
         let k = self.keyboard.clone();
         k.set_focus(self, target, SERIAL_COUNTER.next_serial());
         if before != self.focus {
+            // Where the keys go, said when it changes: «I could not type» is found here.
+            let app = self.focus.and_then(|s| self.slots[s].as_ref()).map_or("nobody".to_owned(), |w| w.app.clone());
+            println!("windows · the keyboard to {app}{}", if self.host_focus { "" } else { " (a program's surface has it for now)" });
             self.write_desktop();
             self.tell(NestEvent::Focused(self.focus));
             for (slot, h) in &self.toplevel_handles {
@@ -1487,6 +1497,16 @@ impl State {
         unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut ts) };
         let secs = ts.tv_sec as u64;
         p.frame.ready((secs >> 32) as u32, secs as u32, ts.tv_nsec as u32);
+    }
+
+    /// A program's buffer held for long is a program that cannot draw again
+    /// (with three buffers, a browser freezes): said once, with whose it is.
+    fn tell_held(&mut self) {
+        for (n, l) in self.lent.iter_mut().filter(|(_, l)| !l.told && l.since.elapsed() > Duration::from_secs(2)) {
+            l.told = true;
+            let who = l.buffer.client().and_then(|c| c.get_credentials(&self.dh).ok()).map_or(0, |c| c.pid);
+            eprintln!("windows · buffer {n} (pid {who}) held for {:.1} s{}: not handed back", l.since.elapsed().as_secs_f32(), if l.release.is_some() { " with a release point" } else { "" });
+        }
     }
 
     fn release(&mut self, numbers: Vec<u64>) {
@@ -2422,7 +2442,7 @@ impl CompositorHandler for State {
                         let release = with_states(surface, |s| s.cached_state.get::<DrmSyncobjCachedState>().current().release_point.take());
                         // The same buffer again while still lent is the program's
                         // mistake; its earlier point is signalled so nobody waits for ever.
-                        if let Some(old) = self.lent.insert(number, Lent { buffer: b, release }) {
+                        if let Some(old) = self.lent.insert(number, Lent { buffer: b, release, since: std::time::Instant::now(), told: false }) {
                             if let Some(p) = old.release {
                                 let _ = p.signal();
                             }
