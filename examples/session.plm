@@ -34,8 +34,7 @@
 // What Hyprland does not do: its animations are curves of a fixed length that
 // start again when interrupted, and its layout is code of its own. Here every
 // window rides a spring —change your mind halfway and it turns without a jolt—,
-// the layout is twelve lines anyone can rewrite, and the ones without the
-// keyboard fade to grey instead of just dimming.
+// and the layout is twelve lines anyone can rewrite.
 language 0.1
 scene Session {
     // One copy per monitor: each lays out its own windows (`win.$i.screen`).
@@ -497,11 +496,10 @@ scene Session {
                 shadow: 0, 14 + 8 * lit.$i + 10 * lift.$i, 34 + 18 * lift.$i, 45% + 20% * lit.$i + 10% * lift.$i
                 box { from: x, y; size: w, h; corner: 12 }
             }
-            // Without the keyboard, grey and a step back.
+            // Without the keyboard, only its title bar steps back: what it shows
+            // stays as it is (a video left playing on another monitor, full colour).
             group {
                 show: wet <= 0.001 and cold <= 0.001
-                saturation: 0.3 + 0.7 * lit.$i
-                brightness: 0.72 + 0.28 * lit.$i
                 clip box { from: x, y; size: w, h; corner: 12 }
                 box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
@@ -510,8 +508,6 @@ scene Session {
             // The same, in the rain: the window seen through wet glass.
             group {
                 show: wet > 0.001
-                saturation: 0.3 + 0.7 * lit.$i
-                brightness: 0.72 + 0.28 * lit.$i
                 shader: rain, wet
                 clip box { from: x, y; size: w, h; corner: 12 }
                 box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
@@ -521,8 +517,6 @@ scene Session {
             // And in the snow: frosted glass with snow on top.
             group {
                 show: cold > 0.001 and wet <= 0.001
-                saturation: 0.3 + 0.7 * lit.$i
-                brightness: 0.72 + 0.28 * lit.$i
                 shader: snow, cold
                 clip box { from: x, y; size: w, h; corner: 12 }
                 box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
