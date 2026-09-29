@@ -79,6 +79,8 @@ fn main() {
     }
     if args.first().map(String::as_str) == Some("session") {
         args.remove(0);
+        // Rebuilt under it, it would start again and every window would go with it.
+        pleamar::stay_on_update();
         let scene = if args.first().is_some_and(|a| !a.starts_with("--")) { args.remove(0) } else { default_scene() };
         nest::set_scene_name(&scene);
         layers::expect_monitors();
