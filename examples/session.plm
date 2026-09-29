@@ -791,7 +791,7 @@ scene Session {
                 clip box { from: x, y; size: w, h; corner: 12 }
                 box { from: x, y; size: w, tb; color: #1d2b27 }
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); show: carried and wet <= 0.001 and cold <= 0.001 }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: win.$i.width, win.$i.height; show: carried and wet <= 0.001 and cold <= 0.001 }
             }
             // Carried in the rain, its water goes with it, lagging behind.
             group {
@@ -800,7 +800,7 @@ scene Session {
                 clip box { from: x, y; size: w, h; corner: 12 }
                 box { from: x, y; size: w, tb; color: #1d2b27 }
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); show: carried and wet > 0.001 }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: win.$i.width, win.$i.height; show: carried and wet > 0.001 }
             }
             // And in the snow, its snow and its frost.
             group {
@@ -809,7 +809,7 @@ scene Session {
                 clip box { from: x, y; size: w, h; corner: 12 }
                 box { from: x, y; size: w, tb; color: #1d2b27 }
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); show: carried and cold > 0.001 and wet <= 0.001 }
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: win.$i.width, win.$i.height; show: carried and cold > 0.001 and wet <= 0.001 }
             }
             box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: 80% }
         }
@@ -1013,7 +1013,10 @@ scene Session {
                 clip box { from: x, y; size: w, h; corner: round }
                 box { from: x, y; size: w, tb; color: #1d2b27 }
                 text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: w, h - tb }
+                // Its program keeps the size it has while it shrinks into the drop: the
+                // picture is scaled, not the program asked (a browser asked for
+                // 60 × 4 froze).
+                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: win.$i.width, win.$i.height }
                 body {
                     gradient: x, y to x, y + h, #2b3030, marea 55%, #0e0f0f
                     opacity: 96% * q

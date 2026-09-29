@@ -805,6 +805,13 @@ impl State {
                 }
             }
             ToNest::Configure { slot, w, h } => {
+                // Never a size a program cannot live in: a scene that asks for
+                // the box of an animation (60 × 4, 1 × 1038) froze browsers.
+                // 0 is still «the size you choose».
+                const LEAST: i32 = 32;
+                if (w > 0 && w < LEAST) || (h > 0 && h < LEAST) {
+                    return;
+                }
                 if self.asked.get(slot) == Some(&Some((w, h))) {
                     return;
                 }
@@ -1838,7 +1845,8 @@ impl State {
         let size = self.asked[slot];
         match &toplevel {
             Toplevel::Xdg(t) => t.with_pending_state(|s| {
-                s.size = size.map(|(w, h)| (w.max(1), h.max(1)).into());
+                // `0 × 0` is «the one it chooses», not 1 × 1 (which froze browsers).
+                s.size = size.filter(|(w, h)| *w >= 32 && *h >= 32).map(|(w, h)| (w, h).into());
                 for t in [xdg_toplevel::State::TiledLeft, xdg_toplevel::State::TiledRight, xdg_toplevel::State::TiledTop, xdg_toplevel::State::TiledBottom] {
                     s.states.set(t);
                 }
