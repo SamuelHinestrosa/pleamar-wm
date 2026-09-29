@@ -87,6 +87,7 @@ fn main() {
         pleamar::provide_before_quit(Box::new(|| {
             layers::stop_all();
             nest::stop_launched();
+            nest::stop_clients();
         }));
         pleamar::provide_platform(Box::new(session::Session));
         let mut options = vec!["--scene".to_owned(), scene, "--no-hud".to_owned()];

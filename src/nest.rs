@@ -561,6 +561,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
     event_loop
         .handle()
         .insert_source(source, |stream, _, state: &mut State| {
+            remember_client(&stream);
             if let Err(e) = state.dh.insert_client(stream, Arc::new(ClientState::default())) {
                 eprintln!("windows · a program could not connect: {e}");
             }
@@ -2134,6 +2135,42 @@ static LAUNCHED: Mutex<Vec<i32>> = Mutex::new(Vec::new());
 /// they have nowhere to show themselves, and some do not notice —a browser
 /// went on animating a page for nobody, at a quarter of a core, long after—.
 /// Asked first; whatever is still there a moment later, made to.
+/// Every program that ever connected here, by its process: the session asks
+/// them all to close when it ends, not only the ones it launched itself —what
+/// Marea opens is detached, and a browser that lost its screen stayed alive,
+/// unseen, holding its profile («Zen is already running»)—.
+static CLIENTS: Mutex<Vec<i32>> = Mutex::new(Vec::new());
+
+fn remember_client(stream: &std::os::unix::net::UnixStream) {
+    use std::os::fd::AsRawFd;
+    let mut cred = libc::ucred { pid: 0, uid: 0, gid: 0 };
+    let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
+    // SAFETY: SO_PEERCRED fills a ucred of that size on a connected Unix socket.
+    let ok = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, &mut cred as *mut _ as *mut libc::c_void, &mut len) } == 0;
+    if ok && cred.pid > 0 && cred.pid != std::process::id() as i32 {
+        let mut all = CLIENTS.lock().unwrap();
+        // The ones gone are forgotten, so the list does not grow for ever.
+        all.retain(|p| unsafe { libc::kill(*p, 0) } == 0);
+        if !all.contains(&cred.pid) {
+            all.push(cred.pid);
+        }
+    }
+}
+
+/// The programs connected here, asked to close (SIGTERM: they save what they
+/// have). The session is ending: their screen goes with it.
+pub fn stop_clients() {
+    let pids = std::mem::take(&mut *CLIENTS.lock().unwrap());
+    for p in &pids {
+        // SAFETY: a signal to a process that connected to this compositor.
+        unsafe { libc::kill(*p, libc::SIGTERM) };
+    }
+    let until = std::time::Instant::now() + Duration::from_millis(1500);
+    while pids.iter().any(|p| unsafe { libc::kill(*p, 0) } == 0) && std::time::Instant::now() < until {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
 pub fn stop_launched() {
     let groups = std::mem::take(&mut *LAUNCHED.lock().unwrap());
     // SAFETY: kill with a negative pid signals that process group; nothing else is touched.
