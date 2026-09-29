@@ -329,8 +329,10 @@ struct Lent {
     /// Since when, and whether it was said that it is taking long.
     since: std::time::Instant,
     told: bool,
-    /// Whose it is: a window (by its program), a program's surface, a menu.
+    /// Whose it is: a window (by its program), a program's surface, a menu;
+    /// and its surface, to know whether it is still the picture shown.
     what: String,
+    surface: WlSurface,
 }
 
 impl Lent {
@@ -1505,6 +1507,14 @@ impl State {
     /// (with three buffers, a browser freezes): said once, with whose it is.
     fn tell_held(&mut self) {
         for (n, l) in self.lent.iter_mut().filter(|(_, l)| !l.told && l.since.elapsed() > Duration::from_secs(2)) {
+            // The picture a program's surface is showing is read by its monitor
+            // for as long as it is shown: held, and rightly.
+            let shown = l.surface.alive() && with_states(&l.surface, |s| s.data_map.get::<Mutex<Content>>().and_then(|c| c.lock().unwrap().dmabuf.as_ref().map(|(k, _)| k == n))).unwrap_or(false);
+            if shown && !l.what.starts_with("window") {
+                // Its time counts from when it stops being shown.
+                l.since = std::time::Instant::now();
+                continue;
+            }
             l.told = true;
             let who = l.buffer.client().and_then(|c| c.get_credentials(&self.dh).ok()).map_or(0, |c| c.pid);
             eprintln!("windows · buffer {n} of {} (pid {who}) held for {:.1} s{}: not handed back", l.what, l.since.elapsed().as_secs_f32(), if l.release.is_some() { " with a release point" } else { "" });
@@ -1514,6 +1524,9 @@ impl State {
     fn release(&mut self, numbers: Vec<u64>) {
         for n in numbers {
             if let Some(b) = self.lent.remove(&n) {
+                if b.told {
+                    eprintln!("windows · buffer {n} of {} handed back after {:.1} s", b.what, b.since.elapsed().as_secs_f32());
+                }
                 b.give_back();
             }
         }
@@ -2455,7 +2468,7 @@ impl CompositorHandler for State {
                         let release = with_states(surface, |s| s.cached_state.get::<DrmSyncobjCachedState>().current().release_point.take());
                         // The same buffer again while still lent is the program's
                         // mistake; its earlier point is signalled so nobody waits for ever.
-                        if let Some(old) = self.lent.insert(number, Lent { buffer: b, release, since: std::time::Instant::now(), told: false, what }) {
+                        if let Some(old) = self.lent.insert(number, Lent { buffer: b, release, since: std::time::Instant::now(), told: false, what, surface: surface.clone() }) {
                             if let Some(p) = old.release {
                                 let _ = p.signal();
                             }
