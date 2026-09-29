@@ -244,8 +244,11 @@ impl pleamar::Platform for Headless {
                                 route.wheel(n);
                             }
                         }
-                        _ if what.starts_with("key:") => {
-                            let mut parts = what[4..].splitn(2, ':');
+                        // `keydown:` and `keyup:` apart: a key let go after
+                        // whoever took it has gone (Marea's search closing on Escape).
+                        _ if what.starts_with("key:") || what.starts_with("keydown:") || what.starts_with("keyup:") => {
+                            let (step, rest) = what.split_once(':').unwrap_or(("key", ""));
+                            let mut parts = rest.splitn(2, ':');
                             let name = parts.next().unwrap_or("");
                             let Some(code) = parts.next().and_then(|c| c.parse::<u32>().ok()) else { continue };
                             // `key:Super+Shift+q:16`: modifiers before the name.
@@ -269,8 +272,12 @@ impl pleamar::Platform for Headless {
                                     }
                                 }
                             }
-                            route.key(&screens, name, None, typed, mods, code, true);
-                            route.key(&screens, name, None, None, mods, code, false);
+                            if step != "keyup" {
+                                route.key(&screens, name, None, typed, mods, code, true);
+                            }
+                            if step != "keydown" {
+                                route.key(&screens, name, None, None, mods, code, false);
+                            }
                         }
                         _ => {
                             let Some((x, y)) = what.split_once(',').and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?))) else { continue };

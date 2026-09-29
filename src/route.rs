@@ -27,12 +27,18 @@ pub struct Route {
     /// repetition still has to be started (the loop that holds the timers does it).
     repeating: Option<(u32, crate::keys::Action)>,
     repeat_new: bool,
+    /// Keys held down that went to a program's surface, and to which: their
+    /// release goes there too, even if it no longer has the keyboard. Marea's
+    /// search closing on a key press never heard it let go, and the keyboard
+    /// kept that key held for every window after it (a Backspace that erased
+    /// everything, letters that were shortcuts).
+    layer_keys: Vec<(u32, u64)>,
     to_render: Sender<ToRender>,
 }
 
 impl Route {
     pub fn new(to_render: Sender<ToRender>) -> Route {
-        Route { hit: Hit::Scene(None), grab: None, scene_held: false, key_client: None, bound: Vec::new(), repeating: None, repeat_new: false, to_render }
+        Route { hit: Hit::Scene(None), grab: None, scene_held: false, key_client: None, bound: Vec::new(), repeating: None, repeat_new: false, layer_keys: Vec::new(), to_render }
     }
 
     /// The pointer at that point of a monitor, in its pixels. Says whether it
@@ -195,13 +201,16 @@ impl Route {
                 println!("session · key {}{}{}{name} → {}", if mods.ctrl { "Ctrl+" } else { "" }, if mods.alt { "Alt+" } else { "" }, if mods.logo { "Super+" } else { "" }, owner.map_or("the scene".to_owned(), |id| format!("the program's surface {id}")));
             }
             if let Some(id) = owner {
+                self.layer_keys.retain(|(c, _)| *c != evdev);
+                self.layer_keys.push((evdev, id));
                 layers::tell(ToLayers::Key { id, code: evdev, down: true });
                 return;
             }
             let _ = self.to_render.send(ToRender::Key(name.to_owned(), typed, mods, evdev));
         } else {
             // A key let go goes where it went down; to both, if that is not known.
-            if let Some(id) = self.key_owner(screens) {
+            let went_to = self.layer_keys.iter().position(|(c, _)| *c == evdev).map(|k| self.layer_keys.remove(k).1);
+            if let Some(id) = went_to.or_else(|| self.key_owner(screens)) {
                 layers::tell(ToLayers::Key { id, code: evdev, down: false });
             }
             if layers::locked() {

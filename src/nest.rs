@@ -891,6 +891,15 @@ impl State {
                 p.frame(self);
             }
             ToNest::Key { code, down } => {
+                // A key let go is only that: the keyboard hears it whoever has
+                // it now, and nobody's focus changes. Lost —no window had the
+                // focus any more, or a program's surface had it— it stayed held
+                // for every window that got the keyboard after.
+                if !down {
+                    let k = self.keyboard.clone();
+                    k.input::<(), _>(self, (code + 8).into(), smithay::backend::input::KeyState::Released, serial, time, |_, _, _| FilterResult::Forward);
+                    return;
+                }
                 if self.focus.is_none() {
                     return;
                 }
@@ -1581,7 +1590,9 @@ impl State {
             }
             ToLayers::Wheel(dy) => self.handle(ToNest::Wheel(dy as f64)),
             ToLayers::Key { id, code, down } => {
-                if self.panel_keyboard != Some(id) {
+                // Let go, as with a window: heard, whoever has the keyboard, and
+                // without taking it for a surface that may be gone.
+                if self.panel_keyboard != Some(id) && down {
                     let Some(surface) = self.panels.iter().find(|p| p.id == id).map(|p| p.shell.wl_surface().clone()) else { return };
                     self.panel_keyboard = Some(id);
                     self.exclusive_keyboard = false;
