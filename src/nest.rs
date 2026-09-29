@@ -329,6 +329,8 @@ struct Lent {
     /// Since when, and whether it was said that it is taking long.
     since: std::time::Instant,
     told: bool,
+    /// Whose it is: a window (by its program), a program's surface, a menu.
+    what: String,
 }
 
 impl Lent {
@@ -1505,7 +1507,7 @@ impl State {
         for (n, l) in self.lent.iter_mut().filter(|(_, l)| !l.told && l.since.elapsed() > Duration::from_secs(2)) {
             l.told = true;
             let who = l.buffer.client().and_then(|c| c.get_credentials(&self.dh).ok()).map_or(0, |c| c.pid);
-            eprintln!("windows · buffer {n} (pid {who}) held for {:.1} s{}: not handed back", l.since.elapsed().as_secs_f32(), if l.release.is_some() { " with a release point" } else { "" });
+            eprintln!("windows · buffer {n} of {} (pid {who}) held for {:.1} s{}: not handed back", l.what, l.since.elapsed().as_secs_f32(), if l.release.is_some() { " with a release point" } else { "" });
         }
     }
 
@@ -2438,11 +2440,22 @@ impl CompositorHandler for State {
                             }
                         };
                         let size = (d.width() as usize, d.height() as usize);
+                        let what = {
+                            let mut root = surface.clone();
+                            while let Some(p) = get_parent(&root) {
+                                root = p;
+                            }
+                            match self.window_of(&root) {
+                                Some(k) => format!("window {k} ({})", self.slots[k].as_ref().map_or("", |w| w.app.as_str())),
+                                None if self.panels.iter().any(|p| p.shell.wl_surface() == &root) => "a program's surface".to_owned(),
+                                None => "a menu or popup".to_owned(),
+                            }
+                        };
                         // With explicit sync, where to say it is no longer read.
                         let release = with_states(surface, |s| s.cached_state.get::<DrmSyncobjCachedState>().current().release_point.take());
                         // The same buffer again while still lent is the program's
                         // mistake; its earlier point is signalled so nobody waits for ever.
-                        if let Some(old) = self.lent.insert(number, Lent { buffer: b, release, since: std::time::Instant::now(), told: false }) {
+                        if let Some(old) = self.lent.insert(number, Lent { buffer: b, release, since: std::time::Instant::now(), told: false, what }) {
                             if let Some(p) = old.release {
                                 let _ = p.signal();
                             }
