@@ -1079,7 +1079,11 @@ impl State {
         self.tell(NestEvent::Minimized(slot, yes));
         self.tell(NestEvent::Order(self.order.clone()));
         if yes && self.focus == Some(slot) {
-            let next = self.order.first().copied();
+            // The keyboard to one that is seen on the same monitor —not to the
+            // first in the order, which may be on another workspace: it had
+            // the keys, unseen, and the next Super+M put it away too—.
+            let monitor = layers::shown(slot).map(|(m, _)| m);
+            let next = self.order.iter().copied().find(|s| *s != slot && layers::shown(*s).is_some_and(|(m, _)| Some(&m) == monitor.as_ref()));
             self.set_focus(next);
         } else if !yes {
             self.set_focus(Some(slot));
