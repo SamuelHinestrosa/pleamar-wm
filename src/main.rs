@@ -55,6 +55,11 @@ fn main() {
         println!("{:#?}", config::get());
         return;
     }
+    // `pleamar-wm report`: measures the session and whatever runs in it (Marea…)
+    // for a while and writes it down, with its monitors, to send when it stutters.
+    if args.first().map(String::as_str) == Some("report") {
+        std::process::exit(pleamar::report(args[1..].to_vec(), Some(report_section())));
+    }
     if args.first().map(String::as_str) == Some("probe") {
         if let Err(e) = probe::run() {
             eprintln!("probe · {e}");
@@ -146,6 +151,31 @@ fn hyprctl(what: &str) -> i32 {
             1
         }
     }
+}
+
+/// What pleamar-wm adds to `pleamar --report`: which window manager runs, on
+/// which monitors, and what the session's configuration says of them.
+fn report_section() -> String {
+    let mut out = format!("## pleamar-wm\n\n- **Version:** {}\n", env!("CARGO_PKG_VERSION"));
+    let own = config::user_dir().is_some_and(|d| std::path::Path::new(&format!("{d}/wm/session.plm")).exists());
+    out.push_str(&format!("- **Window manager scene:** {}\n", if own { "the user's own (~/.config/pleamar/wm/session.plm)" } else { "the one that comes with it" }));
+    match nest::desktop_file().map(std::fs::read_to_string) {
+        Some(Ok(text)) => {
+            for line in text.lines().filter_map(|l| l.strip_prefix("monitor ")) {
+                let f: Vec<&str> = line.split(' ').collect();
+                let [name, w, h, x, y, mhz, _, scale] = f[..] else { continue };
+                let hz = mhz.parse::<f64>().unwrap_or(0.0) / 1000.0;
+                out.push_str(&format!("- **Monitor {name}:** {w}×{h} @ {hz:.2} Hz at {x},{y} · scale {scale}\n"));
+            }
+        }
+        _ => out.push_str("- **Session:** not running here (measured from outside it?)\n"),
+    }
+    let c = config::get();
+    for m in &c.monitors {
+        out.push_str(&format!("- **session.conf:** {m:?}\n"));
+    }
+    out.push_str(&format!("- **Window rules:** {} · pinned to the dock: {}\n", c.windows.len(), c.dock.len()));
+    out
 }
 
 /// The user's folder, to start from: what the session reads, commented, and

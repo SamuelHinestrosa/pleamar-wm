@@ -283,6 +283,12 @@ log goes to `~/.local/state/pleamar-wm/session.log`, and the end of it is shown
 when it leaves. `pleamar-wm probe` tries what the card needs for it —buffers
 for the screen, painted by wgpu and read back— without taking the screen.
 
+If it stutters, run `pleamar-wm report` from a terminal inside the session and
+use the desktop as usual for 30 seconds (`--seconds N` for more): it measures
+the window manager and everything running on pleamar (Marea…), and writes a
+report to `~/pleamar-report-….md`, with the monitors and the machine, to attach
+to an issue.
+
 The language side —`windows`, `window`, `launch`, `focus`, `close`,
 `promote`— is pleamar's and is documented in its reference (§10.3). This repo
 is the compositor that fills it: the protocol side of
