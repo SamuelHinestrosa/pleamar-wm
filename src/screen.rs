@@ -1057,7 +1057,8 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
             layers::tell(ToLayers::Released(released));
         }
         if drew_clients {
-            layers::tell(ToLayers::FrameDone);
+            let name = lock.lock().unwrap().name.clone();
+            layers::tell(ToLayers::FrameDone(name));
         }
         part(5, &mut parts);
     }

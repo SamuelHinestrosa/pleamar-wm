@@ -45,8 +45,9 @@ pub enum ToLayers {
     Key { id: u64, code: u32, down: bool },
     /// The keyboard goes back to the windows.
     KeyboardBack,
-    /// A monitor was put together with what the programs had drawn: they may draw again.
-    FrameDone,
+    /// A monitor (by its name) was put together with what the programs on it
+    /// had drawn: they may draw again.
+    FrameDone(String),
     /// Buffers a monitor no longer reads.
     Released(Vec<u64>),
     /// The monitors changed (one was plugged in or out): see `monitors()`.

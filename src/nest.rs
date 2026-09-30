@@ -468,7 +468,13 @@ struct State {
     pointer_on: Option<usize>,
     /// The windows whose image has to be made again after this round.
     dirty: Vec<WlSurface>,
-    callbacks: Vec<WlCallback>,
+    /// The programs' frame callbacks, and the monitor of the surface when it is
+    /// a program's own (a bar, Marea): that one is told only when its monitor
+    /// has shown it. Told by any monitor, a surface on a 60 Hz monitor was
+    /// asked for another frame at the pace of a 165 Hz one, and drawing it
+    /// waited for a buffer its own monitor had not let go of yet: the program
+    /// went at 60 on both. Windows (`None`) are drawn by the scene, as before.
+    callbacks: Vec<(WlCallback, Option<usize>)>,
     to_render: Sender<ToRender>,
     handle: LoopHandle<'static, State>,
     /// Frames on the card (linux-dmabuf), once the render has said what it can read.
@@ -783,7 +789,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
             }
         }
         if last_done.elapsed() > Duration::from_millis(250) && !state.callbacks.is_empty() {
-            state.frame_done();
+            state.frame_done_all();
         }
         if !state.callbacks.is_empty() {
             last_done = last_done.min(Instant::now());
@@ -1021,7 +1027,7 @@ impl State {
                     }
                 }
             }
-            ToNest::FrameDone => self.frame_done(),
+            ToNest::FrameDone => self.frame_done(None),
             ToNest::Gpu { device, formats } => {
                 if self.dmabuf_global.is_some() {
                     return;
@@ -1595,7 +1601,7 @@ impl State {
 
     /// What the session and the monitors say about the programs' surfaces.
     fn layer_input(&mut self, m: ToLayers) {
-        if std::env::var_os("PLEAMAR_DEBUG_WINDOWS").is_some() && !matches!(m, ToLayers::FrameDone | ToLayers::Released(_)) {
+        if std::env::var_os("PLEAMAR_DEBUG_WINDOWS").is_some() && !matches!(m, ToLayers::FrameDone(_) | ToLayers::Released(_)) {
             eprintln!("windows · {m:?}");
         }
         let serial = SERIAL_COUNTER.next_serial();
@@ -1659,7 +1665,10 @@ impl State {
                     self.set_focus(self.focus);
                 }
             }
-            ToLayers::FrameDone => self.frame_done(),
+            ToLayers::FrameDone(name) => {
+                let monitor = layers::monitors().iter().position(|m| m.name == name);
+                self.frame_done(monitor);
+            }
             ToLayers::Launch(command) => self.launch(&command),
             ToLayers::Released(numbers) => self.release(numbers),
             ToLayers::Monitors => self.monitors_changed(),
@@ -1900,11 +1909,30 @@ impl State {
         }
     }
 
-    fn frame_done(&mut self) {
+    /// A monitor was shown (`Some`), or the scene painted (`None`): the
+    /// windows may draw again, and the programs' surfaces on that monitor.
+    fn frame_done(&mut self, monitor: Option<usize>) {
         let t = self.time();
-        for cb in self.callbacks.drain(..) {
+        self.callbacks.retain(|(cb, on)| {
+            let now = on.is_none() || *on == monitor;
+            if now {
+                cb.done(t);
+            }
+            !now
+        });
+        self.presentation_done();
+    }
+
+    /// All of them: nothing has been shown for a while (see the loop).
+    fn frame_done_all(&mut self) {
+        let t = self.time();
+        for (cb, _) in self.callbacks.drain(..) {
             cb.done(t);
         }
+        self.presentation_done();
+    }
+
+    fn presentation_done(&mut self) {
         // When they were shown (presentation-time): now, on their monitor.
         if !self.presented.is_empty() {
             let mut ts = libc::timespec { tv_sec: 0, tv_nsec: 0 };
@@ -2546,7 +2574,13 @@ impl CompositorHandler for State {
             let attrs = guard.current();
             (attrs.buffer.take(), std::mem::take(&mut attrs.frame_callbacks))
         });
-        self.callbacks.extend(callbacks);
+        // A program's own surface (or one hanging from it): the monitor it is on.
+        let mut root = surface.clone();
+        while let Some(p) = get_parent(&root) {
+            root = p;
+        }
+        let on = self.panels.iter().find(|p| p.shell.wl_surface() == &root).map(|p| p.monitor);
+        self.callbacks.extend(callbacks.into_iter().map(|cb| (cb, on)));
         let feedback = with_states(surface, |s| std::mem::take(&mut s.cached_state.get::<PresentationFeedbackCachedState>().current().callbacks));
         let buffer_was_removed = matches!(buffer, Some(BufferAssignment::Removed));
         // Each surface has its number for the render the first time it shows something.
