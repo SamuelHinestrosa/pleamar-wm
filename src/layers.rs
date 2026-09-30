@@ -162,7 +162,13 @@ pub fn set_drag_icon(ids: Vec<(usize, u64)>) {
 pub fn drag_rect(monitor: usize, w: i32, h: i32) -> [i32; 4] {
     let pos = DRAG.lock().unwrap().1;
     let monitors = MONITORS.lock().unwrap();
-    let Some((m, _)) = monitors.get(monitor) else { return [-100_000, -100_000, w, h] };
+    match monitors.get(monitor) {
+        Some((m, _)) => rect_on(m, pos, w, h),
+        None => [-100_000, -100_000, w, h],
+    }
+}
+
+fn rect_on(m: &MonitorInfo, pos: (f64, f64), w: i32, h: i32) -> [i32; 4] {
     let (lw, lh) = (m.size.0 as f64 / m.scale, m.size.1 as f64 / m.scale);
     let (x, y) = (pos.0 - m.x as f64, pos.1 - m.y as f64);
     if x >= 0.0 && y >= 0.0 && x < lw && y < lh { [(x * m.scale) as i32, (y * m.scale) as i32, w, h] } else { [-100_000, -100_000, w, h] }
@@ -178,14 +184,19 @@ pub fn move_drag(pos: (f64, f64)) {
         }
         d.0.clone()
     };
-    let monitors: Vec<Screen> = MONITORS.lock().unwrap().iter().map(|(_, s)| s.clone()).collect();
+    // The monitors as they are, copied: with a monitor's lock held, `MONITORS`
+    // is not to be asked for. Whoever has it (a window's buffers let go,
+    // `forget`; one that closes, `hide`) goes on to take each monitor's lock,
+    // and the two waited for each other forever: dragging a file over a window
+    // that was redrawing froze the whole session.
+    let monitors: Vec<(MonitorInfo, Screen)> = MONITORS.lock().unwrap().iter().map(|(m, s)| (m.clone(), s.clone())).collect();
     for (k, id) in ids {
-        let Some(sc) = monitors.get(k) else { continue };
+        let Some((m, sc)) = monitors.get(k) else { continue };
         let (lock, cv) = &**sc;
         let mut st = lock.lock().unwrap();
         let Some(i) = st.clients.iter().position(|c| c.id == id) else { continue };
         let old = st.clients[i].rect;
-        let new = drag_rect(k, old[2], old[3]);
+        let new = rect_on(m, pos, old[2], old[3]);
         if new != old {
             st.clients[i].rect = new;
             st.changed.push((old, 0));
@@ -521,5 +532,58 @@ pub fn stop_all() {
 pub fn forget(buffers: &[u64]) {
     for (_, sc) in MONITORS.lock().unwrap().iter() {
         sc.0.lock().unwrap().forget.extend_from_slice(buffers);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    struct Nowhere;
+    impl crate::screen::Output for Nowhere {
+        fn buffer(&mut self, _: &pleamar::wgpu::Device, _: &[u64]) -> Option<(usize, pleamar::wgpu::Texture)> {
+            None
+        }
+        fn show(&mut self, _: usize, _: pleamar::Sent, _: &pleamar::wgpu::Device, _: &pleamar::wgpu::Queue, _: bool) -> bool {
+            false
+        }
+    }
+
+    /// Dragging a file while a window redraws: the pointer moves the drag
+    /// icon (`move_drag`, the input thread) while the compositor lets go of a
+    /// window's buffers (`forget`) and a window goes fullscreen. Both take
+    /// `MONITORS` and each monitor's lock; in opposite orders they froze the
+    /// session for good.
+    #[test]
+    fn dragging_while_windows_redraw_does_not_freeze() {
+        let info = MonitorInfo { name: "A".into(), size: (1920, 1080), x: 0, y: 0, mhz: 60_000, scale: 1.0 };
+        register(vec![(info, crate::screen::screen("A".into(), (1920, 1080), Box::new(Nowhere)))]);
+        show(0, ClientLayer { id: 7, level: 3, rect: [0, 0, 32, 32], pieces: Vec::new(), region: Some(Vec::new()), keyboard: 0, blur: Vec::new(), owner: 0 });
+        set_drag_icon(vec![(0, 7)]);
+        let (done, finished) = std::sync::mpsc::channel();
+        let mover = {
+            let done = done.clone();
+            std::thread::spawn(move || {
+                for k in 0..200_000 {
+                    move_drag(((k % 1900) as f64, (k % 1000) as f64));
+                }
+                let _ = done.send(());
+            })
+        };
+        let redraws = std::thread::spawn(move || {
+            for k in 0..200_000u64 {
+                forget(&[k]);
+                if k % 64 == 0 {
+                    set_fullscreen(&[k % 128 == 0]);
+                }
+            }
+            let _ = done.send(());
+        });
+        for _ in 0..2 {
+            finished.recv_timeout(std::time::Duration::from_secs(60)).expect("the two threads waited for each other: frozen");
+        }
+        mover.join().unwrap();
+        redraws.join().unwrap();
+        set_drag_icon(Vec::new());
     }
 }
