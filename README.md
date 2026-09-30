@@ -45,8 +45,12 @@ the open windows without closing anything.
 - **Windows are born from the water**: a window that opens comes out of the
   nearest edge of the monitor as a black drop, hanging by a neck, and spreads
   into its place —the same water [Marea] comes out of—.
-- **Workspaces**: nine per monitor (`Super+1…9`, `Super+Shift+1…9` to send
-  the window); changing, the windows slide out and the new ones slide in.
+- **Workspaces are tide pools**: each monitor has its own stack, as many as
+  hold windows plus an empty one past the last; one left empty dries up.
+  `Super+1…9` (that pool of the monitor under the mouse), `Super+Shift+1…9` to
+  send the window, `Super+Ctrl+Up/Down` the pool above or below, and
+  `Super+Ctrl+Shift+Left/Right` carries the whole pool to the monitor beside.
+  Changing, a wave crosses the monitor, and the windows change under the water.
 - **Up to 16 windows and 4 monitors**, left to right; a window carried from
   one to another is seen crossing.
 - **Window rules**: `window app=pavucontrol float size 820x560`, `window

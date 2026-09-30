@@ -14,6 +14,8 @@
 //   Super+Shift+Right   to the right monitor
 //   Super+Shift+Up/Down change places with the one before / after it
 //   Super+Tab  everything at a glance       Super+-/+  the leader narrower / wider
+//   Super+1…9  that pool of this monitor    Super+Ctrl+Up/Down  the pool above / below
+//   Super+Ctrl+Shift+Left/Right  the whole pool to the monitor beside
 //   Super+F    fullscreen, and back
 //   Super+W    tiled or free windows on this monitor (also from Marea's menu):
 //              free, each window stays where it is left and as big as it is
@@ -214,42 +216,133 @@ scene Session {
     // A window fullscreen on the monitor under the mouse: the ones below it keep off the keyboard.
     let fs.on = (win.0.fullscreen and win.0.screen == mon and win.0.rank >= 0) + (win.1.fullscreen and win.1.screen == mon and win.1.rank >= 0) + (win.2.fullscreen and win.2.screen == mon and win.2.rank >= 0) + (win.3.fullscreen and win.3.screen == mon and win.3.rank >= 0) + (win.4.fullscreen and win.4.screen == mon and win.4.rank >= 0) + (win.5.fullscreen and win.5.screen == mon and win.5.rank >= 0) + (win.6.fullscreen and win.6.screen == mon and win.6.rank >= 0) + (win.7.fullscreen and win.7.screen == mon and win.7.rank >= 0) + (win.8.fullscreen and win.8.screen == mon and win.8.rank >= 0) + (win.9.fullscreen and win.9.screen == mon and win.9.rank >= 0) + (win.10.fullscreen and win.10.screen == mon and win.10.rank >= 0) + (win.11.fullscreen and win.11.screen == mon and win.11.rank >= 0) + (win.12.fullscreen and win.12.screen == mon and win.12.rank >= 0) + (win.13.fullscreen and win.13.screen == mon and win.13.rank >= 0) + (win.14.fullscreen and win.14.screen == mon and win.14.rank >= 0) + (win.15.fullscreen and win.15.screen == mon and win.15.rank >= 0)
 
-    // ── workspaces: each monitor shows one (1 to 9), and each window is on
-    // one. Super+1…9 shows that one on the monitor under the mouse,
-    // Super+Shift+1…9 sends the window with the keyboard there, and
-    // Super+Ctrl+Left/Right goes to the one beside. Changing, the windows
-    // slide: the old ones out to one side, the new ones in from the other ──
+    // ── pools: each monitor has its own, one below the other, as tide
+    // pools are left along a shore. There are as many as hold windows, and
+    // one more, empty, past the last; one left empty dries up and the ones
+    // below move up. Super+1…9 shows that one on the monitor under the
+    // mouse (no further than the empty one), Super+Shift+1…9 sends the window
+    // with the keyboard there, Super+Ctrl+Up/Down goes to the one above or
+    // below, and Super+Ctrl+Shift+Left/Right carries the whole pool to the
+    // monitor beside. Changing, a wave crosses the monitor: in from below
+    // going down the stack, from above going up; the windows change when the
+    // water covers them all ──
     event workspace
     event move_to_workspace
     event workspace_next
     event workspace_previous
+    event workspace_to_left
+    event workspace_to_right
     on workspace(v) { workspace v }
     on move_to_workspace(v) while win.focus >= 0 { send win(win.focus) to workspace v }
     let ws.mon = pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3)
-    on workspace_next { workspace min(ws.mon + 1, 9) }
+    let ws.last = pick(mon, win.used.0, win.used.1, win.used.2, win.used.3) + 1
+    on workspace_next { workspace min(ws.mon + 1, ws.last) }
     on workspace_previous { workspace max(ws.mon - 1, 1) }
+    on workspace_to_right while mon < screens.count - 1 { send workspace ws.mon on mon to mon + 1 }
+    on workspace_to_left while mon > 0 { send workspace ws.mon on mon to mon - 1 }
+    // The pool each monitor draws (see below): it starts on its first one.
+    fact inpool.0 = 1
+    fact inpool.1 = 2
+    fact inpool.2 = 3
+    fact inpool.3 = 4
     repeat s in 0..4 {
-        // Where each monitor's windows slide to: its workspace, on a spring.
-        prop desk.$s = 1 ~glide
-        follow desk.$s = win.shown.$s
-        // And its number, for a moment, at the top of the monitor.
-        prop wsflash.$s = 0 ~160ms
-        on change win.shown.$s {
-            wsflash.$s: 1 ~120ms
-            wsflash.$s: 0 ~400ms after 900ms
+        // The pool drawn: the one shown, once the water has covered the one
+        // before it (each monitor starts on its own first one). By identity, not
+        // by turn: when one above dries up and it moves up, nothing moves.
+        fact was.$s = 1
+        fact dir.$s = 1
+        prop tide.$s = 1 ~620ms
+        prop flash.$s = 0 ~180ms
+        on change win.pool.$s {
+            dir.$s = if(win.shown.$s >= was.$s, 1, -1)
+            was.$s = win.shown.$s
+            tide.$s: 0 ~0ms
+            tide.$s: 1 ~620ms after 16ms
+            flash.$s: 1 ~140ms
+            flash.$s: 0 ~420ms after 1200ms
         }
+        on change win.shown.$s { was.$s = win.shown.$s }
+        on change tide.$s > 0.5 while tide.$s > 0.5 { inpool.$s = win.pool.$s }
+        on still tide.$s for 60ms while tide.$s > 0.98 and inpool.$s != win.pool.$s { inpool.$s = win.pool.$s }
+
+        // The wave: black water, the same the windows are born from, with a
+        // rolling crest on each side that melts into it, and its own rim of
+        // light, as Marea's edge has.
+        let wv = tide.$s
+        let lead = smooth(0, 0.5, wv)
+        let trail = smooth(0.5, 1, wv)
+        let top = if(dir.$s > 0, H * (1 - lead), H * trail)
+        let bot = if(dir.$s > 0, H * (1 - trail), H * lead)
+        let crest = W / 7
+        group {
+            z: 99980
+            show: wv < 0.999 and screen.index == s and bot - top > 0.5
+            body {
+                gradient: 0, top to 0, bot, #121517, #0c0e10 35%, #0a0b0d
+                rim: 14%
+                shadow: 0, 0, 36, 45%
+                box { from: -60, top; size: W + 120, bot - top }
+                // Its crests, rolling along as it goes.
+                ellipse { at: (0 - 0.5 + wv * 1.4) * W / 7.5, top; radius: crest; scale: 1, (0.16 + 0.1 * sin(0 + wv * 320)) * min((bot - top) / 90, 1); blend: 46; show: top > -crest }
+                ellipse { at: (0 - 0.5 + wv * 1.4) * W / 7.5 + crest * 0.5, bot; radius: crest; scale: 1, (0.26 - (0.16 + 0.1 * sin(0 + wv * 320))) * min((bot - top) / 90, 1); blend: 46; show: bot < H + crest }
+                ellipse { at: (1 - 0.5 + wv * 1.4) * W / 7.5, top; radius: crest; scale: 1, (0.16 + 0.1 * sin(73 + wv * 320)) * min((bot - top) / 90, 1); blend: 46; show: top > -crest }
+                ellipse { at: (1 - 0.5 + wv * 1.4) * W / 7.5 + crest * 0.5, bot; radius: crest; scale: 1, (0.26 - (0.16 + 0.1 * sin(73 + wv * 320))) * min((bot - top) / 90, 1); blend: 46; show: bot < H + crest }
+                ellipse { at: (2 - 0.5 + wv * 1.4) * W / 7.5, top; radius: crest; scale: 1, (0.16 + 0.1 * sin(146 + wv * 320)) * min((bot - top) / 90, 1); blend: 46; show: top > -crest }
+                ellipse { at: (2 - 0.5 + wv * 1.4) * W / 7.5 + crest * 0.5, bot; radius: crest; scale: 1, (0.26 - (0.16 + 0.1 * sin(146 + wv * 320))) * min((bot - top) / 90, 1); blend: 46; show: bot < H + crest }
+                ellipse { at: (3 - 0.5 + wv * 1.4) * W / 7.5, top; radius: crest; scale: 1, (0.16 + 0.1 * sin(219 + wv * 320)) * min((bot - top) / 90, 1); blend: 46; show: top > -crest }
+                ellipse { at: (3 - 0.5 + wv * 1.4) * W / 7.5 + crest * 0.5, bot; radius: crest; scale: 1, (0.26 - (0.16 + 0.1 * sin(219 + wv * 320))) * min((bot - top) / 90, 1); blend: 46; show: bot < H + crest }
+                ellipse { at: (4 - 0.5 + wv * 1.4) * W / 7.5, top; radius: crest; scale: 1, (0.16 + 0.1 * sin(292 + wv * 320)) * min((bot - top) / 90, 1); blend: 46; show: top > -crest }
+                ellipse { at: (4 - 0.5 + wv * 1.4) * W / 7.5 + crest * 0.5, bot; radius: crest; scale: 1, (0.26 - (0.16 + 0.1 * sin(292 + wv * 320))) * min((bot - top) / 90, 1); blend: 46; show: bot < H + crest }
+                ellipse { at: (5 - 0.5 + wv * 1.4) * W / 7.5, top; radius: crest; scale: 1, (0.16 + 0.1 * sin(365 + wv * 320)) * min((bot - top) / 90, 1); blend: 46; show: top > -crest }
+                ellipse { at: (5 - 0.5 + wv * 1.4) * W / 7.5 + crest * 0.5, bot; radius: crest; scale: 1, (0.26 - (0.16 + 0.1 * sin(365 + wv * 320))) * min((bot - top) / 90, 1); blend: 46; show: bot < H + crest }
+                ellipse { at: (6 - 0.5 + wv * 1.4) * W / 7.5, top; radius: crest; scale: 1, (0.16 + 0.1 * sin(438 + wv * 320)) * min((bot - top) / 90, 1); blend: 46; show: top > -crest }
+                ellipse { at: (6 - 0.5 + wv * 1.4) * W / 7.5 + crest * 0.5, bot; radius: crest; scale: 1, (0.26 - (0.16 + 0.1 * sin(438 + wv * 320))) * min((bot - top) / 90, 1); blend: 46; show: bot < H + crest }
+                ellipse { at: (7 - 0.5 + wv * 1.4) * W / 7.5, top; radius: crest; scale: 1, (0.16 + 0.1 * sin(511 + wv * 320)) * min((bot - top) / 90, 1); blend: 46; show: top > -crest }
+                ellipse { at: (7 - 0.5 + wv * 1.4) * W / 7.5 + crest * 0.5, bot; radius: crest; scale: 1, (0.26 - (0.16 + 0.1 * sin(511 + wv * 320))) * min((bot - top) / 90, 1); blend: 46; show: bot < H + crest }
+                ellipse { at: (8 - 0.5 + wv * 1.4) * W / 7.5, top; radius: crest; scale: 1, (0.16 + 0.1 * sin(584 + wv * 320)) * min((bot - top) / 90, 1); blend: 46; show: top > -crest }
+                ellipse { at: (8 - 0.5 + wv * 1.4) * W / 7.5 + crest * 0.5, bot; radius: crest; scale: 1, (0.26 - (0.16 + 0.1 * sin(584 + wv * 320))) * min((bot - top) / 90, 1); blend: 46; show: bot < H + crest }
+            }
+        }
+
+        // Where you are: a capsule at the right edge, a dot per pool —the
+        // empty ones a ring— and the one shown drawn out, sliding to it.
+        let nd = max(win.pools.$s, win.used.$s + 1)
+        let cur = win.shown.$s
+        prop at.$s = 1 ~pop
+        follow at.$s = cur
+        let dy0 = H / 2 - (nd - 1) * 9
         group {
             z: 99990
-            show: wsflash.$s > 0.01 and screen.index == s
-            opacity: wsflash.$s
-            move: 0, -8 * (1 - wsflash.$s)
+            show: flash.$s > 0.01 and screen.index == s
+            opacity: flash.$s
+            move: 12 * (1 - flash.$s), 0
             body {
                 color: #0c0e10
-                rim: 8%
+                rim: 10%
                 shadow: 0, 8, 24, 45%
-                box { at: W / 2, pick(s, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top) + 58; size: 64, 44; corner: 22 }
+                box { at: W - 28, H / 2; size: 24, nd * 18 + 14; corner: 12 }
             }
-            text number(win.shown.$s, 0) { at: W / 2, pick(s, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top) + 58; anchor: center; size: 20; weight: 700; color: mint }
+            ellipse { at: W - 28, dy0 + 0; radius: 3; color: ink; opacity: 45%; show: 1 <= nd and not (1 == nd and win.used.$s < 1 or 1 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 0; radius: 3; stroke: 1.2; color: ink; opacity: 45%; show: 1 <= nd and (1 == nd and win.used.$s < 1 or 1 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 18; radius: 3; color: ink; opacity: 45%; show: 2 <= nd and not (2 == nd and win.used.$s < 2 or 2 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 18; radius: 3; stroke: 1.2; color: ink; opacity: 45%; show: 2 <= nd and (2 == nd and win.used.$s < 2 or 2 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 36; radius: 3; color: ink; opacity: 45%; show: 3 <= nd and not (3 == nd and win.used.$s < 3 or 3 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 36; radius: 3; stroke: 1.2; color: ink; opacity: 45%; show: 3 <= nd and (3 == nd and win.used.$s < 3 or 3 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 54; radius: 3; color: ink; opacity: 45%; show: 4 <= nd and not (4 == nd and win.used.$s < 4 or 4 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 54; radius: 3; stroke: 1.2; color: ink; opacity: 45%; show: 4 <= nd and (4 == nd and win.used.$s < 4 or 4 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 72; radius: 3; color: ink; opacity: 45%; show: 5 <= nd and not (5 == nd and win.used.$s < 5 or 5 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 72; radius: 3; stroke: 1.2; color: ink; opacity: 45%; show: 5 <= nd and (5 == nd and win.used.$s < 5 or 5 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 90; radius: 3; color: ink; opacity: 45%; show: 6 <= nd and not (6 == nd and win.used.$s < 6 or 6 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 90; radius: 3; stroke: 1.2; color: ink; opacity: 45%; show: 6 <= nd and (6 == nd and win.used.$s < 6 or 6 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 108; radius: 3; color: ink; opacity: 45%; show: 7 <= nd and not (7 == nd and win.used.$s < 7 or 7 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 108; radius: 3; stroke: 1.2; color: ink; opacity: 45%; show: 7 <= nd and (7 == nd and win.used.$s < 7 or 7 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 126; radius: 3; color: ink; opacity: 45%; show: 8 <= nd and not (8 == nd and win.used.$s < 8 or 8 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 126; radius: 3; stroke: 1.2; color: ink; opacity: 45%; show: 8 <= nd and (8 == nd and win.used.$s < 8 or 8 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 144; radius: 3; color: ink; opacity: 45%; show: 9 <= nd and not (9 == nd and win.used.$s < 9 or 9 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 144; radius: 3; stroke: 1.2; color: ink; opacity: 45%; show: 9 <= nd and (9 == nd and win.used.$s < 9 or 9 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 162; radius: 3; color: ink; opacity: 45%; show: 10 <= nd and not (10 == nd and win.used.$s < 10 or 10 == cur and win.used.$s < win.pools.$s) }
+            ellipse { at: W - 28, dy0 + 162; radius: 3; stroke: 1.2; color: ink; opacity: 45%; show: 10 <= nd and (10 == nd and win.used.$s < 10 or 10 == cur and win.used.$s < win.pools.$s) }
+            box { at: W - 28, dy0 + (at.$s - 1) * 18; size: 6, 15; corner: 3; color: mint }
         }
     }
 
@@ -268,11 +361,12 @@ scene Session {
         // (Asked to close: see `seen`.)
         prop bye.$i = 0 ~0ms
         // On the workspace its monitor shows; or how far from it, while they slide.
-        let ws.here = win.$i.workspace == pick(sc, win.shown.0, win.shown.1, win.shown.2, win.shown.3)
-        let ws.away = win.$i.workspace - pick(sc, desk.0, desk.1, desk.2, desk.3)
-        let here = win.$i.open and sc == screen.index and not win.$i.minimized and bye.$i < 0.5 and ws.here
+        // On the pool its monitor shows; and drawn, the one the water has left.
+        let ws.here = win.$i.pool == pick(sc, win.pool.0, win.pool.1, win.pool.2, win.pool.3)
+        let ws.vis = win.$i.pool == pick(sc, inpool.0, inpool.1, inpool.2, inpool.3)
+        let here = win.$i.open and sc == screen.index and not win.$i.minimized and bye.$i < 0.5 and ws.vis
         // (Drawn while it goes away into the island, too.)
-        let drawn = win.$i.open and sc == screen.index and abs(ws.away) < 0.999
+        let drawn = win.$i.open and sc == screen.index and ws.vis
         let n = max(win.$i.among, 1)
         let p = max(win.$i.place, 0)
         let L = pick(sc, lay.0, lay.1, lay.2, lay.3)
@@ -551,7 +645,7 @@ scene Session {
         prop wave.$i = 1 ~720ms
         follow lit.$i = if(win.$i.focused and not overview, 1, if(overview, 1, 0))
 
-        let x = x.$i + dx.$i + ws.away * (pick(sc, screen.0.width, screen.1.width, screen.2.width, screen.3.width) + gap)
+        let x = x.$i + dx.$i
         let y = y.$i + dy.$i
         let w = w.$i
         let h = h.$i
@@ -651,7 +745,7 @@ scene Session {
             z: stamp.$i
             // Carried, it is drawn over the others, further down; flying into
             // the island or out of it, too.
-            show: seen.$i > 0.01 and sc == screen.index and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog and mini.$i <= 0.02
+            show: seen.$i > 0.01 and sc == screen.index and ws.vis and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog and mini.$i <= 0.02
             // Born, it grows out of the drop: the same size as the black that
             // spreads, showing through it as the black clears.
             opacity: seen.$i * smooth(0.2, 0.5, swell.$i)
@@ -1255,7 +1349,7 @@ scene Session {
     // ── fullscreen: one that asked (F11, a video, a game) or Super+F covers
     // its monitor, over the bar and the other programs' bars ──
     repeat i in 0..16 {
-        let fs.ws = win.$i.workspace == pick(win.$i.screen, win.shown.0, win.shown.1, win.shown.2, win.shown.3)
+        let fs.ws = win.$i.pool == pick(win.$i.screen, inpool.0, inpool.1, inpool.2, inpool.3)
         let fs.here = win.$i.fullscreen and win.$i.open and win.$i.screen == screen.index and fs.ws
         prop fs.$i = 0 ~160ms
         follow fs.$i = if(win.$i.fullscreen and win.$i.open and fs.ws, 1, 0)
@@ -1277,7 +1371,7 @@ scene Session {
         let dx = (W - dw) / 2
         let dy = (H - dh) / 2
         prop dlg.$i = 0 ~220ms
-        let dlg.ws = win.$i.workspace == pick(win.$i.screen, win.shown.0, win.shown.1, win.shown.2, win.shown.3)
+        let dlg.ws = win.$i.pool == pick(win.$i.screen, inpool.0, inpool.1, inpool.2, inpool.3)
         // The mouse going into it gives it the keyboard, as it does a window.
         let dlg.pointed = win.$i.dialog and win.$i.open and dlg.ws and win.$i.screen == mon and abs(mouse.x - Wmon / 2) <= dw / 2 and abs(mouse.y - Hmon / 2) <= dh / 2
         on change dlg.pointed while dlg.pointed and dragging < 0 and not overview { focus win.$i }
@@ -1420,7 +1514,7 @@ scene Session {
         let sc = win.$i.screen
         let carried = dragging == i or (landing == i and win.$i.screen != landing.to)
         // (On a workspace sliding away, she slides away with it.)
-        let ride.slide = (win.$i.workspace - pick(sc, desk.0, desk.1, desk.2, desk.3)) * (pick(sc, screen.0.width, screen.1.width, screen.2.width, screen.3.width) + gap)
+        let ride.slide = 0
         // The window's corner on the desktop: where it is laid out, or where
         // the hand carries it.
         let wx = if(carried, mouse.x + pick(mon, mx.0, mx.1, mx.2, mx.3) - grab.x, x.$i + dx.$i + ride.slide + pick(sc, mx.0, mx.1, mx.2, mx.3))
