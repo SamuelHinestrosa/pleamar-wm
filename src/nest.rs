@@ -1921,6 +1921,17 @@ impl State {
     fn forget(&mut self, toplevel: &Toplevel) {
         self.waiting.retain(|(t, _)| t != toplevel);
         let Some(slot) = self.slots.iter().position(|w| w.as_ref().is_some_and(|w| &w.toplevel == toplevel)) else { return };
+        // Where the keyboard goes back to, if it had it: the window that opened
+        // it (a «Save image» asked by a viewer), or one fullscreen on its
+        // monitor. The one that leads was a window the user was not looking at.
+        let parent = match toplevel {
+            Toplevel::Xdg(t) => t.parent(),
+            Toplevel::X11(_) => None,
+        };
+        let back_to = parent.and_then(|p| self.window_of(&p)).filter(|s| *s != slot).or_else(|| {
+            let screen = self.slots[slot].as_ref().map(|w| w.screen);
+            self.order.iter().copied().find(|s| *s != slot && self.slots[*s].as_ref().is_some_and(|w| w.fullscreen && Some(w.screen) == screen))
+        });
         if let Some(w) = self.slots[slot].take() {
             self.toplevel_list.remove_toplevel(&w.listed);
             if w.fullscreen {
@@ -1938,8 +1949,8 @@ impl State {
         self.tell(NestEvent::Closed(slot));
         self.tell(NestEvent::Order(self.order.clone()));
         if self.focus == Some(slot) {
-            // The keyboard goes to the one that leads, as when a window closes anywhere.
-            let next = self.order.first().copied();
+            // Else the keyboard goes to the one that leads, as when a window closes anywhere.
+            let next = back_to.or_else(|| self.order.first().copied());
             self.set_focus(next);
         }
         // One that was waiting takes its place.

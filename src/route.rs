@@ -33,12 +33,15 @@ pub struct Route {
     /// kept that key held for every window after it (a Backspace that erased
     /// everything, letters that were shortcuts).
     layer_keys: Vec<(u32, u64)>,
+    /// Super held: the scene is told (`keys.super`), and with it a window is
+    /// carried from anywhere on it.
+    super_held: bool,
     to_render: Sender<ToRender>,
 }
 
 impl Route {
     pub fn new(to_render: Sender<ToRender>) -> Route {
-        Route { hit: Hit::Scene(None), grab: None, scene_held: false, key_client: None, bound: Vec::new(), repeating: None, repeat_new: false, layer_keys: Vec::new(), to_render }
+        Route { hit: Hit::Scene(None), grab: None, scene_held: false, key_client: None, bound: Vec::new(), repeating: None, repeat_new: false, layer_keys: Vec::new(), super_held: false, to_render }
     }
 
     /// The pointer at that point of a monitor, in its pixels. Says whether it
@@ -151,6 +154,10 @@ impl Route {
     /// `base`: the key's own name, without what Shift makes of it (`1` where
     /// it types `!`): a binding says `Super+Shift+1`, whatever the layout.
     pub fn key(&mut self, screens: &[Screen], name: &str, base: Option<&str>, typed: Option<String>, mods: Mods, evdev: u32, down: bool) {
+        if name.starts_with("Super_") && self.super_held != down {
+            self.super_held = down;
+            let _ = self.to_render.send(ToRender::Fact("keys.super", if down { 1.0 } else { 0.0 }));
+        }
         // A binding (keys.conf) takes the key before anyone —while locked,
         // only the ones marked `locked`—.
         if down {

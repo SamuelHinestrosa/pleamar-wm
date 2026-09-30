@@ -41,6 +41,10 @@ the open windows without closing anything.
 - **Tiled or free, per monitor, in one key**: five tiled layouts (leader left or
   right, columns, rows, grid), or free windows as on KDE/Windows — edges,
   corner, maximize, the one clicked on top. `Super+W` switches with an animation.
+  Only free windows have a title bar: tiled, the program has all of its tile.
+- **Windows are born from the water**: a window that opens comes out of the
+  nearest edge of the monitor as a black drop, hanging by a neck, and spreads
+  into its place —the same water [Marea] comes out of—.
 - **Workspaces**: nine per monitor (`Super+1…9`, `Super+Shift+1…9` to send
   the window); changing, the windows slide out and the new ones slide in.
 - **Up to 16 windows and 4 monitors**, left to right; a window carried from
@@ -48,7 +52,8 @@ the open windows without closing anything.
 - **Window rules**: `window app=pavucontrol float size 820x560`, `window
   app=discord workspace 3 monitor HDMI-A-1` in `session.conf`.
 - **Every window rides a spring**: change your mind mid-drag and it turns without a jolt.
-- **Drag with a live preview**: the others move aside as they would be; drop on
+- **Drag with a live preview** —by the title bar when free, by the gap above
+  it when tiled, or from anywhere with `Super` held—: the others move aside as they would be; drop on
   a window to swap (also across monitors), on the other monitor to send it, or
   on the layouts strip to change the layout.
 - **Minimize into [Marea]**: the window melts into a drop that falls into her

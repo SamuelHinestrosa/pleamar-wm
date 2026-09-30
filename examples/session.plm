@@ -19,12 +19,17 @@
 //              free, each window stays where it is left and as big as it is
 //              made —edges and corner—, the green button maximizes it, and
 //              the one clicked comes over the rest. Back to tiled, each goes
-//              to its place; free again, each to where it was.
+//              to its place; free again, each to where it was. Only free do
+//              windows have a title bar with buttons: tiled, the layout says
+//              where each is, and the program has all of its tile.
 //   Super+Space  Marea's search (the wallpaper and Marea start with it: autostart)
 //   Touchpad: three fingers down close, up fullscreen; four
 //   sideways, the keyboard to the next / previous window
 //   The keyboard goes to the window the mouse is over, without a click.
-//   With the mouse: carry a window by its title bar; let it go on another one
+//   A window that opens is born from the water at the nearest edge, as
+//   Marea's panels come out of her: a drop, a neck, and it spreads into it.
+//   With the mouse: carry a window by its title bar (free), by the gap just
+//   above it (tiled), or from anywhere with Super held; let it go on another one
 //   and they change places (on the other monitor too: each takes the other's),
 //   or on an empty spot of the other monitor and it goes there. While
 //   carried, a strip at the top offers five layouts —a leader on the left,
@@ -63,10 +68,17 @@ scene Session {
     let home.y = 12
     spring glide = 210, 23
     spring pop = 320, 12
+    // Marea's, for the water a window is born from: `splash` bounces the
+    // surface twice before it lies flat; `homing` arrives overshooting a hair.
+    spring splash = 420, 13
+    spring homing = 165, 16
 
     fact ratio = 0.56                    // the leader's share of the width
     fact overview = false
     fact dragging = -1                   // the window being carried by its title bar
+    // Super held (the compositor says): then a window is carried from
+    // anywhere on it, tiled or free, even to the other monitor.
+    fact keys.super = 0
     fact grab.x = 0                      // where it was taken from, from its corner
     fact grab.y = 0
     fact over = -1                       // the window under the one carried
@@ -101,6 +113,13 @@ scene Session {
     }
     prop wet = 0 ~2500ms
     follow wet = if(rain, 1, 0)
+    // How hard it rains, from a drizzle to a downpour (`emit rain_level 0.3`,
+    // Marea's menu): fewer beads on the glass, fewer streaks in front.
+    fact rain.level = 1
+    event rain_level
+    on rain_level(v) { rain.level = clamp(v, 0.1, 1) }
+    prop pour = 1 ~900ms
+    follow pour = rain.level
     // ── or snow: frost creeping in from the edges, snow piling up on top of
     // each window, flakes stuck to the glass and falling (`emit toggle_snow`).
     // One weather at a time ──
@@ -392,6 +411,90 @@ scene Session {
         // floats: a deeper shadow.
         prop lift.$i = 0 ~pop
         follow lift.$i = F
+        // Its title bar, with its buttons, only free: tiled, the layout already
+        // says where each one is, and the program has all of its tile. It
+        // unrolls when the monitor goes free, and rolls up when it goes back.
+        prop hb.$i = 0 ~glide
+        follow hb.$i = if(F > 0.5, 1, 0)
+        // ── born from the water, as Marea comes out of hers: a window that
+        // opens comes out of the edge of the monitor nearest to where it goes.
+        // The water there holds a drop that pushes through it, stretched,
+        // hanging by a neck; the thread breaks, the surface gives its tug and
+        // two ripples run along it, a droplet is left behind and swallowed, and
+        // the drop, shaking round, flies to its place with weight, squashes as
+        // it lands and spreads into the window —black, then, pum, the window—.
+        // `out` 0 sunk → 1 separated; `fly` 0 at the edge → 1 at its place;
+        // `swell` 0 a drop → 1 the window (the window is seen at the end of it).
+        prop out.$i = 1 ~420ms
+        prop fly.$i = 1 ~homing
+        prop swell.$i = 1 ~380ms
+        prop wet.$i = 0 ~120ms
+        prop bounce.$i = 0 ~splash
+        prop wobble.$i = 0 ~splash
+        prop ripple.$i = 1 ~900ms
+        prop stray.$i = 0 ~520ms
+        fact edge.$i = 0                  // 0 left, 1 right, 2 top, 3 bottom
+        fact ex.$i = 0
+        fact ey.$i = 0
+        let nb.Wm = pick(sc, screen.0.width, screen.1.width, screen.2.width, screen.3.width)
+        let nb.Hm = pick(sc, screen.0.height, screen.1.height, screen.2.height, screen.3.height)
+        let nb.gcx = goal.x + goal.w / 2
+        let nb.gcy = goal.y + goal.h / 2
+        // Alone on its monitor it is centred, as far from one edge as from the
+        // other: then it comes from the edge nearest to the mouse, where
+        // you are looking.
+        let nb.centred = abs(nb.gcx - nb.Wm / 2) < 60 and abs(nb.gcy - nb.Hm / 2) < 60
+        let nb.bx = if(nb.centred and mon == sc, mouse.x, nb.gcx)
+        let nb.by = if(nb.centred and mon == sc, mouse.y, nb.gcy)
+        let nb.near = min(min(nb.bx, nb.Wm - nb.bx), min(nb.by, nb.Hm - nb.by))
+        // As it opens, its place among the others is not known yet —a slot
+        // used before still says the place of the window it held—: it waits,
+        // unseen, a few frames, until the compositor has laid it out.
+        fact fresh.$i = 0
+        on change win.$i.open while win.$i.open and not win.$i.dialog {
+            fresh.$i = 1
+            swell.$i: 0 ~0ms
+            out.$i: 0 ~0ms
+            fly.$i: 0 ~0ms
+        }
+        on still swell.$i for 80ms while fresh.$i > 0.5 and swell.$i < 0.01 {
+            fresh.$i = 0
+            edge.$i = if(nb.near == nb.bx, 0, if(nb.near == nb.Wm - nb.bx, 1, if(nb.near == nb.by, 2, 3)))
+            ex.$i = if(nb.near == nb.bx, 0, if(nb.near == nb.Wm - nb.bx, nb.Wm, nb.bx))
+            ey.$i = if(nb.near == nb.bx or nb.near == nb.Wm - nb.bx, nb.by, if(nb.near == nb.by, 0, nb.Hm))
+            // Where it is going, at once: it is the drop that travels.
+            x.$i: goal.x ~0ms
+            y.$i: goal.y ~0ms
+            w.$i: goal.w ~0ms
+            h.$i: goal.h ~0ms
+            // The water stirs, and the drop starts pushing through it.
+            wet.$i: 1 ~120ms
+            impulse wobble.$i 190
+            out.$i: 1 ~420ms after 30ms
+        }
+        // The thread breaks: the tug, the ripples, the droplet left behind,
+        // the drop shaking round; and off it goes.
+        on change out.$i > 0.84 while out.$i > 0.84 and fly.$i < 0.01 and swell.$i < 0.01 and fresh.$i < 0.5 {
+            impulse bounce.$i -150
+            impulse wobble.$i -340
+            ripple.$i: 0 ~16ms
+            ripple.$i: 1 ~900ms after 30ms
+            stray.$i: 1 ~16ms
+            stray.$i: 0 ~520ms after 60ms
+            fly.$i: 1 ~homing after 50ms
+        }
+        // Landing: it squashes and spreads into the window; the water behind
+        // lies flat again.
+        on change fly.$i > 0.93 while fly.$i > 0.93 and swell.$i < 0.01 and fresh.$i < 0.5 {
+            impulse wobble.$i 300
+            swell.$i: 1 ~380ms
+            wet.$i: 0 ~500ms after 500ms
+        }
+        // Never hidden for good: whatever cut the journey short, it is there.
+        on still fly.$i for 2500ms while swell.$i < 0.01 and win.$i.open {
+            fresh.$i = 0
+            swell.$i: 1
+        }
         // (What comes from the compositor is already new when the rules look.)
         on change win.$i.open while win.$i.open and F > 0.5 {
             fw.$i = Ws * 0.6
@@ -438,6 +541,49 @@ scene Session {
         let y = y.$i + dy.$i
         let w = w.$i
         let h = h.$i
+        // Born from the water (see `out`, `fly`, `swell`): one body —the sheet
+        // beyond the edge, its bulge and its ripples, the droplet, the drop,
+        // the window it becomes— melted into a single silhouette, so every
+        // neck between them is nobody's drawing, as in Marea.
+        let nb.nx = pick(edge.$i, 1, -1, 0, 0)
+        let nb.ny = pick(edge.$i, 0, 0, 1, -1)
+        let nb.tx = abs(nb.ny)
+        let nb.ty = abs(nb.nx)
+        let nb.along = abs(nb.nx) > 0.5
+        let nb.R = 30
+        let nb.o = out.$i
+        let nb.f = fly.$i
+        let nb.s = swell.$i
+        let nb.wet = wet.$i
+        // The surface: stretched towards the drop while it holds it (a bell),
+        // tugged and bouncing when it lets it go.
+        let nb.tension = 4 * nb.o * (1 - nb.o) * (nb.f < 0.02)
+        let nb.sag = max((30 * nb.tension + bounce.$i) * nb.wet, 0.3)
+        let nb.rx = 14 + 90 * ripple.$i
+        let nb.rh = 16 * (1 - ripple.$i) * clamp(ripple.$i * 6, 0, 1) * nb.wet
+        let nb.sr = 8 * stray.$i
+        // The neck while it hangs: nothing sunk, most halfway, nothing loose.
+        let nb.neck = 34 * 4 * nb.o * (1 - nb.o) * (nb.f < 0.02)
+        // The drop: pushing through the edge, then flying to the middle of
+        // its window.
+        let nb.px = ex.$i + nb.nx * (-nb.R + (2 * nb.R + 18) * nb.o)
+        let nb.py = ey.$i + nb.ny * (-nb.R + (2 * nb.R + 18) * nb.o)
+        let nb.cx = nb.px + (x + w / 2 - nb.px) * nb.f
+        let nb.cy = nb.py + (y + h / 2 - nb.py) * nb.f
+        // Stretched by the pull and by its own speed; shaking round after.
+        let nb.k = nb.tension * 0.3 + clamp(abs(vel(fly.$i)) * 0.05, 0, 0.35)
+        let nb.dr = wobble.$i * 0.0012
+        let nb.sa = 1 + nb.k + nb.dr
+        let nb.sb = 1 - nb.k * 0.45 - nb.dr
+        // Landing it spreads: from the drop to the window, squashed a hair.
+        // (Whole by 0.85 of it: the window only shows through the black once
+        // the black is all of it.)
+        let nb.g = smooth(0, 0.85, nb.s)
+        let nb.bw = (2 * nb.R + (w - 2 * nb.R) * nb.g) * (1 + wobble.$i * 0.0004 * (1 - nb.g))
+        let nb.bh = (2 * nb.R + (h - 2 * nb.R) * nb.g) * (1 - wobble.$i * 0.0004 * (1 - nb.g))
+        // The window drawn at that size while it spreads.
+        let nb.sx = if(swell.$i < 0.999, nb.bw / max(w, 1), 1)
+        let nb.sy = if(swell.$i < 0.999, nb.bh / max(h, 1), 1)
         // A hollow where the carried one would land: where this one is, if it
         // is under it; its own place, if it is under nothing; its place on the
         // other monitor, if it is over that one.
@@ -464,10 +610,14 @@ scene Session {
         // window its edges and buttons go before what the program shows.)
         group {
             z: stamp.$i + 0.5
-            zone box title.$i { from: x.$i, y.$i; size: w - 76, tb; cursor: pointer; active: here and not overview and not win.$i.dialog }
-            zone ellipse lead_zone.$i { at: x + w - 40, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog }
-            zone ellipse mini_zone.$i { at: x + w - 60, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog }
-            zone ellipse close_zone.$i { at: x + w - 20, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog }
+            // Free, it is carried by its title bar; tiled, by the gap just
+            // above it, which takes nothing from the program.
+            // With Super held, all of it.
+            let whole = keys.super > 0.5 or dragging == i
+            zone box title.$i { from: x.$i + if(whole or F > 0.5, 0, 12), y.$i - if(whole or F > 0.5, 0, gap - 1); size: if(whole, w, if(F > 0.5, w - 76, w - 24)), if(whole, h, if(F > 0.5, tb, gap - 2)); cursor: pointer; active: here and not overview and not win.$i.dialog }
+            zone ellipse lead_zone.$i { at: x + w - 40, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog and F > 0.5 }
+            zone ellipse mini_zone.$i { at: x + w - 60, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog and F > 0.5 }
+            zone ellipse close_zone.$i { at: x + w - 20, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog and F > 0.5 }
             // At a glance, the whole window is a button: pressing it chooses it.
             zone box choose.$i { from: x, y; size: w, h; cursor: pointer; active: here and overview and not win.$i.dialog }
             // Free: its edges and its corner make it bigger or smaller.
@@ -488,9 +638,12 @@ scene Session {
             // Carried, it is drawn over the others, further down; flying into
             // the island or out of it, too.
             show: seen.$i > 0.01 and sc == screen.index and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog and mini.$i <= 0.02
-            opacity: seen.$i
+            // Born, it grows out of the drop: the same size as the black that
+            // spreads, showing through it as the black clears.
+            opacity: seen.$i * smooth(0.2, 0.5, swell.$i)
             pivot: x + w / 2, y + h / 2
-            scale: (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F)) * (1 + 0.012 * sin(180 * wave.$i))
+            move: (nb.cx - x - w / 2) * (1 - nb.g) * (swell.$i < 0.999), (nb.cy - y - h / 2) * (1 - nb.g) * (swell.$i < 0.999)
+            scale: (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F)) * (1 + 0.012 * sin(180 * wave.$i)) * (1 + 0.03 * sin(180 * smooth(0.8, 1, swell.$i))) * nb.sx, (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F)) * (1 + 0.012 * sin(180 * wave.$i)) * (1 + 0.03 * sin(180 * smooth(0.8, 1, swell.$i))) * nb.sy
             body {
                 color: #0c0e10
                 shadow: 0, 14 + 8 * lit.$i + 10 * lift.$i, 34 + 18 * lift.$i, 45% + 20% * lit.$i + 10% * lift.$i
@@ -501,27 +654,27 @@ scene Session {
             group {
                 show: wet <= 0.001 and cold <= 0.001
                 clip box { from: x, y; size: w, h; corner: 12 }
-                box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
-                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: goal.w, goal.h - tb; show: drawn and not win.$i.fullscreen and wet <= 0.001 and cold <= 0.001 }
+                box { from: x, y; size: w, tb * hb.$i; color: mix(#1a1e22, #1d2b27, lit.$i); show: hb.$i > 0.01 }
+                text win.$i.title { at: x + 14, y + tb / 2 - tb * (1 - hb.$i); anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink; opacity: (55% + 45% * lit.$i) * hb.$i; show: hb.$i > 0.01 }
+                window win.$i { at: x, y + tb * hb.$i; size: w, max(h - tb * hb.$i, 1); ask: goal.w, goal.h - tb * (F > 0.5); show: drawn and not win.$i.fullscreen and wet <= 0.001 and cold <= 0.001 }
             }
             // The same, in the rain: the window seen through wet glass.
             group {
                 show: wet > 0.001
-                shader: rain, wet
+                shader: rain, wet * pour
                 clip box { from: x, y; size: w, h; corner: 12 }
-                box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
-                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: goal.w, goal.h - tb; show: drawn and not win.$i.fullscreen and wet > 0.001 }
+                box { from: x, y; size: w, tb * hb.$i; color: mix(#1a1e22, #1d2b27, lit.$i); show: hb.$i > 0.01 }
+                text win.$i.title { at: x + 14, y + tb / 2 - tb * (1 - hb.$i); anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink; opacity: (55% + 45% * lit.$i) * hb.$i; show: hb.$i > 0.01 }
+                window win.$i { at: x, y + tb * hb.$i; size: w, max(h - tb * hb.$i, 1); ask: goal.w, goal.h - tb * (F > 0.5); show: drawn and not win.$i.fullscreen and wet > 0.001 }
             }
             // And in the snow: frosted glass with snow on top.
             group {
                 show: cold > 0.001 and wet <= 0.001
                 shader: snow, cold
                 clip box { from: x, y; size: w, h; corner: 12 }
-                box { from: x, y; size: w, tb; color: mix(#1a1e22, #1d2b27, lit.$i) }
-                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink; opacity: 55% + 45% * lit.$i }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: goal.w, goal.h - tb; show: drawn and not win.$i.fullscreen and cold > 0.001 and wet <= 0.001 }
+                box { from: x, y; size: w, tb * hb.$i; color: mix(#1a1e22, #1d2b27, lit.$i); show: hb.$i > 0.01 }
+                text win.$i.title { at: x + 14, y + tb / 2 - tb * (1 - hb.$i); anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink; opacity: (55% + 45% * lit.$i) * hb.$i; show: hb.$i > 0.01 }
+                window win.$i { at: x, y + tb * hb.$i; size: w, max(h - tb * hb.$i, 1); ask: goal.w, goal.h - tb * (F > 0.5); show: drawn and not win.$i.fullscreen and cold > 0.001 and wet <= 0.001 }
             }
             // (The wave: two soft crests of light, the second behind the first.)
             group {
@@ -539,7 +692,8 @@ scene Session {
             let by = y + tb / 2
             let b.any = max(max(mini_zone.$i.hover, lead_zone.$i.hover), close_zone.$i.hover)
             group {
-                opacity: 45% + 55% * max(lit.$i, b.any)
+                show: hb.$i > 0.01
+                opacity: (45% + 55% * max(lit.$i, b.any)) * hb.$i
                 ellipse { at: x + w - 60, by; radius: 8 + 3 * mini_zone.$i.hover; stroke: 1.2; color: amber; opacity: 55% * mini_zone.$i.hover }
                 ellipse { at: x + w - 40, by; radius: 8 + 3 * lead_zone.$i.hover; stroke: 1.2; color: mint; opacity: 55% * lead_zone.$i.hover }
                 ellipse { at: x + w - 20, by; radius: 8 + 3 * close_zone.$i.hover; stroke: 1.2; color: coral; opacity: 55% * close_zone.$i.hover }
@@ -573,6 +727,9 @@ scene Session {
                 box { at: x + w - 20, by + 0.3; size: 7.5, 1.6; corner: 0.8; rotate: -45deg; color: #4a140b; opacity: close_zone.$i.hover }
             }
             box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: lit.$i * 70% * (1 - ov) }
+            // Tiled, where it is taken to carry it: a little bar in the gap
+            // above it, seen when the mouse is there.
+            box { at: x + w / 2, y - gap / 2; size: 40 + 24 * title.$i.hover, 4; corner: 2; color: ink; opacity: 55% * title.$i.hover * (1 - hb.$i); show: hb.$i < 0.99 }
             // Choosing what to share: the one under the pointer lights up and says so.
             group {
                 show: share.windows and share.in > 0.01
@@ -592,6 +749,27 @@ scene Session {
                     text "Share this window" { at: x + w / 2 + 8, y + h / 2; anchor: center; size: 13; weight: 600; color: ink }
                 }
             }
+        }
+        // Born from the water: its drawing (its shape is worked out above, with `nb.`).
+        group {
+            z: stamp.$i + 0.4
+            show: nb.s < 0.995 and fresh.$i < 0.5 and win.$i.open and sc == screen.index and ws.here and not win.$i.dialog
+            opacity: 1 - smooth(0.3, 0.75, nb.s)
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6 + 10 * nb.s, 16 + 22 * nb.s, 40%
+                // The water, beyond the edge: only what it pushes in is seen.
+                box { at: ex.$i - nb.nx * 60, ey.$i - nb.ny * 60; size: if(nb.along, 120 * nb.wet + 1, 420), if(nb.along, 420, 120 * nb.wet + 1) }
+                ellipse { at: ex.$i, ey.$i; radius: 34; scale: if(nb.along, nb.sag / 34, 1), if(nb.along, 1, nb.sag / 34); blend: 18 * clamp(nb.sag / 6, 0, 1) }
+                ellipse { at: ex.$i - nb.tx * nb.rx, ey.$i - nb.ty * nb.rx; radius: 11; scale: if(nb.along, nb.rh / 11, 1), if(nb.along, 1, nb.rh / 11); blend: 9 * clamp(nb.rh / 3, 0, 1) }
+                ellipse { at: ex.$i + nb.tx * nb.rx, ey.$i + nb.ty * nb.rx; radius: 11; scale: if(nb.along, nb.rh / 11, 1), if(nb.along, 1, nb.rh / 11); blend: 9 * clamp(nb.rh / 3, 0, 1) }
+                ellipse { at: ex.$i + nb.nx * nb.sr * 0.7, ey.$i + nb.ny * nb.sr * 0.7; radius: nb.sr; blend: 8 * clamp(nb.sr / 3, 0, 1) }
+                ellipse { at: nb.cx, nb.cy; radius: nb.R; scale: if(nb.along, nb.sa, nb.sb), if(nb.along, nb.sb, nb.sa); blend: nb.neck }
+                box { at: nb.cx, nb.cy; size: nb.bw, nb.bh; corner: nb.R + (12 - nb.R) * nb.g; blend: 28 * 4 * nb.g * (1 - nb.g); show: nb.s > 0.001 }
+            }
+            // A glint on the drop, as on Marea: light from above.
+            ellipse { at: nb.cx - 7, nb.cy - 9; radius: 4; scale: 1.4, 0.8; color: ink; opacity: 35% * (1 - nb.s) * (nb.o > 0.3) }
         }
         // Taken by an edge or the corner: where it was and how big.
         on press left_edge.$i {
@@ -731,8 +909,11 @@ scene Session {
         // no click needed first (Super+Q closes the one under the mouse).
         let pointed = win.$i.open and sc == mon and not win.$i.dialog and not win.$i.minimized and mouse.x >= x.$i and mouse.x < x.$i + w.$i and mouse.y >= y.$i and mouse.y < y.$i + h.$i
         // (Free, they overlap: the keyboard goes with a click, as on Windows.)
-        on change pointed while dragging < 0 and not overview and fs.on < 0.5 and pick(mon, free.0, free.1, free.2, free.3) < 0.5 {
-            focus win(if(pointed, i, -1))
+        // (Only the one entered gives it. The one left said «nobody» too, and
+        // when both changed in the same round and the leaving one spoke last,
+        // nobody had it: a click was needed.)
+        on change pointed while pointed and dragging < 0 and not overview and fs.on < 0.5 and pick(mon, free.0, free.1, free.2, free.3) < 0.5 {
+            focus win.$i
         }
         on press lead_zone.$i while not fr { promote win.$i }
         on press close_zone.$i {
@@ -783,27 +964,27 @@ scene Session {
             group {
                 show: wet <= 0.001 and cold <= 0.001
                 clip box { from: x, y; size: w, h; corner: 12 }
-                box { from: x, y; size: w, tb; color: #1d2b27 }
-                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: win.$i.width, win.$i.height; show: carried and wet <= 0.001 and cold <= 0.001 }
+                box { from: x, y; size: w, tb * hb.$i; color: #1d2b27; show: hb.$i > 0.01 }
+                text win.$i.title { at: x + 14, y + tb / 2 - tb * (1 - hb.$i); anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink; opacity: hb.$i; show: hb.$i > 0.01 }
+                window win.$i { at: x, y + tb * hb.$i; size: w, max(h - tb * hb.$i, 1); ask: win.$i.width, win.$i.height; show: carried and wet <= 0.001 and cold <= 0.001 }
             }
             // Carried in the rain, its water goes with it, lagging behind.
             group {
                 show: wet > 0.001
-                shader: rain, wet, mouse.x - lag.x, mouse.y - lag.y
+                shader: rain, wet * pour, mouse.x - lag.x, mouse.y - lag.y
                 clip box { from: x, y; size: w, h; corner: 12 }
-                box { from: x, y; size: w, tb; color: #1d2b27 }
-                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: win.$i.width, win.$i.height; show: carried and wet > 0.001 }
+                box { from: x, y; size: w, tb * hb.$i; color: #1d2b27; show: hb.$i > 0.01 }
+                text win.$i.title { at: x + 14, y + tb / 2 - tb * (1 - hb.$i); anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink; opacity: hb.$i; show: hb.$i > 0.01 }
+                window win.$i { at: x, y + tb * hb.$i; size: w, max(h - tb * hb.$i, 1); ask: win.$i.width, win.$i.height; show: carried and wet > 0.001 }
             }
             // And in the snow, its snow and its frost.
             group {
                 show: cold > 0.001 and wet <= 0.001
                 shader: snow, cold, mouse.x - lag.x, mouse.y - lag.y
                 clip box { from: x, y; size: w, h; corner: 12 }
-                box { from: x, y; size: w, tb; color: #1d2b27 }
-                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink }
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: win.$i.width, win.$i.height; show: carried and cold > 0.001 and wet <= 0.001 }
+                box { from: x, y; size: w, tb * hb.$i; color: #1d2b27; show: hb.$i > 0.01 }
+                text win.$i.title { at: x + 14, y + tb / 2 - tb * (1 - hb.$i); anchor: left center; size: 12; weight: 500; width: max(w - 90, 10); lines: 1; color: ink; opacity: hb.$i; show: hb.$i > 0.01 }
+                window win.$i { at: x, y + tb * hb.$i; size: w, max(h - tb * hb.$i, 1); ask: win.$i.width, win.$i.height; show: carried and cold > 0.001 and wet <= 0.001 }
             }
             box { from: x, y; size: w, h; corner: 12; stroke: 1.5; color: mint; opacity: 80% }
         }
@@ -1005,12 +1186,12 @@ scene Session {
             }
             group {
                 clip box { from: x, y; size: w, h; corner: round }
-                box { from: x, y; size: w, tb; color: #1d2b27 }
-                text win.$i.title { at: x + 14, y + tb / 2; anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink }
+                box { from: x, y; size: w, tb * hb.$i; color: #1d2b27; show: hb.$i > 0.01 }
+                text win.$i.title { at: x + 14, y + tb / 2 - tb * (1 - hb.$i); anchor: left center; size: 12; weight: 500; width: max(w - 110, 10); lines: 1; color: ink; opacity: hb.$i; show: hb.$i > 0.01 }
                 // Its program keeps the size it has while it shrinks into the drop: the
                 // picture is scaled, not the program asked (a browser asked for
                 // 60 × 4 froze).
-                window win.$i { at: x, y + tb; size: w, max(h - tb, 1); ask: win.$i.width, win.$i.height }
+                window win.$i { at: x, y + tb * hb.$i; size: w, max(h - tb * hb.$i, 1); ask: win.$i.width, win.$i.height }
                 body {
                     gradient: x, y to x, y + h, #2b3030, marea 55%, #0e0f0f
                     opacity: 96% * q
@@ -1054,7 +1235,24 @@ scene Session {
         }
     }
 
+    // ── fullscreen: one that asked (F11, a video, a game) or Super+F covers
+    // its monitor, over the bar and the other programs' bars ──
+    repeat i in 0..16 {
+        let fs.ws = win.$i.workspace == pick(win.$i.screen, win.shown.0, win.shown.1, win.shown.2, win.shown.3)
+        let fs.here = win.$i.fullscreen and win.$i.open and win.$i.screen == screen.index and fs.ws
+        prop fs.$i = 0 ~160ms
+        follow fs.$i = if(win.$i.fullscreen and win.$i.open and fs.ws, 1, 0)
+        group {
+            show: fs.$i > 0.01 and win.$i.screen == screen.index
+            opacity: fs.$i
+            box { from: 0, 0; size: W, H; color: #000 }
+            window win.$i { at: 0, 0; size: W, H; ask: W, H; show: fs.here }
+        }
+    }
     // ── dialogs: a message, a file chooser, a window of another's: over the
+    // fullscreen ones too (drawn after them): a «Save image» asked by a
+    // fullscreen viewer was hidden behind it, and being modal, the viewer
+    // took nothing until it went —nobody could see it to close it—.
     // rest, at the size it chooses, in the middle of its monitor ──
     repeat i in 0..16 {
         let dw = max(win.$i.width, 120)
@@ -1084,27 +1282,26 @@ scene Session {
         }
     }
 
-    // ── fullscreen: one that asked (F11, a video, a game) or Super+F covers
-    // its monitor, over the bar and the other programs' bars ──
-    repeat i in 0..16 {
-        let fs.ws = win.$i.workspace == pick(win.$i.screen, win.shown.0, win.shown.1, win.shown.2, win.shown.3)
-        let fs.here = win.$i.fullscreen and win.$i.open and win.$i.screen == screen.index and fs.ws
-        prop fs.$i = 0 ~160ms
-        follow fs.$i = if(win.$i.fullscreen and win.$i.open and fs.ws, 1, 0)
-        group {
-            show: fs.$i > 0.01 and win.$i.screen == screen.index
-            opacity: fs.$i
-            box { from: 0, 0; size: W, H; color: #000 }
-            window win.$i { at: 0, 0; size: W, H; ask: W, H; show: fs.here }
-        }
-    }
     // The rain itself, in front of everything: streaks, slanted a little.
     group {
         z: 100000
         show: wet > 0.001
-        opacity: wet
+        opacity: wet * (0.45 + 0.55 * pour)
         particles {
-            at: W / 2, -40; area: W + 300, 1; count: 380
+            at: W / 2, -40; area: W + 300, 1; count: 130
+            life: 0.55s .. 0.9s; speed: 1600 .. 2100
+            direction: 100deg; spread: 3deg; gravity: 0, 0
+            size: 1.2, 0.9; colors: #e4f0ff, #c8dcf0; opacity: 24%, 12%
+            shape: spark; emit: rain
+        }
+    }
+    // (The rest of the downpour, only when it pours.)
+    group {
+        z: 100000
+        show: wet > 0.001 and pour > 0.4
+        opacity: wet * smooth(0.4, 0.9, pour)
+        particles {
+            at: W / 2, -40; area: W + 300, 1; count: 250
             life: 0.55s .. 0.9s; speed: 1600 .. 2100
             direction: 100deg; spread: 3deg; gravity: 0, 0
             size: 1.2, 0.9; colors: #e4f0ff, #c8dcf0; opacity: 24%, 12%
@@ -1211,7 +1408,8 @@ scene Session {
         // Her seat: on the top edge, left of the buttons; with no room above
         // it (tiled, against the top of the monitor), in the title bar itself.
         let seat.x = wx + max(w.$i * 0.5, w.$i - 140)
-        let seat.y = if(wy - r.r + 2 > 8, wy - r.r + 2, wy + tb / 2 - 1)
+        // (Tiled there is no title bar: she sits astride its top edge.)
+        let seat.y = if(wy - r.r + 2 > 8, wy - r.r + 2, wy + tb * hb.$i / 2 - 1)
         let to.x = if(homing, home.rx, seat.x)
         let to.y = if(homing, home.ry, seat.y)
         // On her way she goes up and comes down, like something with weight.
