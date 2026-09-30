@@ -68,9 +68,23 @@ fn main() {
         let scene = if args.first().is_some_and(|a| !a.starts_with("--")) { args.remove(0) } else { default_scene() };
         nest::set_scene_name(&scene);
         layers::expect_monitors();
-        pleamar::provide_before_quit(Box::new(|| {
+        // Its scene listens apart: under the same name as a real session's
+        // (`session`), it took that one's place, and Marea there could no longer
+        // reach her window manager until the next login.
+        let own = std::env::var("PLEAMAR_SOCKETS").ok().filter(|d| !d.is_empty()).unwrap_or_else(|| {
+            let dir = format!("{}/pleamar-headless-{}", std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into()), std::process::id());
+            // SAFETY: before any thread is started.
+            unsafe { std::env::set_var("PLEAMAR_SOCKETS", &dir) };
+            dir
+        });
+        let _ = std::fs::create_dir_all(&own);
+        println!("headless · its scene listens in {own}");
+        pleamar::provide_before_quit(Box::new(move || {
             layers::stop_all();
             nest::stop_launched();
+            if own.contains("pleamar-headless-") {
+                let _ = std::fs::remove_dir_all(&own);
+            }
         }));
         pleamar::provide_platform(Box::new(headless::Headless));
         let mut options = vec!["--scene".to_owned(), scene, "--no-hud".to_owned()];

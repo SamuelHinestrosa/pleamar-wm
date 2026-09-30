@@ -50,7 +50,11 @@ the open windows without closing anything.
   (free, minimize puts them there; tiled, nothing is put away); and the pools of
   the monitor. The icons rise like buoys as the mouse passes; one pressed dips
   and rings the water, and goes to its window (the next one, pressed again) or
-  starts the program.
+  starts the program. Its name shows over it; held a moment, its windows rise
+  from the water as live previews; a coral drop says what is unread (Marea tells
+  it); a file dropped on it opens with it. Right click: keep it on the shore or
+  let it go, and close its windows; drag it out of the shore and it bursts into
+  drops, unpinned (`session.conf` keeps what you pin).
 - **Windows are born from the water**: a window that opens comes out of the
   nearest edge of the monitor as a black drop, hanging by a neck, and spreads
   into its place —the same water [Marea] comes out of—.

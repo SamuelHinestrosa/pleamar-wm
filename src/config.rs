@@ -170,6 +170,36 @@ impl Config {
     }
 }
 
+/// Writes the `dock` line of session.conf: where the first one was (the
+/// others gone), or at the end. Nothing else of the file changes.
+pub fn write_dock(pins: &[String]) {
+    let Some(dir) = user_dir() else { return };
+    let path = format!("{dir}/session.conf");
+    let text = std::fs::read_to_string(&path).unwrap_or_default();
+    let line = format!("dock {}", pins.join(" "));
+    let mut out: Vec<String> = Vec::new();
+    let mut put = false;
+    for l in text.lines() {
+        if l.trim_start().starts_with("dock ") || l.trim() == "dock" {
+            if !put {
+                if !pins.is_empty() {
+                    out.push(line.clone());
+                }
+                put = true;
+            }
+            continue;
+        }
+        out.push(l.to_owned());
+    }
+    if !put && !pins.is_empty() {
+        out.push(line);
+    }
+    let _ = std::fs::create_dir_all(&dir);
+    if let Err(e) = std::fs::write(&path, out.join("\n") + "\n") {
+        eprintln!("config · could not write {path}: {e}");
+    }
+}
+
 /// The session's configuration, read once.
 pub fn get() -> &'static Config {
     static CONFIG: OnceLock<Config> = OnceLock::new();

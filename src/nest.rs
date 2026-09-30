@@ -481,6 +481,9 @@ struct State {
     /// their frame is ready and are told when it is no longer read.
     syncobj: Option<DrmSyncobjState>,
     next_number: u64,
+    /// The programs pinned to the dock, as `dock …` says; pinning or unpinning
+    /// from the dock changes them, and that line of session.conf.
+    pins: Vec<String>,
     // The usual protocols: activation (a program that asks for its window to
     // come forward), the middle-click selection and clipboard managers,
     // idleness, virtual keyboards and input methods, pointer lock (games),
@@ -714,6 +717,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         lent: HashMap::new(),
         syncobj: None,
         next_number: 0,
+        pins: crate::config::get().dock.clone(),
         socket: socket.clone(),
         x_display: None,
         x_starting: false,
@@ -942,6 +946,7 @@ impl State {
                 }
             }
             ToNest::Launch(command) => self.launch(&command),
+            ToNest::Pin(program, yes) => self.pin(&program, yes),
             // Its workspace is no longer shown: nobody has the keyboard.
             ToNest::Blur => self.set_focus(None),
             ToNest::Minimize(slot, yes) => self.set_minimized(slot, yes),
@@ -1211,7 +1216,8 @@ impl State {
             h.done();
         }
         self.tell(NestEvent::App(slot, app.clone()));
-        self.tell(NestEvent::Icon(slot, crate::desktop::icon_for(&app)));
+        let (icon, name, exec) = crate::desktop::program(&app);
+        self.tell(NestEvent::Program { slot, icon, name, exec });
         self.apply_rules(slot);
     }
 
@@ -1240,6 +1246,24 @@ impl State {
     }
 
     /// A program, started so that it opens here and not on the desktop.
+    /// A program pinned to the dock or unpinned: the dock is told again, and
+    /// session.conf keeps it (its `dock` line, the rest of the file as it was).
+    fn pin(&mut self, program: &str, yes: bool) {
+        let p = program.to_lowercase();
+        let known = |w: &String| crate::desktop::pin(w).keys.iter().any(|k| *k == p);
+        if yes {
+            if !self.pins.iter().any(known) {
+                self.pins.push(program.to_owned());
+            }
+        } else {
+            self.pins.retain(|w| !known(w));
+        }
+        println!("windows · the dock pins: {}", self.pins.join(" "));
+        let pins = self.pins.iter().map(|w| crate::desktop::pin(w)).collect();
+        self.tell(NestEvent::Dock(pins));
+        crate::config::write_dock(&self.pins);
+    }
+
     fn launch(&self, command: &str) {
         let mut c = std::process::Command::new("sh");
         c.arg("-c").arg(command);
@@ -1267,7 +1291,9 @@ impl State {
             if let Some(scene) = SCENE.get() {
                 let link = format!("{own}/wm.sock");
                 let _ = std::fs::remove_file(&link);
-                let _ = std::os::unix::fs::symlink(format!("{dir}/pleamar/{scene}.sock"), &link);
+                // Where the scene listens: its own place, if it has one (headless).
+                let scenes = std::env::var("PLEAMAR_SOCKETS").ok().filter(|d| !d.is_empty()).unwrap_or_else(|| format!("{dir}/pleamar"));
+                let _ = std::os::unix::fs::symlink(format!("{scenes}/{scene}.sock"), &link);
             }
             c.env("PLEAMAR_SOCKETS", own);
         }
@@ -1934,10 +1960,10 @@ impl State {
         self.slots[slot] = Some(Window { toplevel, surface, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen, shown: None, listed, fullscreen: false, dialog: false, floating: false, ruled: None, minimized: false, was_at: 0, home: None });
         self.order.push(slot);
         layers::set_private(slot, false);
-        let icon = (!app.is_empty()).then(|| crate::desktop::icon_for(&app));
+        let program = (!app.is_empty()).then(|| crate::desktop::program(&app));
         self.tell(NestEvent::Opened { slot, title, app, screen });
-        if let Some(icon) = icon {
-            self.tell(NestEvent::Icon(slot, icon));
+        if let Some((icon, name, exec)) = program {
+            self.tell(NestEvent::Program { slot, icon, name, exec });
         }
         self.tell(NestEvent::Order(self.order.clone()));
         self.apply_rules(slot);

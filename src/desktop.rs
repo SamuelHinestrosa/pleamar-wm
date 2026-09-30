@@ -82,17 +82,19 @@ pub fn pin(word: &str) -> DockPin {
                 keys.push(bin.to_lowercase());
             }
             keys.dedup();
-            DockPin { keys, icon: if e.icon.is_empty() { w } else { e.icon.clone() }, exec: e.exec.clone() }
+            DockPin { keys, icon: if e.icon.is_empty() { w } else { e.icon.clone() }, exec: e.exec.clone(), name: e.name.clone() }
         }
-        None => DockPin { keys: vec![w.clone()], icon: w.clone(), exec: word.to_owned() },
+        None => DockPin { keys: vec![w.clone()], icon: w.clone(), exec: word.to_owned(), name: word.to_owned() },
     }
 }
 
 /// The icon of the program whose windows say that app id (or class).
-/// Nothing installed says it: the generic one, not an empty space.
-pub fn icon_for(app: &str) -> String {
+/// The program whose windows say that app id (or class): its icon —the
+/// generic one if nothing installed says it, not an empty space—, its name
+/// and how it starts.
+pub fn program(app: &str) -> (String, String, String) {
     match find(app) {
-        Some(e) if !e.icon.is_empty() => e.icon.clone(),
-        _ => "application-x-executable".to_owned(),
+        Some(e) => (if e.icon.is_empty() { "application-x-executable".to_owned() } else { e.icon.clone() }, e.name.clone(), e.exec.clone()),
+        None => ("application-x-executable".to_owned(), app.to_owned(), String::new()),
     }
 }

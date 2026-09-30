@@ -631,78 +631,354 @@ scene Session {
         text "8" { at: (dk.px.0 + 7 * 26 + 13), dk.cy.0; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 7 < dk.p.0 and win.shown.0 == 8 }
         zone ellipse dkpool.7.0 { at: (dk.px.0 + 7 * 26 + 13), dk.cy.0; radius: 12; cursor: pointer; active: shore.0 > 0.6 and 7 < dk.p.0 and not overview }
     }
-    on press dockz.0.0 {
+    on press dockz.0.0 { impulse buoy.0.0 -9 }
+    on drag dockz.0.0 while dkdrag.0 < 0 {
+        dkdrag.0 = 0
+        pv.0 = -1
+    }
+    on release dockz.0.0 while dkdrag.0 < 0 {
         dock 0 on 0
-        impulse buoy.0.0 -9
+        pv.0 = -1
         ring.0.0: 0 ~0ms
         ring.0.0: 1 ~760ms after 16ms
     }
-    on press dockz.1.0 {
+    on release dockz.0.0 while dkdrag.0 == 0 and mouse.y < dk.cy.0 - 110 and win.dock.0.0.pinned > 0.5 {
+        dock 0 on 0 unpin
+        poofx.0 = mouse.x
+        poofy.0 = mouse.y
+        poof.0: 0 ~0ms
+        poof.0: 1 ~700ms after 16ms
+    }
+    on release dockz.0.0 { dkdrag.0 = -1 }
+    on drop dockz.0.0 {
+        dock 0 on 0 with drop
+        ring.0.0: 0 ~0ms
+        ring.0.0: 1 ~760ms after 16ms
+    }
+    on press right dockz.0.0 {
+        dmenu.0 = 0
+        pv.0 = -1
+    }
+    on hover dockz.0.0 for 450ms while dkdrag.0 < 0 and dmenu.0 < 0 and win.dock.0.0.windows > 0 { pv.0 = 0 }
+    on press dockz.1.0 { impulse buoy.0.1 -9 }
+    on drag dockz.1.0 while dkdrag.0 < 0 {
+        dkdrag.0 = 1
+        pv.0 = -1
+    }
+    on release dockz.1.0 while dkdrag.0 < 0 {
         dock 1 on 0
-        impulse buoy.0.1 -9
+        pv.0 = -1
         ring.0.1: 0 ~0ms
         ring.0.1: 1 ~760ms after 16ms
     }
-    on press dockz.2.0 {
+    on release dockz.1.0 while dkdrag.0 == 1 and mouse.y < dk.cy.0 - 110 and win.dock.0.1.pinned > 0.5 {
+        dock 1 on 0 unpin
+        poofx.0 = mouse.x
+        poofy.0 = mouse.y
+        poof.0: 0 ~0ms
+        poof.0: 1 ~700ms after 16ms
+    }
+    on release dockz.1.0 { dkdrag.0 = -1 }
+    on drop dockz.1.0 {
+        dock 1 on 0 with drop
+        ring.0.1: 0 ~0ms
+        ring.0.1: 1 ~760ms after 16ms
+    }
+    on press right dockz.1.0 {
+        dmenu.0 = 1
+        pv.0 = -1
+    }
+    on hover dockz.1.0 for 450ms while dkdrag.0 < 0 and dmenu.0 < 0 and win.dock.0.1.windows > 0 { pv.0 = 1 }
+    on press dockz.2.0 { impulse buoy.0.2 -9 }
+    on drag dockz.2.0 while dkdrag.0 < 0 {
+        dkdrag.0 = 2
+        pv.0 = -1
+    }
+    on release dockz.2.0 while dkdrag.0 < 0 {
         dock 2 on 0
-        impulse buoy.0.2 -9
+        pv.0 = -1
         ring.0.2: 0 ~0ms
         ring.0.2: 1 ~760ms after 16ms
     }
-    on press dockz.3.0 {
+    on release dockz.2.0 while dkdrag.0 == 2 and mouse.y < dk.cy.0 - 110 and win.dock.0.2.pinned > 0.5 {
+        dock 2 on 0 unpin
+        poofx.0 = mouse.x
+        poofy.0 = mouse.y
+        poof.0: 0 ~0ms
+        poof.0: 1 ~700ms after 16ms
+    }
+    on release dockz.2.0 { dkdrag.0 = -1 }
+    on drop dockz.2.0 {
+        dock 2 on 0 with drop
+        ring.0.2: 0 ~0ms
+        ring.0.2: 1 ~760ms after 16ms
+    }
+    on press right dockz.2.0 {
+        dmenu.0 = 2
+        pv.0 = -1
+    }
+    on hover dockz.2.0 for 450ms while dkdrag.0 < 0 and dmenu.0 < 0 and win.dock.0.2.windows > 0 { pv.0 = 2 }
+    on press dockz.3.0 { impulse buoy.0.3 -9 }
+    on drag dockz.3.0 while dkdrag.0 < 0 {
+        dkdrag.0 = 3
+        pv.0 = -1
+    }
+    on release dockz.3.0 while dkdrag.0 < 0 {
         dock 3 on 0
-        impulse buoy.0.3 -9
+        pv.0 = -1
         ring.0.3: 0 ~0ms
         ring.0.3: 1 ~760ms after 16ms
     }
-    on press dockz.4.0 {
+    on release dockz.3.0 while dkdrag.0 == 3 and mouse.y < dk.cy.0 - 110 and win.dock.0.3.pinned > 0.5 {
+        dock 3 on 0 unpin
+        poofx.0 = mouse.x
+        poofy.0 = mouse.y
+        poof.0: 0 ~0ms
+        poof.0: 1 ~700ms after 16ms
+    }
+    on release dockz.3.0 { dkdrag.0 = -1 }
+    on drop dockz.3.0 {
+        dock 3 on 0 with drop
+        ring.0.3: 0 ~0ms
+        ring.0.3: 1 ~760ms after 16ms
+    }
+    on press right dockz.3.0 {
+        dmenu.0 = 3
+        pv.0 = -1
+    }
+    on hover dockz.3.0 for 450ms while dkdrag.0 < 0 and dmenu.0 < 0 and win.dock.0.3.windows > 0 { pv.0 = 3 }
+    on press dockz.4.0 { impulse buoy.0.4 -9 }
+    on drag dockz.4.0 while dkdrag.0 < 0 {
+        dkdrag.0 = 4
+        pv.0 = -1
+    }
+    on release dockz.4.0 while dkdrag.0 < 0 {
         dock 4 on 0
-        impulse buoy.0.4 -9
+        pv.0 = -1
         ring.0.4: 0 ~0ms
         ring.0.4: 1 ~760ms after 16ms
     }
-    on press dockz.5.0 {
+    on release dockz.4.0 while dkdrag.0 == 4 and mouse.y < dk.cy.0 - 110 and win.dock.0.4.pinned > 0.5 {
+        dock 4 on 0 unpin
+        poofx.0 = mouse.x
+        poofy.0 = mouse.y
+        poof.0: 0 ~0ms
+        poof.0: 1 ~700ms after 16ms
+    }
+    on release dockz.4.0 { dkdrag.0 = -1 }
+    on drop dockz.4.0 {
+        dock 4 on 0 with drop
+        ring.0.4: 0 ~0ms
+        ring.0.4: 1 ~760ms after 16ms
+    }
+    on press right dockz.4.0 {
+        dmenu.0 = 4
+        pv.0 = -1
+    }
+    on hover dockz.4.0 for 450ms while dkdrag.0 < 0 and dmenu.0 < 0 and win.dock.0.4.windows > 0 { pv.0 = 4 }
+    on press dockz.5.0 { impulse buoy.0.5 -9 }
+    on drag dockz.5.0 while dkdrag.0 < 0 {
+        dkdrag.0 = 5
+        pv.0 = -1
+    }
+    on release dockz.5.0 while dkdrag.0 < 0 {
         dock 5 on 0
-        impulse buoy.0.5 -9
+        pv.0 = -1
         ring.0.5: 0 ~0ms
         ring.0.5: 1 ~760ms after 16ms
     }
-    on press dockz.6.0 {
+    on release dockz.5.0 while dkdrag.0 == 5 and mouse.y < dk.cy.0 - 110 and win.dock.0.5.pinned > 0.5 {
+        dock 5 on 0 unpin
+        poofx.0 = mouse.x
+        poofy.0 = mouse.y
+        poof.0: 0 ~0ms
+        poof.0: 1 ~700ms after 16ms
+    }
+    on release dockz.5.0 { dkdrag.0 = -1 }
+    on drop dockz.5.0 {
+        dock 5 on 0 with drop
+        ring.0.5: 0 ~0ms
+        ring.0.5: 1 ~760ms after 16ms
+    }
+    on press right dockz.5.0 {
+        dmenu.0 = 5
+        pv.0 = -1
+    }
+    on hover dockz.5.0 for 450ms while dkdrag.0 < 0 and dmenu.0 < 0 and win.dock.0.5.windows > 0 { pv.0 = 5 }
+    on press dockz.6.0 { impulse buoy.0.6 -9 }
+    on drag dockz.6.0 while dkdrag.0 < 0 {
+        dkdrag.0 = 6
+        pv.0 = -1
+    }
+    on release dockz.6.0 while dkdrag.0 < 0 {
         dock 6 on 0
-        impulse buoy.0.6 -9
+        pv.0 = -1
         ring.0.6: 0 ~0ms
         ring.0.6: 1 ~760ms after 16ms
     }
-    on press dockz.7.0 {
+    on release dockz.6.0 while dkdrag.0 == 6 and mouse.y < dk.cy.0 - 110 and win.dock.0.6.pinned > 0.5 {
+        dock 6 on 0 unpin
+        poofx.0 = mouse.x
+        poofy.0 = mouse.y
+        poof.0: 0 ~0ms
+        poof.0: 1 ~700ms after 16ms
+    }
+    on release dockz.6.0 { dkdrag.0 = -1 }
+    on drop dockz.6.0 {
+        dock 6 on 0 with drop
+        ring.0.6: 0 ~0ms
+        ring.0.6: 1 ~760ms after 16ms
+    }
+    on press right dockz.6.0 {
+        dmenu.0 = 6
+        pv.0 = -1
+    }
+    on hover dockz.6.0 for 450ms while dkdrag.0 < 0 and dmenu.0 < 0 and win.dock.0.6.windows > 0 { pv.0 = 6 }
+    on press dockz.7.0 { impulse buoy.0.7 -9 }
+    on drag dockz.7.0 while dkdrag.0 < 0 {
+        dkdrag.0 = 7
+        pv.0 = -1
+    }
+    on release dockz.7.0 while dkdrag.0 < 0 {
         dock 7 on 0
-        impulse buoy.0.7 -9
+        pv.0 = -1
         ring.0.7: 0 ~0ms
         ring.0.7: 1 ~760ms after 16ms
     }
-    on press dockz.8.0 {
+    on release dockz.7.0 while dkdrag.0 == 7 and mouse.y < dk.cy.0 - 110 and win.dock.0.7.pinned > 0.5 {
+        dock 7 on 0 unpin
+        poofx.0 = mouse.x
+        poofy.0 = mouse.y
+        poof.0: 0 ~0ms
+        poof.0: 1 ~700ms after 16ms
+    }
+    on release dockz.7.0 { dkdrag.0 = -1 }
+    on drop dockz.7.0 {
+        dock 7 on 0 with drop
+        ring.0.7: 0 ~0ms
+        ring.0.7: 1 ~760ms after 16ms
+    }
+    on press right dockz.7.0 {
+        dmenu.0 = 7
+        pv.0 = -1
+    }
+    on hover dockz.7.0 for 450ms while dkdrag.0 < 0 and dmenu.0 < 0 and win.dock.0.7.windows > 0 { pv.0 = 7 }
+    on press dockz.8.0 { impulse buoy.0.8 -9 }
+    on drag dockz.8.0 while dkdrag.0 < 0 {
+        dkdrag.0 = 8
+        pv.0 = -1
+    }
+    on release dockz.8.0 while dkdrag.0 < 0 {
         dock 8 on 0
-        impulse buoy.0.8 -9
+        pv.0 = -1
         ring.0.8: 0 ~0ms
         ring.0.8: 1 ~760ms after 16ms
     }
-    on press dockz.9.0 {
+    on release dockz.8.0 while dkdrag.0 == 8 and mouse.y < dk.cy.0 - 110 and win.dock.0.8.pinned > 0.5 {
+        dock 8 on 0 unpin
+        poofx.0 = mouse.x
+        poofy.0 = mouse.y
+        poof.0: 0 ~0ms
+        poof.0: 1 ~700ms after 16ms
+    }
+    on release dockz.8.0 { dkdrag.0 = -1 }
+    on drop dockz.8.0 {
+        dock 8 on 0 with drop
+        ring.0.8: 0 ~0ms
+        ring.0.8: 1 ~760ms after 16ms
+    }
+    on press right dockz.8.0 {
+        dmenu.0 = 8
+        pv.0 = -1
+    }
+    on hover dockz.8.0 for 450ms while dkdrag.0 < 0 and dmenu.0 < 0 and win.dock.0.8.windows > 0 { pv.0 = 8 }
+    on press dockz.9.0 { impulse buoy.0.9 -9 }
+    on drag dockz.9.0 while dkdrag.0 < 0 {
+        dkdrag.0 = 9
+        pv.0 = -1
+    }
+    on release dockz.9.0 while dkdrag.0 < 0 {
         dock 9 on 0
-        impulse buoy.0.9 -9
+        pv.0 = -1
         ring.0.9: 0 ~0ms
         ring.0.9: 1 ~760ms after 16ms
     }
-    on press dockz.10.0 {
+    on release dockz.9.0 while dkdrag.0 == 9 and mouse.y < dk.cy.0 - 110 and win.dock.0.9.pinned > 0.5 {
+        dock 9 on 0 unpin
+        poofx.0 = mouse.x
+        poofy.0 = mouse.y
+        poof.0: 0 ~0ms
+        poof.0: 1 ~700ms after 16ms
+    }
+    on release dockz.9.0 { dkdrag.0 = -1 }
+    on drop dockz.9.0 {
+        dock 9 on 0 with drop
+        ring.0.9: 0 ~0ms
+        ring.0.9: 1 ~760ms after 16ms
+    }
+    on press right dockz.9.0 {
+        dmenu.0 = 9
+        pv.0 = -1
+    }
+    on hover dockz.9.0 for 450ms while dkdrag.0 < 0 and dmenu.0 < 0 and win.dock.0.9.windows > 0 { pv.0 = 9 }
+    on press dockz.10.0 { impulse buoy.0.10 -9 }
+    on drag dockz.10.0 while dkdrag.0 < 0 {
+        dkdrag.0 = 10
+        pv.0 = -1
+    }
+    on release dockz.10.0 while dkdrag.0 < 0 {
         dock 10 on 0
-        impulse buoy.0.10 -9
+        pv.0 = -1
         ring.0.10: 0 ~0ms
         ring.0.10: 1 ~760ms after 16ms
     }
-    on press dockz.11.0 {
+    on release dockz.10.0 while dkdrag.0 == 10 and mouse.y < dk.cy.0 - 110 and win.dock.0.10.pinned > 0.5 {
+        dock 10 on 0 unpin
+        poofx.0 = mouse.x
+        poofy.0 = mouse.y
+        poof.0: 0 ~0ms
+        poof.0: 1 ~700ms after 16ms
+    }
+    on release dockz.10.0 { dkdrag.0 = -1 }
+    on drop dockz.10.0 {
+        dock 10 on 0 with drop
+        ring.0.10: 0 ~0ms
+        ring.0.10: 1 ~760ms after 16ms
+    }
+    on press right dockz.10.0 {
+        dmenu.0 = 10
+        pv.0 = -1
+    }
+    on hover dockz.10.0 for 450ms while dkdrag.0 < 0 and dmenu.0 < 0 and win.dock.0.10.windows > 0 { pv.0 = 10 }
+    on press dockz.11.0 { impulse buoy.0.11 -9 }
+    on drag dockz.11.0 while dkdrag.0 < 0 {
+        dkdrag.0 = 11
+        pv.0 = -1
+    }
+    on release dockz.11.0 while dkdrag.0 < 0 {
         dock 11 on 0
-        impulse buoy.0.11 -9
+        pv.0 = -1
         ring.0.11: 0 ~0ms
         ring.0.11: 1 ~760ms after 16ms
     }
+    on release dockz.11.0 while dkdrag.0 == 11 and mouse.y < dk.cy.0 - 110 and win.dock.0.11.pinned > 0.5 {
+        dock 11 on 0 unpin
+        poofx.0 = mouse.x
+        poofy.0 = mouse.y
+        poof.0: 0 ~0ms
+        poof.0: 1 ~700ms after 16ms
+    }
+    on release dockz.11.0 { dkdrag.0 = -1 }
+    on drop dockz.11.0 {
+        dock 11 on 0 with drop
+        ring.0.11: 0 ~0ms
+        ring.0.11: 1 ~760ms after 16ms
+    }
+    on press right dockz.11.0 {
+        dmenu.0 = 11
+        pv.0 = -1
+    }
+    on hover dockz.11.0 for 450ms while dkdrag.0 < 0 and dmenu.0 < 0 and win.dock.0.11.windows > 0 { pv.0 = 11 }
     on press dkpool.0.0 { workspace 1 on 0 }
     on press dkpool.1.0 { workspace 2 on 0 }
     on press dkpool.2.0 { workspace 3 on 0 }
@@ -986,78 +1262,354 @@ scene Session {
         text "8" { at: (dk.px.1 + 7 * 26 + 13), dk.cy.1; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 7 < dk.p.1 and win.shown.1 == 8 }
         zone ellipse dkpool.7.1 { at: (dk.px.1 + 7 * 26 + 13), dk.cy.1; radius: 12; cursor: pointer; active: shore.1 > 0.6 and 7 < dk.p.1 and not overview }
     }
-    on press dockz.0.1 {
+    on press dockz.0.1 { impulse buoy.1.0 -9 }
+    on drag dockz.0.1 while dkdrag.1 < 0 {
+        dkdrag.1 = 0
+        pv.1 = -1
+    }
+    on release dockz.0.1 while dkdrag.1 < 0 {
         dock 0 on 1
-        impulse buoy.1.0 -9
+        pv.1 = -1
         ring.1.0: 0 ~0ms
         ring.1.0: 1 ~760ms after 16ms
     }
-    on press dockz.1.1 {
+    on release dockz.0.1 while dkdrag.1 == 0 and mouse.y < dk.cy.1 - 110 and win.dock.1.0.pinned > 0.5 {
+        dock 0 on 1 unpin
+        poofx.1 = mouse.x
+        poofy.1 = mouse.y
+        poof.1: 0 ~0ms
+        poof.1: 1 ~700ms after 16ms
+    }
+    on release dockz.0.1 { dkdrag.1 = -1 }
+    on drop dockz.0.1 {
+        dock 0 on 1 with drop
+        ring.1.0: 0 ~0ms
+        ring.1.0: 1 ~760ms after 16ms
+    }
+    on press right dockz.0.1 {
+        dmenu.1 = 0
+        pv.1 = -1
+    }
+    on hover dockz.0.1 for 450ms while dkdrag.1 < 0 and dmenu.1 < 0 and win.dock.1.0.windows > 0 { pv.1 = 0 }
+    on press dockz.1.1 { impulse buoy.1.1 -9 }
+    on drag dockz.1.1 while dkdrag.1 < 0 {
+        dkdrag.1 = 1
+        pv.1 = -1
+    }
+    on release dockz.1.1 while dkdrag.1 < 0 {
         dock 1 on 1
-        impulse buoy.1.1 -9
+        pv.1 = -1
         ring.1.1: 0 ~0ms
         ring.1.1: 1 ~760ms after 16ms
     }
-    on press dockz.2.1 {
+    on release dockz.1.1 while dkdrag.1 == 1 and mouse.y < dk.cy.1 - 110 and win.dock.1.1.pinned > 0.5 {
+        dock 1 on 1 unpin
+        poofx.1 = mouse.x
+        poofy.1 = mouse.y
+        poof.1: 0 ~0ms
+        poof.1: 1 ~700ms after 16ms
+    }
+    on release dockz.1.1 { dkdrag.1 = -1 }
+    on drop dockz.1.1 {
+        dock 1 on 1 with drop
+        ring.1.1: 0 ~0ms
+        ring.1.1: 1 ~760ms after 16ms
+    }
+    on press right dockz.1.1 {
+        dmenu.1 = 1
+        pv.1 = -1
+    }
+    on hover dockz.1.1 for 450ms while dkdrag.1 < 0 and dmenu.1 < 0 and win.dock.1.1.windows > 0 { pv.1 = 1 }
+    on press dockz.2.1 { impulse buoy.1.2 -9 }
+    on drag dockz.2.1 while dkdrag.1 < 0 {
+        dkdrag.1 = 2
+        pv.1 = -1
+    }
+    on release dockz.2.1 while dkdrag.1 < 0 {
         dock 2 on 1
-        impulse buoy.1.2 -9
+        pv.1 = -1
         ring.1.2: 0 ~0ms
         ring.1.2: 1 ~760ms after 16ms
     }
-    on press dockz.3.1 {
+    on release dockz.2.1 while dkdrag.1 == 2 and mouse.y < dk.cy.1 - 110 and win.dock.1.2.pinned > 0.5 {
+        dock 2 on 1 unpin
+        poofx.1 = mouse.x
+        poofy.1 = mouse.y
+        poof.1: 0 ~0ms
+        poof.1: 1 ~700ms after 16ms
+    }
+    on release dockz.2.1 { dkdrag.1 = -1 }
+    on drop dockz.2.1 {
+        dock 2 on 1 with drop
+        ring.1.2: 0 ~0ms
+        ring.1.2: 1 ~760ms after 16ms
+    }
+    on press right dockz.2.1 {
+        dmenu.1 = 2
+        pv.1 = -1
+    }
+    on hover dockz.2.1 for 450ms while dkdrag.1 < 0 and dmenu.1 < 0 and win.dock.1.2.windows > 0 { pv.1 = 2 }
+    on press dockz.3.1 { impulse buoy.1.3 -9 }
+    on drag dockz.3.1 while dkdrag.1 < 0 {
+        dkdrag.1 = 3
+        pv.1 = -1
+    }
+    on release dockz.3.1 while dkdrag.1 < 0 {
         dock 3 on 1
-        impulse buoy.1.3 -9
+        pv.1 = -1
         ring.1.3: 0 ~0ms
         ring.1.3: 1 ~760ms after 16ms
     }
-    on press dockz.4.1 {
+    on release dockz.3.1 while dkdrag.1 == 3 and mouse.y < dk.cy.1 - 110 and win.dock.1.3.pinned > 0.5 {
+        dock 3 on 1 unpin
+        poofx.1 = mouse.x
+        poofy.1 = mouse.y
+        poof.1: 0 ~0ms
+        poof.1: 1 ~700ms after 16ms
+    }
+    on release dockz.3.1 { dkdrag.1 = -1 }
+    on drop dockz.3.1 {
+        dock 3 on 1 with drop
+        ring.1.3: 0 ~0ms
+        ring.1.3: 1 ~760ms after 16ms
+    }
+    on press right dockz.3.1 {
+        dmenu.1 = 3
+        pv.1 = -1
+    }
+    on hover dockz.3.1 for 450ms while dkdrag.1 < 0 and dmenu.1 < 0 and win.dock.1.3.windows > 0 { pv.1 = 3 }
+    on press dockz.4.1 { impulse buoy.1.4 -9 }
+    on drag dockz.4.1 while dkdrag.1 < 0 {
+        dkdrag.1 = 4
+        pv.1 = -1
+    }
+    on release dockz.4.1 while dkdrag.1 < 0 {
         dock 4 on 1
-        impulse buoy.1.4 -9
+        pv.1 = -1
         ring.1.4: 0 ~0ms
         ring.1.4: 1 ~760ms after 16ms
     }
-    on press dockz.5.1 {
+    on release dockz.4.1 while dkdrag.1 == 4 and mouse.y < dk.cy.1 - 110 and win.dock.1.4.pinned > 0.5 {
+        dock 4 on 1 unpin
+        poofx.1 = mouse.x
+        poofy.1 = mouse.y
+        poof.1: 0 ~0ms
+        poof.1: 1 ~700ms after 16ms
+    }
+    on release dockz.4.1 { dkdrag.1 = -1 }
+    on drop dockz.4.1 {
+        dock 4 on 1 with drop
+        ring.1.4: 0 ~0ms
+        ring.1.4: 1 ~760ms after 16ms
+    }
+    on press right dockz.4.1 {
+        dmenu.1 = 4
+        pv.1 = -1
+    }
+    on hover dockz.4.1 for 450ms while dkdrag.1 < 0 and dmenu.1 < 0 and win.dock.1.4.windows > 0 { pv.1 = 4 }
+    on press dockz.5.1 { impulse buoy.1.5 -9 }
+    on drag dockz.5.1 while dkdrag.1 < 0 {
+        dkdrag.1 = 5
+        pv.1 = -1
+    }
+    on release dockz.5.1 while dkdrag.1 < 0 {
         dock 5 on 1
-        impulse buoy.1.5 -9
+        pv.1 = -1
         ring.1.5: 0 ~0ms
         ring.1.5: 1 ~760ms after 16ms
     }
-    on press dockz.6.1 {
+    on release dockz.5.1 while dkdrag.1 == 5 and mouse.y < dk.cy.1 - 110 and win.dock.1.5.pinned > 0.5 {
+        dock 5 on 1 unpin
+        poofx.1 = mouse.x
+        poofy.1 = mouse.y
+        poof.1: 0 ~0ms
+        poof.1: 1 ~700ms after 16ms
+    }
+    on release dockz.5.1 { dkdrag.1 = -1 }
+    on drop dockz.5.1 {
+        dock 5 on 1 with drop
+        ring.1.5: 0 ~0ms
+        ring.1.5: 1 ~760ms after 16ms
+    }
+    on press right dockz.5.1 {
+        dmenu.1 = 5
+        pv.1 = -1
+    }
+    on hover dockz.5.1 for 450ms while dkdrag.1 < 0 and dmenu.1 < 0 and win.dock.1.5.windows > 0 { pv.1 = 5 }
+    on press dockz.6.1 { impulse buoy.1.6 -9 }
+    on drag dockz.6.1 while dkdrag.1 < 0 {
+        dkdrag.1 = 6
+        pv.1 = -1
+    }
+    on release dockz.6.1 while dkdrag.1 < 0 {
         dock 6 on 1
-        impulse buoy.1.6 -9
+        pv.1 = -1
         ring.1.6: 0 ~0ms
         ring.1.6: 1 ~760ms after 16ms
     }
-    on press dockz.7.1 {
+    on release dockz.6.1 while dkdrag.1 == 6 and mouse.y < dk.cy.1 - 110 and win.dock.1.6.pinned > 0.5 {
+        dock 6 on 1 unpin
+        poofx.1 = mouse.x
+        poofy.1 = mouse.y
+        poof.1: 0 ~0ms
+        poof.1: 1 ~700ms after 16ms
+    }
+    on release dockz.6.1 { dkdrag.1 = -1 }
+    on drop dockz.6.1 {
+        dock 6 on 1 with drop
+        ring.1.6: 0 ~0ms
+        ring.1.6: 1 ~760ms after 16ms
+    }
+    on press right dockz.6.1 {
+        dmenu.1 = 6
+        pv.1 = -1
+    }
+    on hover dockz.6.1 for 450ms while dkdrag.1 < 0 and dmenu.1 < 0 and win.dock.1.6.windows > 0 { pv.1 = 6 }
+    on press dockz.7.1 { impulse buoy.1.7 -9 }
+    on drag dockz.7.1 while dkdrag.1 < 0 {
+        dkdrag.1 = 7
+        pv.1 = -1
+    }
+    on release dockz.7.1 while dkdrag.1 < 0 {
         dock 7 on 1
-        impulse buoy.1.7 -9
+        pv.1 = -1
         ring.1.7: 0 ~0ms
         ring.1.7: 1 ~760ms after 16ms
     }
-    on press dockz.8.1 {
+    on release dockz.7.1 while dkdrag.1 == 7 and mouse.y < dk.cy.1 - 110 and win.dock.1.7.pinned > 0.5 {
+        dock 7 on 1 unpin
+        poofx.1 = mouse.x
+        poofy.1 = mouse.y
+        poof.1: 0 ~0ms
+        poof.1: 1 ~700ms after 16ms
+    }
+    on release dockz.7.1 { dkdrag.1 = -1 }
+    on drop dockz.7.1 {
+        dock 7 on 1 with drop
+        ring.1.7: 0 ~0ms
+        ring.1.7: 1 ~760ms after 16ms
+    }
+    on press right dockz.7.1 {
+        dmenu.1 = 7
+        pv.1 = -1
+    }
+    on hover dockz.7.1 for 450ms while dkdrag.1 < 0 and dmenu.1 < 0 and win.dock.1.7.windows > 0 { pv.1 = 7 }
+    on press dockz.8.1 { impulse buoy.1.8 -9 }
+    on drag dockz.8.1 while dkdrag.1 < 0 {
+        dkdrag.1 = 8
+        pv.1 = -1
+    }
+    on release dockz.8.1 while dkdrag.1 < 0 {
         dock 8 on 1
-        impulse buoy.1.8 -9
+        pv.1 = -1
         ring.1.8: 0 ~0ms
         ring.1.8: 1 ~760ms after 16ms
     }
-    on press dockz.9.1 {
+    on release dockz.8.1 while dkdrag.1 == 8 and mouse.y < dk.cy.1 - 110 and win.dock.1.8.pinned > 0.5 {
+        dock 8 on 1 unpin
+        poofx.1 = mouse.x
+        poofy.1 = mouse.y
+        poof.1: 0 ~0ms
+        poof.1: 1 ~700ms after 16ms
+    }
+    on release dockz.8.1 { dkdrag.1 = -1 }
+    on drop dockz.8.1 {
+        dock 8 on 1 with drop
+        ring.1.8: 0 ~0ms
+        ring.1.8: 1 ~760ms after 16ms
+    }
+    on press right dockz.8.1 {
+        dmenu.1 = 8
+        pv.1 = -1
+    }
+    on hover dockz.8.1 for 450ms while dkdrag.1 < 0 and dmenu.1 < 0 and win.dock.1.8.windows > 0 { pv.1 = 8 }
+    on press dockz.9.1 { impulse buoy.1.9 -9 }
+    on drag dockz.9.1 while dkdrag.1 < 0 {
+        dkdrag.1 = 9
+        pv.1 = -1
+    }
+    on release dockz.9.1 while dkdrag.1 < 0 {
         dock 9 on 1
-        impulse buoy.1.9 -9
+        pv.1 = -1
         ring.1.9: 0 ~0ms
         ring.1.9: 1 ~760ms after 16ms
     }
-    on press dockz.10.1 {
+    on release dockz.9.1 while dkdrag.1 == 9 and mouse.y < dk.cy.1 - 110 and win.dock.1.9.pinned > 0.5 {
+        dock 9 on 1 unpin
+        poofx.1 = mouse.x
+        poofy.1 = mouse.y
+        poof.1: 0 ~0ms
+        poof.1: 1 ~700ms after 16ms
+    }
+    on release dockz.9.1 { dkdrag.1 = -1 }
+    on drop dockz.9.1 {
+        dock 9 on 1 with drop
+        ring.1.9: 0 ~0ms
+        ring.1.9: 1 ~760ms after 16ms
+    }
+    on press right dockz.9.1 {
+        dmenu.1 = 9
+        pv.1 = -1
+    }
+    on hover dockz.9.1 for 450ms while dkdrag.1 < 0 and dmenu.1 < 0 and win.dock.1.9.windows > 0 { pv.1 = 9 }
+    on press dockz.10.1 { impulse buoy.1.10 -9 }
+    on drag dockz.10.1 while dkdrag.1 < 0 {
+        dkdrag.1 = 10
+        pv.1 = -1
+    }
+    on release dockz.10.1 while dkdrag.1 < 0 {
         dock 10 on 1
-        impulse buoy.1.10 -9
+        pv.1 = -1
         ring.1.10: 0 ~0ms
         ring.1.10: 1 ~760ms after 16ms
     }
-    on press dockz.11.1 {
+    on release dockz.10.1 while dkdrag.1 == 10 and mouse.y < dk.cy.1 - 110 and win.dock.1.10.pinned > 0.5 {
+        dock 10 on 1 unpin
+        poofx.1 = mouse.x
+        poofy.1 = mouse.y
+        poof.1: 0 ~0ms
+        poof.1: 1 ~700ms after 16ms
+    }
+    on release dockz.10.1 { dkdrag.1 = -1 }
+    on drop dockz.10.1 {
+        dock 10 on 1 with drop
+        ring.1.10: 0 ~0ms
+        ring.1.10: 1 ~760ms after 16ms
+    }
+    on press right dockz.10.1 {
+        dmenu.1 = 10
+        pv.1 = -1
+    }
+    on hover dockz.10.1 for 450ms while dkdrag.1 < 0 and dmenu.1 < 0 and win.dock.1.10.windows > 0 { pv.1 = 10 }
+    on press dockz.11.1 { impulse buoy.1.11 -9 }
+    on drag dockz.11.1 while dkdrag.1 < 0 {
+        dkdrag.1 = 11
+        pv.1 = -1
+    }
+    on release dockz.11.1 while dkdrag.1 < 0 {
         dock 11 on 1
-        impulse buoy.1.11 -9
+        pv.1 = -1
         ring.1.11: 0 ~0ms
         ring.1.11: 1 ~760ms after 16ms
     }
+    on release dockz.11.1 while dkdrag.1 == 11 and mouse.y < dk.cy.1 - 110 and win.dock.1.11.pinned > 0.5 {
+        dock 11 on 1 unpin
+        poofx.1 = mouse.x
+        poofy.1 = mouse.y
+        poof.1: 0 ~0ms
+        poof.1: 1 ~700ms after 16ms
+    }
+    on release dockz.11.1 { dkdrag.1 = -1 }
+    on drop dockz.11.1 {
+        dock 11 on 1 with drop
+        ring.1.11: 0 ~0ms
+        ring.1.11: 1 ~760ms after 16ms
+    }
+    on press right dockz.11.1 {
+        dmenu.1 = 11
+        pv.1 = -1
+    }
+    on hover dockz.11.1 for 450ms while dkdrag.1 < 0 and dmenu.1 < 0 and win.dock.1.11.windows > 0 { pv.1 = 11 }
     on press dkpool.0.1 { workspace 1 on 1 }
     on press dkpool.1.1 { workspace 2 on 1 }
     on press dkpool.2.1 { workspace 3 on 1 }
@@ -1341,78 +1893,354 @@ scene Session {
         text "8" { at: (dk.px.2 + 7 * 26 + 13), dk.cy.2; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 7 < dk.p.2 and win.shown.2 == 8 }
         zone ellipse dkpool.7.2 { at: (dk.px.2 + 7 * 26 + 13), dk.cy.2; radius: 12; cursor: pointer; active: shore.2 > 0.6 and 7 < dk.p.2 and not overview }
     }
-    on press dockz.0.2 {
+    on press dockz.0.2 { impulse buoy.2.0 -9 }
+    on drag dockz.0.2 while dkdrag.2 < 0 {
+        dkdrag.2 = 0
+        pv.2 = -1
+    }
+    on release dockz.0.2 while dkdrag.2 < 0 {
         dock 0 on 2
-        impulse buoy.2.0 -9
+        pv.2 = -1
         ring.2.0: 0 ~0ms
         ring.2.0: 1 ~760ms after 16ms
     }
-    on press dockz.1.2 {
+    on release dockz.0.2 while dkdrag.2 == 0 and mouse.y < dk.cy.2 - 110 and win.dock.2.0.pinned > 0.5 {
+        dock 0 on 2 unpin
+        poofx.2 = mouse.x
+        poofy.2 = mouse.y
+        poof.2: 0 ~0ms
+        poof.2: 1 ~700ms after 16ms
+    }
+    on release dockz.0.2 { dkdrag.2 = -1 }
+    on drop dockz.0.2 {
+        dock 0 on 2 with drop
+        ring.2.0: 0 ~0ms
+        ring.2.0: 1 ~760ms after 16ms
+    }
+    on press right dockz.0.2 {
+        dmenu.2 = 0
+        pv.2 = -1
+    }
+    on hover dockz.0.2 for 450ms while dkdrag.2 < 0 and dmenu.2 < 0 and win.dock.2.0.windows > 0 { pv.2 = 0 }
+    on press dockz.1.2 { impulse buoy.2.1 -9 }
+    on drag dockz.1.2 while dkdrag.2 < 0 {
+        dkdrag.2 = 1
+        pv.2 = -1
+    }
+    on release dockz.1.2 while dkdrag.2 < 0 {
         dock 1 on 2
-        impulse buoy.2.1 -9
+        pv.2 = -1
         ring.2.1: 0 ~0ms
         ring.2.1: 1 ~760ms after 16ms
     }
-    on press dockz.2.2 {
+    on release dockz.1.2 while dkdrag.2 == 1 and mouse.y < dk.cy.2 - 110 and win.dock.2.1.pinned > 0.5 {
+        dock 1 on 2 unpin
+        poofx.2 = mouse.x
+        poofy.2 = mouse.y
+        poof.2: 0 ~0ms
+        poof.2: 1 ~700ms after 16ms
+    }
+    on release dockz.1.2 { dkdrag.2 = -1 }
+    on drop dockz.1.2 {
+        dock 1 on 2 with drop
+        ring.2.1: 0 ~0ms
+        ring.2.1: 1 ~760ms after 16ms
+    }
+    on press right dockz.1.2 {
+        dmenu.2 = 1
+        pv.2 = -1
+    }
+    on hover dockz.1.2 for 450ms while dkdrag.2 < 0 and dmenu.2 < 0 and win.dock.2.1.windows > 0 { pv.2 = 1 }
+    on press dockz.2.2 { impulse buoy.2.2 -9 }
+    on drag dockz.2.2 while dkdrag.2 < 0 {
+        dkdrag.2 = 2
+        pv.2 = -1
+    }
+    on release dockz.2.2 while dkdrag.2 < 0 {
         dock 2 on 2
-        impulse buoy.2.2 -9
+        pv.2 = -1
         ring.2.2: 0 ~0ms
         ring.2.2: 1 ~760ms after 16ms
     }
-    on press dockz.3.2 {
+    on release dockz.2.2 while dkdrag.2 == 2 and mouse.y < dk.cy.2 - 110 and win.dock.2.2.pinned > 0.5 {
+        dock 2 on 2 unpin
+        poofx.2 = mouse.x
+        poofy.2 = mouse.y
+        poof.2: 0 ~0ms
+        poof.2: 1 ~700ms after 16ms
+    }
+    on release dockz.2.2 { dkdrag.2 = -1 }
+    on drop dockz.2.2 {
+        dock 2 on 2 with drop
+        ring.2.2: 0 ~0ms
+        ring.2.2: 1 ~760ms after 16ms
+    }
+    on press right dockz.2.2 {
+        dmenu.2 = 2
+        pv.2 = -1
+    }
+    on hover dockz.2.2 for 450ms while dkdrag.2 < 0 and dmenu.2 < 0 and win.dock.2.2.windows > 0 { pv.2 = 2 }
+    on press dockz.3.2 { impulse buoy.2.3 -9 }
+    on drag dockz.3.2 while dkdrag.2 < 0 {
+        dkdrag.2 = 3
+        pv.2 = -1
+    }
+    on release dockz.3.2 while dkdrag.2 < 0 {
         dock 3 on 2
-        impulse buoy.2.3 -9
+        pv.2 = -1
         ring.2.3: 0 ~0ms
         ring.2.3: 1 ~760ms after 16ms
     }
-    on press dockz.4.2 {
+    on release dockz.3.2 while dkdrag.2 == 3 and mouse.y < dk.cy.2 - 110 and win.dock.2.3.pinned > 0.5 {
+        dock 3 on 2 unpin
+        poofx.2 = mouse.x
+        poofy.2 = mouse.y
+        poof.2: 0 ~0ms
+        poof.2: 1 ~700ms after 16ms
+    }
+    on release dockz.3.2 { dkdrag.2 = -1 }
+    on drop dockz.3.2 {
+        dock 3 on 2 with drop
+        ring.2.3: 0 ~0ms
+        ring.2.3: 1 ~760ms after 16ms
+    }
+    on press right dockz.3.2 {
+        dmenu.2 = 3
+        pv.2 = -1
+    }
+    on hover dockz.3.2 for 450ms while dkdrag.2 < 0 and dmenu.2 < 0 and win.dock.2.3.windows > 0 { pv.2 = 3 }
+    on press dockz.4.2 { impulse buoy.2.4 -9 }
+    on drag dockz.4.2 while dkdrag.2 < 0 {
+        dkdrag.2 = 4
+        pv.2 = -1
+    }
+    on release dockz.4.2 while dkdrag.2 < 0 {
         dock 4 on 2
-        impulse buoy.2.4 -9
+        pv.2 = -1
         ring.2.4: 0 ~0ms
         ring.2.4: 1 ~760ms after 16ms
     }
-    on press dockz.5.2 {
+    on release dockz.4.2 while dkdrag.2 == 4 and mouse.y < dk.cy.2 - 110 and win.dock.2.4.pinned > 0.5 {
+        dock 4 on 2 unpin
+        poofx.2 = mouse.x
+        poofy.2 = mouse.y
+        poof.2: 0 ~0ms
+        poof.2: 1 ~700ms after 16ms
+    }
+    on release dockz.4.2 { dkdrag.2 = -1 }
+    on drop dockz.4.2 {
+        dock 4 on 2 with drop
+        ring.2.4: 0 ~0ms
+        ring.2.4: 1 ~760ms after 16ms
+    }
+    on press right dockz.4.2 {
+        dmenu.2 = 4
+        pv.2 = -1
+    }
+    on hover dockz.4.2 for 450ms while dkdrag.2 < 0 and dmenu.2 < 0 and win.dock.2.4.windows > 0 { pv.2 = 4 }
+    on press dockz.5.2 { impulse buoy.2.5 -9 }
+    on drag dockz.5.2 while dkdrag.2 < 0 {
+        dkdrag.2 = 5
+        pv.2 = -1
+    }
+    on release dockz.5.2 while dkdrag.2 < 0 {
         dock 5 on 2
-        impulse buoy.2.5 -9
+        pv.2 = -1
         ring.2.5: 0 ~0ms
         ring.2.5: 1 ~760ms after 16ms
     }
-    on press dockz.6.2 {
+    on release dockz.5.2 while dkdrag.2 == 5 and mouse.y < dk.cy.2 - 110 and win.dock.2.5.pinned > 0.5 {
+        dock 5 on 2 unpin
+        poofx.2 = mouse.x
+        poofy.2 = mouse.y
+        poof.2: 0 ~0ms
+        poof.2: 1 ~700ms after 16ms
+    }
+    on release dockz.5.2 { dkdrag.2 = -1 }
+    on drop dockz.5.2 {
+        dock 5 on 2 with drop
+        ring.2.5: 0 ~0ms
+        ring.2.5: 1 ~760ms after 16ms
+    }
+    on press right dockz.5.2 {
+        dmenu.2 = 5
+        pv.2 = -1
+    }
+    on hover dockz.5.2 for 450ms while dkdrag.2 < 0 and dmenu.2 < 0 and win.dock.2.5.windows > 0 { pv.2 = 5 }
+    on press dockz.6.2 { impulse buoy.2.6 -9 }
+    on drag dockz.6.2 while dkdrag.2 < 0 {
+        dkdrag.2 = 6
+        pv.2 = -1
+    }
+    on release dockz.6.2 while dkdrag.2 < 0 {
         dock 6 on 2
-        impulse buoy.2.6 -9
+        pv.2 = -1
         ring.2.6: 0 ~0ms
         ring.2.6: 1 ~760ms after 16ms
     }
-    on press dockz.7.2 {
+    on release dockz.6.2 while dkdrag.2 == 6 and mouse.y < dk.cy.2 - 110 and win.dock.2.6.pinned > 0.5 {
+        dock 6 on 2 unpin
+        poofx.2 = mouse.x
+        poofy.2 = mouse.y
+        poof.2: 0 ~0ms
+        poof.2: 1 ~700ms after 16ms
+    }
+    on release dockz.6.2 { dkdrag.2 = -1 }
+    on drop dockz.6.2 {
+        dock 6 on 2 with drop
+        ring.2.6: 0 ~0ms
+        ring.2.6: 1 ~760ms after 16ms
+    }
+    on press right dockz.6.2 {
+        dmenu.2 = 6
+        pv.2 = -1
+    }
+    on hover dockz.6.2 for 450ms while dkdrag.2 < 0 and dmenu.2 < 0 and win.dock.2.6.windows > 0 { pv.2 = 6 }
+    on press dockz.7.2 { impulse buoy.2.7 -9 }
+    on drag dockz.7.2 while dkdrag.2 < 0 {
+        dkdrag.2 = 7
+        pv.2 = -1
+    }
+    on release dockz.7.2 while dkdrag.2 < 0 {
         dock 7 on 2
-        impulse buoy.2.7 -9
+        pv.2 = -1
         ring.2.7: 0 ~0ms
         ring.2.7: 1 ~760ms after 16ms
     }
-    on press dockz.8.2 {
+    on release dockz.7.2 while dkdrag.2 == 7 and mouse.y < dk.cy.2 - 110 and win.dock.2.7.pinned > 0.5 {
+        dock 7 on 2 unpin
+        poofx.2 = mouse.x
+        poofy.2 = mouse.y
+        poof.2: 0 ~0ms
+        poof.2: 1 ~700ms after 16ms
+    }
+    on release dockz.7.2 { dkdrag.2 = -1 }
+    on drop dockz.7.2 {
+        dock 7 on 2 with drop
+        ring.2.7: 0 ~0ms
+        ring.2.7: 1 ~760ms after 16ms
+    }
+    on press right dockz.7.2 {
+        dmenu.2 = 7
+        pv.2 = -1
+    }
+    on hover dockz.7.2 for 450ms while dkdrag.2 < 0 and dmenu.2 < 0 and win.dock.2.7.windows > 0 { pv.2 = 7 }
+    on press dockz.8.2 { impulse buoy.2.8 -9 }
+    on drag dockz.8.2 while dkdrag.2 < 0 {
+        dkdrag.2 = 8
+        pv.2 = -1
+    }
+    on release dockz.8.2 while dkdrag.2 < 0 {
         dock 8 on 2
-        impulse buoy.2.8 -9
+        pv.2 = -1
         ring.2.8: 0 ~0ms
         ring.2.8: 1 ~760ms after 16ms
     }
-    on press dockz.9.2 {
+    on release dockz.8.2 while dkdrag.2 == 8 and mouse.y < dk.cy.2 - 110 and win.dock.2.8.pinned > 0.5 {
+        dock 8 on 2 unpin
+        poofx.2 = mouse.x
+        poofy.2 = mouse.y
+        poof.2: 0 ~0ms
+        poof.2: 1 ~700ms after 16ms
+    }
+    on release dockz.8.2 { dkdrag.2 = -1 }
+    on drop dockz.8.2 {
+        dock 8 on 2 with drop
+        ring.2.8: 0 ~0ms
+        ring.2.8: 1 ~760ms after 16ms
+    }
+    on press right dockz.8.2 {
+        dmenu.2 = 8
+        pv.2 = -1
+    }
+    on hover dockz.8.2 for 450ms while dkdrag.2 < 0 and dmenu.2 < 0 and win.dock.2.8.windows > 0 { pv.2 = 8 }
+    on press dockz.9.2 { impulse buoy.2.9 -9 }
+    on drag dockz.9.2 while dkdrag.2 < 0 {
+        dkdrag.2 = 9
+        pv.2 = -1
+    }
+    on release dockz.9.2 while dkdrag.2 < 0 {
         dock 9 on 2
-        impulse buoy.2.9 -9
+        pv.2 = -1
         ring.2.9: 0 ~0ms
         ring.2.9: 1 ~760ms after 16ms
     }
-    on press dockz.10.2 {
+    on release dockz.9.2 while dkdrag.2 == 9 and mouse.y < dk.cy.2 - 110 and win.dock.2.9.pinned > 0.5 {
+        dock 9 on 2 unpin
+        poofx.2 = mouse.x
+        poofy.2 = mouse.y
+        poof.2: 0 ~0ms
+        poof.2: 1 ~700ms after 16ms
+    }
+    on release dockz.9.2 { dkdrag.2 = -1 }
+    on drop dockz.9.2 {
+        dock 9 on 2 with drop
+        ring.2.9: 0 ~0ms
+        ring.2.9: 1 ~760ms after 16ms
+    }
+    on press right dockz.9.2 {
+        dmenu.2 = 9
+        pv.2 = -1
+    }
+    on hover dockz.9.2 for 450ms while dkdrag.2 < 0 and dmenu.2 < 0 and win.dock.2.9.windows > 0 { pv.2 = 9 }
+    on press dockz.10.2 { impulse buoy.2.10 -9 }
+    on drag dockz.10.2 while dkdrag.2 < 0 {
+        dkdrag.2 = 10
+        pv.2 = -1
+    }
+    on release dockz.10.2 while dkdrag.2 < 0 {
         dock 10 on 2
-        impulse buoy.2.10 -9
+        pv.2 = -1
         ring.2.10: 0 ~0ms
         ring.2.10: 1 ~760ms after 16ms
     }
-    on press dockz.11.2 {
+    on release dockz.10.2 while dkdrag.2 == 10 and mouse.y < dk.cy.2 - 110 and win.dock.2.10.pinned > 0.5 {
+        dock 10 on 2 unpin
+        poofx.2 = mouse.x
+        poofy.2 = mouse.y
+        poof.2: 0 ~0ms
+        poof.2: 1 ~700ms after 16ms
+    }
+    on release dockz.10.2 { dkdrag.2 = -1 }
+    on drop dockz.10.2 {
+        dock 10 on 2 with drop
+        ring.2.10: 0 ~0ms
+        ring.2.10: 1 ~760ms after 16ms
+    }
+    on press right dockz.10.2 {
+        dmenu.2 = 10
+        pv.2 = -1
+    }
+    on hover dockz.10.2 for 450ms while dkdrag.2 < 0 and dmenu.2 < 0 and win.dock.2.10.windows > 0 { pv.2 = 10 }
+    on press dockz.11.2 { impulse buoy.2.11 -9 }
+    on drag dockz.11.2 while dkdrag.2 < 0 {
+        dkdrag.2 = 11
+        pv.2 = -1
+    }
+    on release dockz.11.2 while dkdrag.2 < 0 {
         dock 11 on 2
-        impulse buoy.2.11 -9
+        pv.2 = -1
         ring.2.11: 0 ~0ms
         ring.2.11: 1 ~760ms after 16ms
     }
+    on release dockz.11.2 while dkdrag.2 == 11 and mouse.y < dk.cy.2 - 110 and win.dock.2.11.pinned > 0.5 {
+        dock 11 on 2 unpin
+        poofx.2 = mouse.x
+        poofy.2 = mouse.y
+        poof.2: 0 ~0ms
+        poof.2: 1 ~700ms after 16ms
+    }
+    on release dockz.11.2 { dkdrag.2 = -1 }
+    on drop dockz.11.2 {
+        dock 11 on 2 with drop
+        ring.2.11: 0 ~0ms
+        ring.2.11: 1 ~760ms after 16ms
+    }
+    on press right dockz.11.2 {
+        dmenu.2 = 11
+        pv.2 = -1
+    }
+    on hover dockz.11.2 for 450ms while dkdrag.2 < 0 and dmenu.2 < 0 and win.dock.2.11.windows > 0 { pv.2 = 11 }
     on press dkpool.0.2 { workspace 1 on 2 }
     on press dkpool.1.2 { workspace 2 on 2 }
     on press dkpool.2.2 { workspace 3 on 2 }
@@ -1696,78 +2524,354 @@ scene Session {
         text "8" { at: (dk.px.3 + 7 * 26 + 13), dk.cy.3; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 7 < dk.p.3 and win.shown.3 == 8 }
         zone ellipse dkpool.7.3 { at: (dk.px.3 + 7 * 26 + 13), dk.cy.3; radius: 12; cursor: pointer; active: shore.3 > 0.6 and 7 < dk.p.3 and not overview }
     }
-    on press dockz.0.3 {
+    on press dockz.0.3 { impulse buoy.3.0 -9 }
+    on drag dockz.0.3 while dkdrag.3 < 0 {
+        dkdrag.3 = 0
+        pv.3 = -1
+    }
+    on release dockz.0.3 while dkdrag.3 < 0 {
         dock 0 on 3
-        impulse buoy.3.0 -9
+        pv.3 = -1
         ring.3.0: 0 ~0ms
         ring.3.0: 1 ~760ms after 16ms
     }
-    on press dockz.1.3 {
+    on release dockz.0.3 while dkdrag.3 == 0 and mouse.y < dk.cy.3 - 110 and win.dock.3.0.pinned > 0.5 {
+        dock 0 on 3 unpin
+        poofx.3 = mouse.x
+        poofy.3 = mouse.y
+        poof.3: 0 ~0ms
+        poof.3: 1 ~700ms after 16ms
+    }
+    on release dockz.0.3 { dkdrag.3 = -1 }
+    on drop dockz.0.3 {
+        dock 0 on 3 with drop
+        ring.3.0: 0 ~0ms
+        ring.3.0: 1 ~760ms after 16ms
+    }
+    on press right dockz.0.3 {
+        dmenu.3 = 0
+        pv.3 = -1
+    }
+    on hover dockz.0.3 for 450ms while dkdrag.3 < 0 and dmenu.3 < 0 and win.dock.3.0.windows > 0 { pv.3 = 0 }
+    on press dockz.1.3 { impulse buoy.3.1 -9 }
+    on drag dockz.1.3 while dkdrag.3 < 0 {
+        dkdrag.3 = 1
+        pv.3 = -1
+    }
+    on release dockz.1.3 while dkdrag.3 < 0 {
         dock 1 on 3
-        impulse buoy.3.1 -9
+        pv.3 = -1
         ring.3.1: 0 ~0ms
         ring.3.1: 1 ~760ms after 16ms
     }
-    on press dockz.2.3 {
+    on release dockz.1.3 while dkdrag.3 == 1 and mouse.y < dk.cy.3 - 110 and win.dock.3.1.pinned > 0.5 {
+        dock 1 on 3 unpin
+        poofx.3 = mouse.x
+        poofy.3 = mouse.y
+        poof.3: 0 ~0ms
+        poof.3: 1 ~700ms after 16ms
+    }
+    on release dockz.1.3 { dkdrag.3 = -1 }
+    on drop dockz.1.3 {
+        dock 1 on 3 with drop
+        ring.3.1: 0 ~0ms
+        ring.3.1: 1 ~760ms after 16ms
+    }
+    on press right dockz.1.3 {
+        dmenu.3 = 1
+        pv.3 = -1
+    }
+    on hover dockz.1.3 for 450ms while dkdrag.3 < 0 and dmenu.3 < 0 and win.dock.3.1.windows > 0 { pv.3 = 1 }
+    on press dockz.2.3 { impulse buoy.3.2 -9 }
+    on drag dockz.2.3 while dkdrag.3 < 0 {
+        dkdrag.3 = 2
+        pv.3 = -1
+    }
+    on release dockz.2.3 while dkdrag.3 < 0 {
         dock 2 on 3
-        impulse buoy.3.2 -9
+        pv.3 = -1
         ring.3.2: 0 ~0ms
         ring.3.2: 1 ~760ms after 16ms
     }
-    on press dockz.3.3 {
+    on release dockz.2.3 while dkdrag.3 == 2 and mouse.y < dk.cy.3 - 110 and win.dock.3.2.pinned > 0.5 {
+        dock 2 on 3 unpin
+        poofx.3 = mouse.x
+        poofy.3 = mouse.y
+        poof.3: 0 ~0ms
+        poof.3: 1 ~700ms after 16ms
+    }
+    on release dockz.2.3 { dkdrag.3 = -1 }
+    on drop dockz.2.3 {
+        dock 2 on 3 with drop
+        ring.3.2: 0 ~0ms
+        ring.3.2: 1 ~760ms after 16ms
+    }
+    on press right dockz.2.3 {
+        dmenu.3 = 2
+        pv.3 = -1
+    }
+    on hover dockz.2.3 for 450ms while dkdrag.3 < 0 and dmenu.3 < 0 and win.dock.3.2.windows > 0 { pv.3 = 2 }
+    on press dockz.3.3 { impulse buoy.3.3 -9 }
+    on drag dockz.3.3 while dkdrag.3 < 0 {
+        dkdrag.3 = 3
+        pv.3 = -1
+    }
+    on release dockz.3.3 while dkdrag.3 < 0 {
         dock 3 on 3
-        impulse buoy.3.3 -9
+        pv.3 = -1
         ring.3.3: 0 ~0ms
         ring.3.3: 1 ~760ms after 16ms
     }
-    on press dockz.4.3 {
+    on release dockz.3.3 while dkdrag.3 == 3 and mouse.y < dk.cy.3 - 110 and win.dock.3.3.pinned > 0.5 {
+        dock 3 on 3 unpin
+        poofx.3 = mouse.x
+        poofy.3 = mouse.y
+        poof.3: 0 ~0ms
+        poof.3: 1 ~700ms after 16ms
+    }
+    on release dockz.3.3 { dkdrag.3 = -1 }
+    on drop dockz.3.3 {
+        dock 3 on 3 with drop
+        ring.3.3: 0 ~0ms
+        ring.3.3: 1 ~760ms after 16ms
+    }
+    on press right dockz.3.3 {
+        dmenu.3 = 3
+        pv.3 = -1
+    }
+    on hover dockz.3.3 for 450ms while dkdrag.3 < 0 and dmenu.3 < 0 and win.dock.3.3.windows > 0 { pv.3 = 3 }
+    on press dockz.4.3 { impulse buoy.3.4 -9 }
+    on drag dockz.4.3 while dkdrag.3 < 0 {
+        dkdrag.3 = 4
+        pv.3 = -1
+    }
+    on release dockz.4.3 while dkdrag.3 < 0 {
         dock 4 on 3
-        impulse buoy.3.4 -9
+        pv.3 = -1
         ring.3.4: 0 ~0ms
         ring.3.4: 1 ~760ms after 16ms
     }
-    on press dockz.5.3 {
+    on release dockz.4.3 while dkdrag.3 == 4 and mouse.y < dk.cy.3 - 110 and win.dock.3.4.pinned > 0.5 {
+        dock 4 on 3 unpin
+        poofx.3 = mouse.x
+        poofy.3 = mouse.y
+        poof.3: 0 ~0ms
+        poof.3: 1 ~700ms after 16ms
+    }
+    on release dockz.4.3 { dkdrag.3 = -1 }
+    on drop dockz.4.3 {
+        dock 4 on 3 with drop
+        ring.3.4: 0 ~0ms
+        ring.3.4: 1 ~760ms after 16ms
+    }
+    on press right dockz.4.3 {
+        dmenu.3 = 4
+        pv.3 = -1
+    }
+    on hover dockz.4.3 for 450ms while dkdrag.3 < 0 and dmenu.3 < 0 and win.dock.3.4.windows > 0 { pv.3 = 4 }
+    on press dockz.5.3 { impulse buoy.3.5 -9 }
+    on drag dockz.5.3 while dkdrag.3 < 0 {
+        dkdrag.3 = 5
+        pv.3 = -1
+    }
+    on release dockz.5.3 while dkdrag.3 < 0 {
         dock 5 on 3
-        impulse buoy.3.5 -9
+        pv.3 = -1
         ring.3.5: 0 ~0ms
         ring.3.5: 1 ~760ms after 16ms
     }
-    on press dockz.6.3 {
+    on release dockz.5.3 while dkdrag.3 == 5 and mouse.y < dk.cy.3 - 110 and win.dock.3.5.pinned > 0.5 {
+        dock 5 on 3 unpin
+        poofx.3 = mouse.x
+        poofy.3 = mouse.y
+        poof.3: 0 ~0ms
+        poof.3: 1 ~700ms after 16ms
+    }
+    on release dockz.5.3 { dkdrag.3 = -1 }
+    on drop dockz.5.3 {
+        dock 5 on 3 with drop
+        ring.3.5: 0 ~0ms
+        ring.3.5: 1 ~760ms after 16ms
+    }
+    on press right dockz.5.3 {
+        dmenu.3 = 5
+        pv.3 = -1
+    }
+    on hover dockz.5.3 for 450ms while dkdrag.3 < 0 and dmenu.3 < 0 and win.dock.3.5.windows > 0 { pv.3 = 5 }
+    on press dockz.6.3 { impulse buoy.3.6 -9 }
+    on drag dockz.6.3 while dkdrag.3 < 0 {
+        dkdrag.3 = 6
+        pv.3 = -1
+    }
+    on release dockz.6.3 while dkdrag.3 < 0 {
         dock 6 on 3
-        impulse buoy.3.6 -9
+        pv.3 = -1
         ring.3.6: 0 ~0ms
         ring.3.6: 1 ~760ms after 16ms
     }
-    on press dockz.7.3 {
+    on release dockz.6.3 while dkdrag.3 == 6 and mouse.y < dk.cy.3 - 110 and win.dock.3.6.pinned > 0.5 {
+        dock 6 on 3 unpin
+        poofx.3 = mouse.x
+        poofy.3 = mouse.y
+        poof.3: 0 ~0ms
+        poof.3: 1 ~700ms after 16ms
+    }
+    on release dockz.6.3 { dkdrag.3 = -1 }
+    on drop dockz.6.3 {
+        dock 6 on 3 with drop
+        ring.3.6: 0 ~0ms
+        ring.3.6: 1 ~760ms after 16ms
+    }
+    on press right dockz.6.3 {
+        dmenu.3 = 6
+        pv.3 = -1
+    }
+    on hover dockz.6.3 for 450ms while dkdrag.3 < 0 and dmenu.3 < 0 and win.dock.3.6.windows > 0 { pv.3 = 6 }
+    on press dockz.7.3 { impulse buoy.3.7 -9 }
+    on drag dockz.7.3 while dkdrag.3 < 0 {
+        dkdrag.3 = 7
+        pv.3 = -1
+    }
+    on release dockz.7.3 while dkdrag.3 < 0 {
         dock 7 on 3
-        impulse buoy.3.7 -9
+        pv.3 = -1
         ring.3.7: 0 ~0ms
         ring.3.7: 1 ~760ms after 16ms
     }
-    on press dockz.8.3 {
+    on release dockz.7.3 while dkdrag.3 == 7 and mouse.y < dk.cy.3 - 110 and win.dock.3.7.pinned > 0.5 {
+        dock 7 on 3 unpin
+        poofx.3 = mouse.x
+        poofy.3 = mouse.y
+        poof.3: 0 ~0ms
+        poof.3: 1 ~700ms after 16ms
+    }
+    on release dockz.7.3 { dkdrag.3 = -1 }
+    on drop dockz.7.3 {
+        dock 7 on 3 with drop
+        ring.3.7: 0 ~0ms
+        ring.3.7: 1 ~760ms after 16ms
+    }
+    on press right dockz.7.3 {
+        dmenu.3 = 7
+        pv.3 = -1
+    }
+    on hover dockz.7.3 for 450ms while dkdrag.3 < 0 and dmenu.3 < 0 and win.dock.3.7.windows > 0 { pv.3 = 7 }
+    on press dockz.8.3 { impulse buoy.3.8 -9 }
+    on drag dockz.8.3 while dkdrag.3 < 0 {
+        dkdrag.3 = 8
+        pv.3 = -1
+    }
+    on release dockz.8.3 while dkdrag.3 < 0 {
         dock 8 on 3
-        impulse buoy.3.8 -9
+        pv.3 = -1
         ring.3.8: 0 ~0ms
         ring.3.8: 1 ~760ms after 16ms
     }
-    on press dockz.9.3 {
+    on release dockz.8.3 while dkdrag.3 == 8 and mouse.y < dk.cy.3 - 110 and win.dock.3.8.pinned > 0.5 {
+        dock 8 on 3 unpin
+        poofx.3 = mouse.x
+        poofy.3 = mouse.y
+        poof.3: 0 ~0ms
+        poof.3: 1 ~700ms after 16ms
+    }
+    on release dockz.8.3 { dkdrag.3 = -1 }
+    on drop dockz.8.3 {
+        dock 8 on 3 with drop
+        ring.3.8: 0 ~0ms
+        ring.3.8: 1 ~760ms after 16ms
+    }
+    on press right dockz.8.3 {
+        dmenu.3 = 8
+        pv.3 = -1
+    }
+    on hover dockz.8.3 for 450ms while dkdrag.3 < 0 and dmenu.3 < 0 and win.dock.3.8.windows > 0 { pv.3 = 8 }
+    on press dockz.9.3 { impulse buoy.3.9 -9 }
+    on drag dockz.9.3 while dkdrag.3 < 0 {
+        dkdrag.3 = 9
+        pv.3 = -1
+    }
+    on release dockz.9.3 while dkdrag.3 < 0 {
         dock 9 on 3
-        impulse buoy.3.9 -9
+        pv.3 = -1
         ring.3.9: 0 ~0ms
         ring.3.9: 1 ~760ms after 16ms
     }
-    on press dockz.10.3 {
+    on release dockz.9.3 while dkdrag.3 == 9 and mouse.y < dk.cy.3 - 110 and win.dock.3.9.pinned > 0.5 {
+        dock 9 on 3 unpin
+        poofx.3 = mouse.x
+        poofy.3 = mouse.y
+        poof.3: 0 ~0ms
+        poof.3: 1 ~700ms after 16ms
+    }
+    on release dockz.9.3 { dkdrag.3 = -1 }
+    on drop dockz.9.3 {
+        dock 9 on 3 with drop
+        ring.3.9: 0 ~0ms
+        ring.3.9: 1 ~760ms after 16ms
+    }
+    on press right dockz.9.3 {
+        dmenu.3 = 9
+        pv.3 = -1
+    }
+    on hover dockz.9.3 for 450ms while dkdrag.3 < 0 and dmenu.3 < 0 and win.dock.3.9.windows > 0 { pv.3 = 9 }
+    on press dockz.10.3 { impulse buoy.3.10 -9 }
+    on drag dockz.10.3 while dkdrag.3 < 0 {
+        dkdrag.3 = 10
+        pv.3 = -1
+    }
+    on release dockz.10.3 while dkdrag.3 < 0 {
         dock 10 on 3
-        impulse buoy.3.10 -9
+        pv.3 = -1
         ring.3.10: 0 ~0ms
         ring.3.10: 1 ~760ms after 16ms
     }
-    on press dockz.11.3 {
+    on release dockz.10.3 while dkdrag.3 == 10 and mouse.y < dk.cy.3 - 110 and win.dock.3.10.pinned > 0.5 {
+        dock 10 on 3 unpin
+        poofx.3 = mouse.x
+        poofy.3 = mouse.y
+        poof.3: 0 ~0ms
+        poof.3: 1 ~700ms after 16ms
+    }
+    on release dockz.10.3 { dkdrag.3 = -1 }
+    on drop dockz.10.3 {
+        dock 10 on 3 with drop
+        ring.3.10: 0 ~0ms
+        ring.3.10: 1 ~760ms after 16ms
+    }
+    on press right dockz.10.3 {
+        dmenu.3 = 10
+        pv.3 = -1
+    }
+    on hover dockz.10.3 for 450ms while dkdrag.3 < 0 and dmenu.3 < 0 and win.dock.3.10.windows > 0 { pv.3 = 10 }
+    on press dockz.11.3 { impulse buoy.3.11 -9 }
+    on drag dockz.11.3 while dkdrag.3 < 0 {
+        dkdrag.3 = 11
+        pv.3 = -1
+    }
+    on release dockz.11.3 while dkdrag.3 < 0 {
         dock 11 on 3
-        impulse buoy.3.11 -9
+        pv.3 = -1
         ring.3.11: 0 ~0ms
         ring.3.11: 1 ~760ms after 16ms
     }
+    on release dockz.11.3 while dkdrag.3 == 11 and mouse.y < dk.cy.3 - 110 and win.dock.3.11.pinned > 0.5 {
+        dock 11 on 3 unpin
+        poofx.3 = mouse.x
+        poofy.3 = mouse.y
+        poof.3: 0 ~0ms
+        poof.3: 1 ~700ms after 16ms
+    }
+    on release dockz.11.3 { dkdrag.3 = -1 }
+    on drop dockz.11.3 {
+        dock 11 on 3 with drop
+        ring.3.11: 0 ~0ms
+        ring.3.11: 1 ~760ms after 16ms
+    }
+    on press right dockz.11.3 {
+        dmenu.3 = 11
+        pv.3 = -1
+    }
+    on hover dockz.11.3 for 450ms while dkdrag.3 < 0 and dmenu.3 < 0 and win.dock.3.11.windows > 0 { pv.3 = 11 }
     on press dkpool.0.3 { workspace 1 on 3 }
     on press dkpool.1.3 { workspace 2 on 3 }
     on press dkpool.2.3 { workspace 3 on 3 }
@@ -1776,6 +2880,1971 @@ scene Session {
     on press dkpool.5.3 { workspace 6 on 3 }
     on press dkpool.6.3 { workspace 7 on 3 }
     on press dkpool.7.3 { workspace 8 on 3 }
+
+    // Monitor 0's shore: the item being carried out of it, the one whose
+    // windows rise from the water, the one whose menu is open.
+    fact dkdrag.0 = -1
+    fact pv.0 = -1
+    fact dmenu.0 = -1
+    fact poofx.0 = 0
+    fact poofy.0 = 0
+    prop poof.0 = 1 ~700ms
+    prop pvup.0 = 0 ~pop
+    follow pvup.0 = if(pv.0 >= 0, 1, 0)
+    prop mnup.0 = 0 ~pop
+    follow mnup.0 = if(dmenu.0 >= 0, 1, 0)
+    let dk.hk.0 = clamp(floor(dk.t.0 + 0.5), 0, 11)
+    // The previews: as wide as there are windows of that item, over its icon.
+    let pv.n.0 = pick(max(pv.0, 0), win.dock.0.0.windows, win.dock.0.1.windows, win.dock.0.2.windows, win.dock.0.3.windows, win.dock.0.4.windows, win.dock.0.5.windows, win.dock.0.6.windows, win.dock.0.7.windows, win.dock.0.8.windows, win.dock.0.9.windows, win.dock.0.10.windows, win.dock.0.11.windows)
+    let pv.cx.0 = clamp(dk.x0.0 + 14 + max(pv.0, 0) * 60 + 30, pv.n.0 * 116 + 20, screen.0.width - pv.n.0 * 116 - 20)
+    let pv.top.0 = dk.cy.0 - 48 - 170
+    // Away from the shore and from its previews or its menu, they sink.
+    let pv.near.0 = mon == 0 and mouse.y >= pv.top.0 - 24 and mouse.x >= min(dk.x0.0, pv.cx.0 - pv.n.0 * 116 - 24) and mouse.x <= max(dk.x0.0 + dkw.0, pv.cx.0 + pv.n.0 * 116 + 24)
+    on change pv.near.0 while not pv.near.0 {
+        pv.0 = -1
+        dmenu.0 = -1
+    }
+    on key Escape while dmenu.0 >= 0 or pv.0 >= 0 {
+        dmenu.0 = -1
+        pv.0 = -1
+    }
+    group {
+        z: 99984
+        show: shore.0 > 0.01 and screen.index == 0
+        measure tip.0.0
+        group {
+            show: dk.on.0 and dk.hk.0 == 0 and 0 < dk.n.0 and pv.0 < 0 and dmenu.0 < 0 and dkdrag.0 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.0 + 14 + 0 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.0; size: tip.0.0.width + 22, 26; corner: 13 }
+            }
+            text win.dock.0.0.name { at: (dk.x0.0 + 14 + 0 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.0; anchor: center; size: 12; weight: 600; color: ink; measure: tip.0.0; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.0.0.badge > 0 and 0 < dk.n.0
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.0 + 14 + 0 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.0; radius: 8.5 }
+            }
+            text "{win.dock.0.0.badge, 0}" { at: (dk.x0.0 + 14 + 0 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.0; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.0.1
+        group {
+            show: dk.on.0 and dk.hk.0 == 1 and 1 < dk.n.0 and pv.0 < 0 and dmenu.0 < 0 and dkdrag.0 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.0 + 14 + 1 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.1; size: tip.0.1.width + 22, 26; corner: 13 }
+            }
+            text win.dock.0.1.name { at: (dk.x0.0 + 14 + 1 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.1; anchor: center; size: 12; weight: 600; color: ink; measure: tip.0.1; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.0.1.badge > 0 and 1 < dk.n.0
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.0 + 14 + 1 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.1; radius: 8.5 }
+            }
+            text "{win.dock.0.1.badge, 0}" { at: (dk.x0.0 + 14 + 1 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.1; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.0.2
+        group {
+            show: dk.on.0 and dk.hk.0 == 2 and 2 < dk.n.0 and pv.0 < 0 and dmenu.0 < 0 and dkdrag.0 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.0 + 14 + 2 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.2; size: tip.0.2.width + 22, 26; corner: 13 }
+            }
+            text win.dock.0.2.name { at: (dk.x0.0 + 14 + 2 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.2; anchor: center; size: 12; weight: 600; color: ink; measure: tip.0.2; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.0.2.badge > 0 and 2 < dk.n.0
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.0 + 14 + 2 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.2; radius: 8.5 }
+            }
+            text "{win.dock.0.2.badge, 0}" { at: (dk.x0.0 + 14 + 2 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.2; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.0.3
+        group {
+            show: dk.on.0 and dk.hk.0 == 3 and 3 < dk.n.0 and pv.0 < 0 and dmenu.0 < 0 and dkdrag.0 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.0 + 14 + 3 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.3; size: tip.0.3.width + 22, 26; corner: 13 }
+            }
+            text win.dock.0.3.name { at: (dk.x0.0 + 14 + 3 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.3; anchor: center; size: 12; weight: 600; color: ink; measure: tip.0.3; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.0.3.badge > 0 and 3 < dk.n.0
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.0 + 14 + 3 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.3; radius: 8.5 }
+            }
+            text "{win.dock.0.3.badge, 0}" { at: (dk.x0.0 + 14 + 3 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.3; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.0.4
+        group {
+            show: dk.on.0 and dk.hk.0 == 4 and 4 < dk.n.0 and pv.0 < 0 and dmenu.0 < 0 and dkdrag.0 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.0 + 14 + 4 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.4; size: tip.0.4.width + 22, 26; corner: 13 }
+            }
+            text win.dock.0.4.name { at: (dk.x0.0 + 14 + 4 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.4; anchor: center; size: 12; weight: 600; color: ink; measure: tip.0.4; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.0.4.badge > 0 and 4 < dk.n.0
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.0 + 14 + 4 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.4; radius: 8.5 }
+            }
+            text "{win.dock.0.4.badge, 0}" { at: (dk.x0.0 + 14 + 4 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.4; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.0.5
+        group {
+            show: dk.on.0 and dk.hk.0 == 5 and 5 < dk.n.0 and pv.0 < 0 and dmenu.0 < 0 and dkdrag.0 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.0 + 14 + 5 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.5; size: tip.0.5.width + 22, 26; corner: 13 }
+            }
+            text win.dock.0.5.name { at: (dk.x0.0 + 14 + 5 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.5; anchor: center; size: 12; weight: 600; color: ink; measure: tip.0.5; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.0.5.badge > 0 and 5 < dk.n.0
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.0 + 14 + 5 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.5; radius: 8.5 }
+            }
+            text "{win.dock.0.5.badge, 0}" { at: (dk.x0.0 + 14 + 5 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.5; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.0.6
+        group {
+            show: dk.on.0 and dk.hk.0 == 6 and 6 < dk.n.0 and pv.0 < 0 and dmenu.0 < 0 and dkdrag.0 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.0 + 14 + 6 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.6; size: tip.0.6.width + 22, 26; corner: 13 }
+            }
+            text win.dock.0.6.name { at: (dk.x0.0 + 14 + 6 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.6; anchor: center; size: 12; weight: 600; color: ink; measure: tip.0.6; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.0.6.badge > 0 and 6 < dk.n.0
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.0 + 14 + 6 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.6; radius: 8.5 }
+            }
+            text "{win.dock.0.6.badge, 0}" { at: (dk.x0.0 + 14 + 6 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.6; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.0.7
+        group {
+            show: dk.on.0 and dk.hk.0 == 7 and 7 < dk.n.0 and pv.0 < 0 and dmenu.0 < 0 and dkdrag.0 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.0 + 14 + 7 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.7; size: tip.0.7.width + 22, 26; corner: 13 }
+            }
+            text win.dock.0.7.name { at: (dk.x0.0 + 14 + 7 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.7; anchor: center; size: 12; weight: 600; color: ink; measure: tip.0.7; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.0.7.badge > 0 and 7 < dk.n.0
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.0 + 14 + 7 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.7; radius: 8.5 }
+            }
+            text "{win.dock.0.7.badge, 0}" { at: (dk.x0.0 + 14 + 7 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.7; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.0.8
+        group {
+            show: dk.on.0 and dk.hk.0 == 8 and 8 < dk.n.0 and pv.0 < 0 and dmenu.0 < 0 and dkdrag.0 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.0 + 14 + 8 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.8; size: tip.0.8.width + 22, 26; corner: 13 }
+            }
+            text win.dock.0.8.name { at: (dk.x0.0 + 14 + 8 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.8; anchor: center; size: 12; weight: 600; color: ink; measure: tip.0.8; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.0.8.badge > 0 and 8 < dk.n.0
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.0 + 14 + 8 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.8; radius: 8.5 }
+            }
+            text "{win.dock.0.8.badge, 0}" { at: (dk.x0.0 + 14 + 8 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.8; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.0.9
+        group {
+            show: dk.on.0 and dk.hk.0 == 9 and 9 < dk.n.0 and pv.0 < 0 and dmenu.0 < 0 and dkdrag.0 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.0 + 14 + 9 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.9; size: tip.0.9.width + 22, 26; corner: 13 }
+            }
+            text win.dock.0.9.name { at: (dk.x0.0 + 14 + 9 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.9; anchor: center; size: 12; weight: 600; color: ink; measure: tip.0.9; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.0.9.badge > 0 and 9 < dk.n.0
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.0 + 14 + 9 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.9; radius: 8.5 }
+            }
+            text "{win.dock.0.9.badge, 0}" { at: (dk.x0.0 + 14 + 9 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.9; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.0.10
+        group {
+            show: dk.on.0 and dk.hk.0 == 10 and 10 < dk.n.0 and pv.0 < 0 and dmenu.0 < 0 and dkdrag.0 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.0 + 14 + 10 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.10; size: tip.0.10.width + 22, 26; corner: 13 }
+            }
+            text win.dock.0.10.name { at: (dk.x0.0 + 14 + 10 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.10; anchor: center; size: 12; weight: 600; color: ink; measure: tip.0.10; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.0.10.badge > 0 and 10 < dk.n.0
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.0 + 14 + 10 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.10; radius: 8.5 }
+            }
+            text "{win.dock.0.10.badge, 0}" { at: (dk.x0.0 + 14 + 10 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.10; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.0.11
+        group {
+            show: dk.on.0 and dk.hk.0 == 11 and 11 < dk.n.0 and pv.0 < 0 and dmenu.0 < 0 and dkdrag.0 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.0 + 14 + 11 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.11; size: tip.0.11.width + 22, 26; corner: 13 }
+            }
+            text win.dock.0.11.name { at: (dk.x0.0 + 14 + 11 * 60 + 30), dk.cy.0 - 66 - 12 * buoy.0.11; anchor: center; size: 12; weight: 600; color: ink; measure: tip.0.11; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.0.11.badge > 0 and 11 < dk.n.0
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.0 + 14 + 11 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.11; radius: 8.5 }
+            }
+            text "{win.dock.0.11.badge, 0}" { at: (dk.x0.0 + 14 + 11 * 60 + 30) + 17, dk.cy.0 - 20 - 12 * buoy.0.11; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        // Carried out of the shore: the icon at the mouse, and far enough, it
+        // says it will go.
+        group {
+            show: dkdrag.0 >= 0 and mon == 0
+            opacity: if(mouse.y < dk.cy.0 - 110, 55%, 90%)
+            image dockicon.0.0 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.0 == 0 }
+            image dockicon.0.1 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.0 == 1 }
+            image dockicon.0.2 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.0 == 2 }
+            image dockicon.0.3 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.0 == 3 }
+            image dockicon.0.4 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.0 == 4 }
+            image dockicon.0.5 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.0 == 5 }
+            image dockicon.0.6 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.0 == 6 }
+            image dockicon.0.7 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.0 == 7 }
+            image dockicon.0.8 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.0 == 8 }
+            image dockicon.0.9 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.0 == 9 }
+            image dockicon.0.10 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.0 == 10 }
+            image dockicon.0.11 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.0 == 11 }
+        }
+        // Unpinned, it bursts into drops where it was let go.
+        group {
+            show: poof.0 < 0.99
+            opacity: 1 - poof.0
+            ellipse { at: poofx.0, poofy.0; radius: 10 + 34 * poof.0; stroke: 2 * (1 - poof.0) + 0.4; color: ink; opacity: 60% }
+            ellipse { at: poofx.0 - 22 * poof.0, poofy.0 - 16 * poof.0 + 30 * poof.0 * poof.0; radius: 3.5 * (1 - poof.0); color: ink }
+            ellipse { at: poofx.0 + 20 * poof.0, poofy.0 - 20 * poof.0 + 34 * poof.0 * poof.0; radius: 3 * (1 - poof.0); color: ink }
+            ellipse { at: poofx.0 + 4 * poof.0, poofy.0 - 28 * poof.0 + 40 * poof.0 * poof.0; radius: 2.5 * (1 - poof.0); color: ink }
+        }
+        // Its menu, over its icon: keep it on the shore or let it go, and
+        // close its windows.
+        let mn.y.0 = dk.cy.0 - 50 - 40 * mnup.0
+        group {
+            show: mnup.0 > 0.01
+            opacity: mnup.0
+            pivot: (dk.x0.0 + 14 + max(dmenu.0, 0) * 60 + 30), dk.cy.0 - 40
+            scale: 0.9 + 0.1 * mnup.0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 10, 26, 45%
+                box { at: (dk.x0.0 + 14 + max(dmenu.0, 0) * 60 + 30), mn.y.0 - if(pick(max(dmenu.0, 0), win.dock.0.0.windows, win.dock.0.1.windows, win.dock.0.2.windows, win.dock.0.3.windows, win.dock.0.4.windows, win.dock.0.5.windows, win.dock.0.6.windows, win.dock.0.7.windows, win.dock.0.8.windows, win.dock.0.9.windows, win.dock.0.10.windows, win.dock.0.11.windows) > 0, 17, 0); size: 172, if(pick(max(dmenu.0, 0), win.dock.0.0.windows, win.dock.0.1.windows, win.dock.0.2.windows, win.dock.0.3.windows, win.dock.0.4.windows, win.dock.0.5.windows, win.dock.0.6.windows, win.dock.0.7.windows, win.dock.0.8.windows, win.dock.0.9.windows, win.dock.0.10.windows, win.dock.0.11.windows) > 0, 72, 38); corner: 14 }
+            }
+            zone box dmpin.0 { at: (dk.x0.0 + 14 + max(dmenu.0, 0) * 60 + 30), mn.y.0 - if(pick(max(dmenu.0, 0), win.dock.0.0.windows, win.dock.0.1.windows, win.dock.0.2.windows, win.dock.0.3.windows, win.dock.0.4.windows, win.dock.0.5.windows, win.dock.0.6.windows, win.dock.0.7.windows, win.dock.0.8.windows, win.dock.0.9.windows, win.dock.0.10.windows, win.dock.0.11.windows) > 0, 34, 0); size: 160, 30; corner: 9; cursor: pointer; active: dmenu.0 >= 0 }
+            box { at: (dk.x0.0 + 14 + max(dmenu.0, 0) * 60 + 30), mn.y.0 - if(pick(max(dmenu.0, 0), win.dock.0.0.windows, win.dock.0.1.windows, win.dock.0.2.windows, win.dock.0.3.windows, win.dock.0.4.windows, win.dock.0.5.windows, win.dock.0.6.windows, win.dock.0.7.windows, win.dock.0.8.windows, win.dock.0.9.windows, win.dock.0.10.windows, win.dock.0.11.windows) > 0, 34, 0); size: 160, 28; corner: 9; color: ink; opacity: 8% * dmpin.0.hover }
+            text "Take off the shore" { at: (dk.x0.0 + 14 + max(dmenu.0, 0) * 60 + 30) - 68, mn.y.0 - if(pick(max(dmenu.0, 0), win.dock.0.0.windows, win.dock.0.1.windows, win.dock.0.2.windows, win.dock.0.3.windows, win.dock.0.4.windows, win.dock.0.5.windows, win.dock.0.6.windows, win.dock.0.7.windows, win.dock.0.8.windows, win.dock.0.9.windows, win.dock.0.10.windows, win.dock.0.11.windows) > 0, 34, 0); anchor: left center; size: 12; weight: 500; color: ink; show: pick(max(dmenu.0, 0), win.dock.0.0.pinned, win.dock.0.1.pinned, win.dock.0.2.pinned, win.dock.0.3.pinned, win.dock.0.4.pinned, win.dock.0.5.pinned, win.dock.0.6.pinned, win.dock.0.7.pinned, win.dock.0.8.pinned, win.dock.0.9.pinned, win.dock.0.10.pinned, win.dock.0.11.pinned) > 0.5 }
+            text "Keep on the shore" { at: (dk.x0.0 + 14 + max(dmenu.0, 0) * 60 + 30) - 68, mn.y.0 - if(pick(max(dmenu.0, 0), win.dock.0.0.windows, win.dock.0.1.windows, win.dock.0.2.windows, win.dock.0.3.windows, win.dock.0.4.windows, win.dock.0.5.windows, win.dock.0.6.windows, win.dock.0.7.windows, win.dock.0.8.windows, win.dock.0.9.windows, win.dock.0.10.windows, win.dock.0.11.windows) > 0, 34, 0); anchor: left center; size: 12; weight: 500; color: ink; show: pick(max(dmenu.0, 0), win.dock.0.0.pinned, win.dock.0.1.pinned, win.dock.0.2.pinned, win.dock.0.3.pinned, win.dock.0.4.pinned, win.dock.0.5.pinned, win.dock.0.6.pinned, win.dock.0.7.pinned, win.dock.0.8.pinned, win.dock.0.9.pinned, win.dock.0.10.pinned, win.dock.0.11.pinned) < 0.5 }
+            group {
+                show: pick(max(dmenu.0, 0), win.dock.0.0.windows, win.dock.0.1.windows, win.dock.0.2.windows, win.dock.0.3.windows, win.dock.0.4.windows, win.dock.0.5.windows, win.dock.0.6.windows, win.dock.0.7.windows, win.dock.0.8.windows, win.dock.0.9.windows, win.dock.0.10.windows, win.dock.0.11.windows) > 0
+                zone box dmclose.0 { at: (dk.x0.0 + 14 + max(dmenu.0, 0) * 60 + 30), mn.y.0; size: 160, 30; corner: 9; cursor: pointer; active: dmenu.0 >= 0 and pick(max(dmenu.0, 0), win.dock.0.0.windows, win.dock.0.1.windows, win.dock.0.2.windows, win.dock.0.3.windows, win.dock.0.4.windows, win.dock.0.5.windows, win.dock.0.6.windows, win.dock.0.7.windows, win.dock.0.8.windows, win.dock.0.9.windows, win.dock.0.10.windows, win.dock.0.11.windows) > 0 }
+                box { at: (dk.x0.0 + 14 + max(dmenu.0, 0) * 60 + 30), mn.y.0; size: 160, 28; corner: 9; color: #ef7a66; opacity: 12% * dmclose.0.hover }
+                text "Close its windows" { at: (dk.x0.0 + 14 + max(dmenu.0, 0) * 60 + 30) - 68, mn.y.0; anchor: left center; size: 12; weight: 500; color: #ef7a66 }
+            }
+        }
+    }
+    on press dmpin.0 while dmenu.0 == 0 and win.dock.0.0.pinned > 0.5 {
+        dock 0 on 0 unpin
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 0 and win.dock.0.0.pinned < 0.5 {
+        dock 0 on 0 pin
+        dmenu.0 = -1
+    }
+    on press dmclose.0 while dmenu.0 == 0 {
+        dock 0 on 0 close
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 1 and win.dock.0.1.pinned > 0.5 {
+        dock 1 on 0 unpin
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 1 and win.dock.0.1.pinned < 0.5 {
+        dock 1 on 0 pin
+        dmenu.0 = -1
+    }
+    on press dmclose.0 while dmenu.0 == 1 {
+        dock 1 on 0 close
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 2 and win.dock.0.2.pinned > 0.5 {
+        dock 2 on 0 unpin
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 2 and win.dock.0.2.pinned < 0.5 {
+        dock 2 on 0 pin
+        dmenu.0 = -1
+    }
+    on press dmclose.0 while dmenu.0 == 2 {
+        dock 2 on 0 close
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 3 and win.dock.0.3.pinned > 0.5 {
+        dock 3 on 0 unpin
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 3 and win.dock.0.3.pinned < 0.5 {
+        dock 3 on 0 pin
+        dmenu.0 = -1
+    }
+    on press dmclose.0 while dmenu.0 == 3 {
+        dock 3 on 0 close
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 4 and win.dock.0.4.pinned > 0.5 {
+        dock 4 on 0 unpin
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 4 and win.dock.0.4.pinned < 0.5 {
+        dock 4 on 0 pin
+        dmenu.0 = -1
+    }
+    on press dmclose.0 while dmenu.0 == 4 {
+        dock 4 on 0 close
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 5 and win.dock.0.5.pinned > 0.5 {
+        dock 5 on 0 unpin
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 5 and win.dock.0.5.pinned < 0.5 {
+        dock 5 on 0 pin
+        dmenu.0 = -1
+    }
+    on press dmclose.0 while dmenu.0 == 5 {
+        dock 5 on 0 close
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 6 and win.dock.0.6.pinned > 0.5 {
+        dock 6 on 0 unpin
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 6 and win.dock.0.6.pinned < 0.5 {
+        dock 6 on 0 pin
+        dmenu.0 = -1
+    }
+    on press dmclose.0 while dmenu.0 == 6 {
+        dock 6 on 0 close
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 7 and win.dock.0.7.pinned > 0.5 {
+        dock 7 on 0 unpin
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 7 and win.dock.0.7.pinned < 0.5 {
+        dock 7 on 0 pin
+        dmenu.0 = -1
+    }
+    on press dmclose.0 while dmenu.0 == 7 {
+        dock 7 on 0 close
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 8 and win.dock.0.8.pinned > 0.5 {
+        dock 8 on 0 unpin
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 8 and win.dock.0.8.pinned < 0.5 {
+        dock 8 on 0 pin
+        dmenu.0 = -1
+    }
+    on press dmclose.0 while dmenu.0 == 8 {
+        dock 8 on 0 close
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 9 and win.dock.0.9.pinned > 0.5 {
+        dock 9 on 0 unpin
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 9 and win.dock.0.9.pinned < 0.5 {
+        dock 9 on 0 pin
+        dmenu.0 = -1
+    }
+    on press dmclose.0 while dmenu.0 == 9 {
+        dock 9 on 0 close
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 10 and win.dock.0.10.pinned > 0.5 {
+        dock 10 on 0 unpin
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 10 and win.dock.0.10.pinned < 0.5 {
+        dock 10 on 0 pin
+        dmenu.0 = -1
+    }
+    on press dmclose.0 while dmenu.0 == 10 {
+        dock 10 on 0 close
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 11 and win.dock.0.11.pinned > 0.5 {
+        dock 11 on 0 unpin
+        dmenu.0 = -1
+    }
+    on press dmpin.0 while dmenu.0 == 11 and win.dock.0.11.pinned < 0.5 {
+        dock 11 on 0 pin
+        dmenu.0 = -1
+    }
+    on press dmclose.0 while dmenu.0 == 11 {
+        dock 11 on 0 close
+        dmenu.0 = -1
+    }
+    // Monitor 1's shore: the item being carried out of it, the one whose
+    // windows rise from the water, the one whose menu is open.
+    fact dkdrag.1 = -1
+    fact pv.1 = -1
+    fact dmenu.1 = -1
+    fact poofx.1 = 0
+    fact poofy.1 = 0
+    prop poof.1 = 1 ~700ms
+    prop pvup.1 = 0 ~pop
+    follow pvup.1 = if(pv.1 >= 0, 1, 0)
+    prop mnup.1 = 0 ~pop
+    follow mnup.1 = if(dmenu.1 >= 0, 1, 0)
+    let dk.hk.1 = clamp(floor(dk.t.1 + 0.5), 0, 11)
+    // The previews: as wide as there are windows of that item, over its icon.
+    let pv.n.1 = pick(max(pv.1, 0), win.dock.1.0.windows, win.dock.1.1.windows, win.dock.1.2.windows, win.dock.1.3.windows, win.dock.1.4.windows, win.dock.1.5.windows, win.dock.1.6.windows, win.dock.1.7.windows, win.dock.1.8.windows, win.dock.1.9.windows, win.dock.1.10.windows, win.dock.1.11.windows)
+    let pv.cx.1 = clamp(dk.x0.1 + 14 + max(pv.1, 0) * 60 + 30, pv.n.1 * 116 + 20, screen.1.width - pv.n.1 * 116 - 20)
+    let pv.top.1 = dk.cy.1 - 48 - 170
+    // Away from the shore and from its previews or its menu, they sink.
+    let pv.near.1 = mon == 1 and mouse.y >= pv.top.1 - 24 and mouse.x >= min(dk.x0.1, pv.cx.1 - pv.n.1 * 116 - 24) and mouse.x <= max(dk.x0.1 + dkw.1, pv.cx.1 + pv.n.1 * 116 + 24)
+    on change pv.near.1 while not pv.near.1 {
+        pv.1 = -1
+        dmenu.1 = -1
+    }
+    on key Escape while dmenu.1 >= 0 or pv.1 >= 0 {
+        dmenu.1 = -1
+        pv.1 = -1
+    }
+    group {
+        z: 99984
+        show: shore.1 > 0.01 and screen.index == 1
+        measure tip.1.0
+        group {
+            show: dk.on.1 and dk.hk.1 == 0 and 0 < dk.n.1 and pv.1 < 0 and dmenu.1 < 0 and dkdrag.1 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.1 + 14 + 0 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.0; size: tip.1.0.width + 22, 26; corner: 13 }
+            }
+            text win.dock.1.0.name { at: (dk.x0.1 + 14 + 0 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.0; anchor: center; size: 12; weight: 600; color: ink; measure: tip.1.0; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.1.0.badge > 0 and 0 < dk.n.1
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.1 + 14 + 0 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.0; radius: 8.5 }
+            }
+            text "{win.dock.1.0.badge, 0}" { at: (dk.x0.1 + 14 + 0 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.0; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.1.1
+        group {
+            show: dk.on.1 and dk.hk.1 == 1 and 1 < dk.n.1 and pv.1 < 0 and dmenu.1 < 0 and dkdrag.1 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.1 + 14 + 1 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.1; size: tip.1.1.width + 22, 26; corner: 13 }
+            }
+            text win.dock.1.1.name { at: (dk.x0.1 + 14 + 1 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.1; anchor: center; size: 12; weight: 600; color: ink; measure: tip.1.1; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.1.1.badge > 0 and 1 < dk.n.1
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.1 + 14 + 1 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.1; radius: 8.5 }
+            }
+            text "{win.dock.1.1.badge, 0}" { at: (dk.x0.1 + 14 + 1 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.1; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.1.2
+        group {
+            show: dk.on.1 and dk.hk.1 == 2 and 2 < dk.n.1 and pv.1 < 0 and dmenu.1 < 0 and dkdrag.1 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.1 + 14 + 2 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.2; size: tip.1.2.width + 22, 26; corner: 13 }
+            }
+            text win.dock.1.2.name { at: (dk.x0.1 + 14 + 2 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.2; anchor: center; size: 12; weight: 600; color: ink; measure: tip.1.2; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.1.2.badge > 0 and 2 < dk.n.1
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.1 + 14 + 2 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.2; radius: 8.5 }
+            }
+            text "{win.dock.1.2.badge, 0}" { at: (dk.x0.1 + 14 + 2 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.2; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.1.3
+        group {
+            show: dk.on.1 and dk.hk.1 == 3 and 3 < dk.n.1 and pv.1 < 0 and dmenu.1 < 0 and dkdrag.1 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.1 + 14 + 3 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.3; size: tip.1.3.width + 22, 26; corner: 13 }
+            }
+            text win.dock.1.3.name { at: (dk.x0.1 + 14 + 3 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.3; anchor: center; size: 12; weight: 600; color: ink; measure: tip.1.3; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.1.3.badge > 0 and 3 < dk.n.1
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.1 + 14 + 3 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.3; radius: 8.5 }
+            }
+            text "{win.dock.1.3.badge, 0}" { at: (dk.x0.1 + 14 + 3 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.3; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.1.4
+        group {
+            show: dk.on.1 and dk.hk.1 == 4 and 4 < dk.n.1 and pv.1 < 0 and dmenu.1 < 0 and dkdrag.1 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.1 + 14 + 4 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.4; size: tip.1.4.width + 22, 26; corner: 13 }
+            }
+            text win.dock.1.4.name { at: (dk.x0.1 + 14 + 4 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.4; anchor: center; size: 12; weight: 600; color: ink; measure: tip.1.4; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.1.4.badge > 0 and 4 < dk.n.1
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.1 + 14 + 4 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.4; radius: 8.5 }
+            }
+            text "{win.dock.1.4.badge, 0}" { at: (dk.x0.1 + 14 + 4 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.4; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.1.5
+        group {
+            show: dk.on.1 and dk.hk.1 == 5 and 5 < dk.n.1 and pv.1 < 0 and dmenu.1 < 0 and dkdrag.1 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.1 + 14 + 5 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.5; size: tip.1.5.width + 22, 26; corner: 13 }
+            }
+            text win.dock.1.5.name { at: (dk.x0.1 + 14 + 5 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.5; anchor: center; size: 12; weight: 600; color: ink; measure: tip.1.5; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.1.5.badge > 0 and 5 < dk.n.1
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.1 + 14 + 5 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.5; radius: 8.5 }
+            }
+            text "{win.dock.1.5.badge, 0}" { at: (dk.x0.1 + 14 + 5 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.5; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.1.6
+        group {
+            show: dk.on.1 and dk.hk.1 == 6 and 6 < dk.n.1 and pv.1 < 0 and dmenu.1 < 0 and dkdrag.1 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.1 + 14 + 6 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.6; size: tip.1.6.width + 22, 26; corner: 13 }
+            }
+            text win.dock.1.6.name { at: (dk.x0.1 + 14 + 6 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.6; anchor: center; size: 12; weight: 600; color: ink; measure: tip.1.6; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.1.6.badge > 0 and 6 < dk.n.1
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.1 + 14 + 6 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.6; radius: 8.5 }
+            }
+            text "{win.dock.1.6.badge, 0}" { at: (dk.x0.1 + 14 + 6 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.6; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.1.7
+        group {
+            show: dk.on.1 and dk.hk.1 == 7 and 7 < dk.n.1 and pv.1 < 0 and dmenu.1 < 0 and dkdrag.1 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.1 + 14 + 7 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.7; size: tip.1.7.width + 22, 26; corner: 13 }
+            }
+            text win.dock.1.7.name { at: (dk.x0.1 + 14 + 7 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.7; anchor: center; size: 12; weight: 600; color: ink; measure: tip.1.7; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.1.7.badge > 0 and 7 < dk.n.1
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.1 + 14 + 7 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.7; radius: 8.5 }
+            }
+            text "{win.dock.1.7.badge, 0}" { at: (dk.x0.1 + 14 + 7 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.7; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.1.8
+        group {
+            show: dk.on.1 and dk.hk.1 == 8 and 8 < dk.n.1 and pv.1 < 0 and dmenu.1 < 0 and dkdrag.1 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.1 + 14 + 8 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.8; size: tip.1.8.width + 22, 26; corner: 13 }
+            }
+            text win.dock.1.8.name { at: (dk.x0.1 + 14 + 8 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.8; anchor: center; size: 12; weight: 600; color: ink; measure: tip.1.8; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.1.8.badge > 0 and 8 < dk.n.1
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.1 + 14 + 8 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.8; radius: 8.5 }
+            }
+            text "{win.dock.1.8.badge, 0}" { at: (dk.x0.1 + 14 + 8 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.8; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.1.9
+        group {
+            show: dk.on.1 and dk.hk.1 == 9 and 9 < dk.n.1 and pv.1 < 0 and dmenu.1 < 0 and dkdrag.1 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.1 + 14 + 9 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.9; size: tip.1.9.width + 22, 26; corner: 13 }
+            }
+            text win.dock.1.9.name { at: (dk.x0.1 + 14 + 9 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.9; anchor: center; size: 12; weight: 600; color: ink; measure: tip.1.9; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.1.9.badge > 0 and 9 < dk.n.1
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.1 + 14 + 9 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.9; radius: 8.5 }
+            }
+            text "{win.dock.1.9.badge, 0}" { at: (dk.x0.1 + 14 + 9 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.9; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.1.10
+        group {
+            show: dk.on.1 and dk.hk.1 == 10 and 10 < dk.n.1 and pv.1 < 0 and dmenu.1 < 0 and dkdrag.1 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.1 + 14 + 10 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.10; size: tip.1.10.width + 22, 26; corner: 13 }
+            }
+            text win.dock.1.10.name { at: (dk.x0.1 + 14 + 10 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.10; anchor: center; size: 12; weight: 600; color: ink; measure: tip.1.10; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.1.10.badge > 0 and 10 < dk.n.1
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.1 + 14 + 10 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.10; radius: 8.5 }
+            }
+            text "{win.dock.1.10.badge, 0}" { at: (dk.x0.1 + 14 + 10 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.10; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.1.11
+        group {
+            show: dk.on.1 and dk.hk.1 == 11 and 11 < dk.n.1 and pv.1 < 0 and dmenu.1 < 0 and dkdrag.1 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.1 + 14 + 11 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.11; size: tip.1.11.width + 22, 26; corner: 13 }
+            }
+            text win.dock.1.11.name { at: (dk.x0.1 + 14 + 11 * 60 + 30), dk.cy.1 - 66 - 12 * buoy.1.11; anchor: center; size: 12; weight: 600; color: ink; measure: tip.1.11; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.1.11.badge > 0 and 11 < dk.n.1
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.1 + 14 + 11 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.11; radius: 8.5 }
+            }
+            text "{win.dock.1.11.badge, 0}" { at: (dk.x0.1 + 14 + 11 * 60 + 30) + 17, dk.cy.1 - 20 - 12 * buoy.1.11; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        // Carried out of the shore: the icon at the mouse, and far enough, it
+        // says it will go.
+        group {
+            show: dkdrag.1 >= 0 and mon == 1
+            opacity: if(mouse.y < dk.cy.1 - 110, 55%, 90%)
+            image dockicon.1.0 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.1 == 0 }
+            image dockicon.1.1 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.1 == 1 }
+            image dockicon.1.2 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.1 == 2 }
+            image dockicon.1.3 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.1 == 3 }
+            image dockicon.1.4 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.1 == 4 }
+            image dockicon.1.5 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.1 == 5 }
+            image dockicon.1.6 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.1 == 6 }
+            image dockicon.1.7 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.1 == 7 }
+            image dockicon.1.8 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.1 == 8 }
+            image dockicon.1.9 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.1 == 9 }
+            image dockicon.1.10 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.1 == 10 }
+            image dockicon.1.11 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.1 == 11 }
+        }
+        // Unpinned, it bursts into drops where it was let go.
+        group {
+            show: poof.1 < 0.99
+            opacity: 1 - poof.1
+            ellipse { at: poofx.1, poofy.1; radius: 10 + 34 * poof.1; stroke: 2 * (1 - poof.1) + 0.4; color: ink; opacity: 60% }
+            ellipse { at: poofx.1 - 22 * poof.1, poofy.1 - 16 * poof.1 + 30 * poof.1 * poof.1; radius: 3.5 * (1 - poof.1); color: ink }
+            ellipse { at: poofx.1 + 20 * poof.1, poofy.1 - 20 * poof.1 + 34 * poof.1 * poof.1; radius: 3 * (1 - poof.1); color: ink }
+            ellipse { at: poofx.1 + 4 * poof.1, poofy.1 - 28 * poof.1 + 40 * poof.1 * poof.1; radius: 2.5 * (1 - poof.1); color: ink }
+        }
+        // Its menu, over its icon: keep it on the shore or let it go, and
+        // close its windows.
+        let mn.y.1 = dk.cy.1 - 50 - 40 * mnup.1
+        group {
+            show: mnup.1 > 0.01
+            opacity: mnup.1
+            pivot: (dk.x0.1 + 14 + max(dmenu.1, 0) * 60 + 30), dk.cy.1 - 40
+            scale: 0.9 + 0.1 * mnup.1
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 10, 26, 45%
+                box { at: (dk.x0.1 + 14 + max(dmenu.1, 0) * 60 + 30), mn.y.1 - if(pick(max(dmenu.1, 0), win.dock.1.0.windows, win.dock.1.1.windows, win.dock.1.2.windows, win.dock.1.3.windows, win.dock.1.4.windows, win.dock.1.5.windows, win.dock.1.6.windows, win.dock.1.7.windows, win.dock.1.8.windows, win.dock.1.9.windows, win.dock.1.10.windows, win.dock.1.11.windows) > 0, 17, 0); size: 172, if(pick(max(dmenu.1, 0), win.dock.1.0.windows, win.dock.1.1.windows, win.dock.1.2.windows, win.dock.1.3.windows, win.dock.1.4.windows, win.dock.1.5.windows, win.dock.1.6.windows, win.dock.1.7.windows, win.dock.1.8.windows, win.dock.1.9.windows, win.dock.1.10.windows, win.dock.1.11.windows) > 0, 72, 38); corner: 14 }
+            }
+            zone box dmpin.1 { at: (dk.x0.1 + 14 + max(dmenu.1, 0) * 60 + 30), mn.y.1 - if(pick(max(dmenu.1, 0), win.dock.1.0.windows, win.dock.1.1.windows, win.dock.1.2.windows, win.dock.1.3.windows, win.dock.1.4.windows, win.dock.1.5.windows, win.dock.1.6.windows, win.dock.1.7.windows, win.dock.1.8.windows, win.dock.1.9.windows, win.dock.1.10.windows, win.dock.1.11.windows) > 0, 34, 0); size: 160, 30; corner: 9; cursor: pointer; active: dmenu.1 >= 0 }
+            box { at: (dk.x0.1 + 14 + max(dmenu.1, 0) * 60 + 30), mn.y.1 - if(pick(max(dmenu.1, 0), win.dock.1.0.windows, win.dock.1.1.windows, win.dock.1.2.windows, win.dock.1.3.windows, win.dock.1.4.windows, win.dock.1.5.windows, win.dock.1.6.windows, win.dock.1.7.windows, win.dock.1.8.windows, win.dock.1.9.windows, win.dock.1.10.windows, win.dock.1.11.windows) > 0, 34, 0); size: 160, 28; corner: 9; color: ink; opacity: 8% * dmpin.1.hover }
+            text "Take off the shore" { at: (dk.x0.1 + 14 + max(dmenu.1, 0) * 60 + 30) - 68, mn.y.1 - if(pick(max(dmenu.1, 0), win.dock.1.0.windows, win.dock.1.1.windows, win.dock.1.2.windows, win.dock.1.3.windows, win.dock.1.4.windows, win.dock.1.5.windows, win.dock.1.6.windows, win.dock.1.7.windows, win.dock.1.8.windows, win.dock.1.9.windows, win.dock.1.10.windows, win.dock.1.11.windows) > 0, 34, 0); anchor: left center; size: 12; weight: 500; color: ink; show: pick(max(dmenu.1, 0), win.dock.1.0.pinned, win.dock.1.1.pinned, win.dock.1.2.pinned, win.dock.1.3.pinned, win.dock.1.4.pinned, win.dock.1.5.pinned, win.dock.1.6.pinned, win.dock.1.7.pinned, win.dock.1.8.pinned, win.dock.1.9.pinned, win.dock.1.10.pinned, win.dock.1.11.pinned) > 0.5 }
+            text "Keep on the shore" { at: (dk.x0.1 + 14 + max(dmenu.1, 0) * 60 + 30) - 68, mn.y.1 - if(pick(max(dmenu.1, 0), win.dock.1.0.windows, win.dock.1.1.windows, win.dock.1.2.windows, win.dock.1.3.windows, win.dock.1.4.windows, win.dock.1.5.windows, win.dock.1.6.windows, win.dock.1.7.windows, win.dock.1.8.windows, win.dock.1.9.windows, win.dock.1.10.windows, win.dock.1.11.windows) > 0, 34, 0); anchor: left center; size: 12; weight: 500; color: ink; show: pick(max(dmenu.1, 0), win.dock.1.0.pinned, win.dock.1.1.pinned, win.dock.1.2.pinned, win.dock.1.3.pinned, win.dock.1.4.pinned, win.dock.1.5.pinned, win.dock.1.6.pinned, win.dock.1.7.pinned, win.dock.1.8.pinned, win.dock.1.9.pinned, win.dock.1.10.pinned, win.dock.1.11.pinned) < 0.5 }
+            group {
+                show: pick(max(dmenu.1, 0), win.dock.1.0.windows, win.dock.1.1.windows, win.dock.1.2.windows, win.dock.1.3.windows, win.dock.1.4.windows, win.dock.1.5.windows, win.dock.1.6.windows, win.dock.1.7.windows, win.dock.1.8.windows, win.dock.1.9.windows, win.dock.1.10.windows, win.dock.1.11.windows) > 0
+                zone box dmclose.1 { at: (dk.x0.1 + 14 + max(dmenu.1, 0) * 60 + 30), mn.y.1; size: 160, 30; corner: 9; cursor: pointer; active: dmenu.1 >= 0 and pick(max(dmenu.1, 0), win.dock.1.0.windows, win.dock.1.1.windows, win.dock.1.2.windows, win.dock.1.3.windows, win.dock.1.4.windows, win.dock.1.5.windows, win.dock.1.6.windows, win.dock.1.7.windows, win.dock.1.8.windows, win.dock.1.9.windows, win.dock.1.10.windows, win.dock.1.11.windows) > 0 }
+                box { at: (dk.x0.1 + 14 + max(dmenu.1, 0) * 60 + 30), mn.y.1; size: 160, 28; corner: 9; color: #ef7a66; opacity: 12% * dmclose.1.hover }
+                text "Close its windows" { at: (dk.x0.1 + 14 + max(dmenu.1, 0) * 60 + 30) - 68, mn.y.1; anchor: left center; size: 12; weight: 500; color: #ef7a66 }
+            }
+        }
+    }
+    on press dmpin.1 while dmenu.1 == 0 and win.dock.1.0.pinned > 0.5 {
+        dock 0 on 1 unpin
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 0 and win.dock.1.0.pinned < 0.5 {
+        dock 0 on 1 pin
+        dmenu.1 = -1
+    }
+    on press dmclose.1 while dmenu.1 == 0 {
+        dock 0 on 1 close
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 1 and win.dock.1.1.pinned > 0.5 {
+        dock 1 on 1 unpin
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 1 and win.dock.1.1.pinned < 0.5 {
+        dock 1 on 1 pin
+        dmenu.1 = -1
+    }
+    on press dmclose.1 while dmenu.1 == 1 {
+        dock 1 on 1 close
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 2 and win.dock.1.2.pinned > 0.5 {
+        dock 2 on 1 unpin
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 2 and win.dock.1.2.pinned < 0.5 {
+        dock 2 on 1 pin
+        dmenu.1 = -1
+    }
+    on press dmclose.1 while dmenu.1 == 2 {
+        dock 2 on 1 close
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 3 and win.dock.1.3.pinned > 0.5 {
+        dock 3 on 1 unpin
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 3 and win.dock.1.3.pinned < 0.5 {
+        dock 3 on 1 pin
+        dmenu.1 = -1
+    }
+    on press dmclose.1 while dmenu.1 == 3 {
+        dock 3 on 1 close
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 4 and win.dock.1.4.pinned > 0.5 {
+        dock 4 on 1 unpin
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 4 and win.dock.1.4.pinned < 0.5 {
+        dock 4 on 1 pin
+        dmenu.1 = -1
+    }
+    on press dmclose.1 while dmenu.1 == 4 {
+        dock 4 on 1 close
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 5 and win.dock.1.5.pinned > 0.5 {
+        dock 5 on 1 unpin
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 5 and win.dock.1.5.pinned < 0.5 {
+        dock 5 on 1 pin
+        dmenu.1 = -1
+    }
+    on press dmclose.1 while dmenu.1 == 5 {
+        dock 5 on 1 close
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 6 and win.dock.1.6.pinned > 0.5 {
+        dock 6 on 1 unpin
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 6 and win.dock.1.6.pinned < 0.5 {
+        dock 6 on 1 pin
+        dmenu.1 = -1
+    }
+    on press dmclose.1 while dmenu.1 == 6 {
+        dock 6 on 1 close
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 7 and win.dock.1.7.pinned > 0.5 {
+        dock 7 on 1 unpin
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 7 and win.dock.1.7.pinned < 0.5 {
+        dock 7 on 1 pin
+        dmenu.1 = -1
+    }
+    on press dmclose.1 while dmenu.1 == 7 {
+        dock 7 on 1 close
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 8 and win.dock.1.8.pinned > 0.5 {
+        dock 8 on 1 unpin
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 8 and win.dock.1.8.pinned < 0.5 {
+        dock 8 on 1 pin
+        dmenu.1 = -1
+    }
+    on press dmclose.1 while dmenu.1 == 8 {
+        dock 8 on 1 close
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 9 and win.dock.1.9.pinned > 0.5 {
+        dock 9 on 1 unpin
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 9 and win.dock.1.9.pinned < 0.5 {
+        dock 9 on 1 pin
+        dmenu.1 = -1
+    }
+    on press dmclose.1 while dmenu.1 == 9 {
+        dock 9 on 1 close
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 10 and win.dock.1.10.pinned > 0.5 {
+        dock 10 on 1 unpin
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 10 and win.dock.1.10.pinned < 0.5 {
+        dock 10 on 1 pin
+        dmenu.1 = -1
+    }
+    on press dmclose.1 while dmenu.1 == 10 {
+        dock 10 on 1 close
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 11 and win.dock.1.11.pinned > 0.5 {
+        dock 11 on 1 unpin
+        dmenu.1 = -1
+    }
+    on press dmpin.1 while dmenu.1 == 11 and win.dock.1.11.pinned < 0.5 {
+        dock 11 on 1 pin
+        dmenu.1 = -1
+    }
+    on press dmclose.1 while dmenu.1 == 11 {
+        dock 11 on 1 close
+        dmenu.1 = -1
+    }
+    // Monitor 2's shore: the item being carried out of it, the one whose
+    // windows rise from the water, the one whose menu is open.
+    fact dkdrag.2 = -1
+    fact pv.2 = -1
+    fact dmenu.2 = -1
+    fact poofx.2 = 0
+    fact poofy.2 = 0
+    prop poof.2 = 1 ~700ms
+    prop pvup.2 = 0 ~pop
+    follow pvup.2 = if(pv.2 >= 0, 1, 0)
+    prop mnup.2 = 0 ~pop
+    follow mnup.2 = if(dmenu.2 >= 0, 1, 0)
+    let dk.hk.2 = clamp(floor(dk.t.2 + 0.5), 0, 11)
+    // The previews: as wide as there are windows of that item, over its icon.
+    let pv.n.2 = pick(max(pv.2, 0), win.dock.2.0.windows, win.dock.2.1.windows, win.dock.2.2.windows, win.dock.2.3.windows, win.dock.2.4.windows, win.dock.2.5.windows, win.dock.2.6.windows, win.dock.2.7.windows, win.dock.2.8.windows, win.dock.2.9.windows, win.dock.2.10.windows, win.dock.2.11.windows)
+    let pv.cx.2 = clamp(dk.x0.2 + 14 + max(pv.2, 0) * 60 + 30, pv.n.2 * 116 + 20, screen.2.width - pv.n.2 * 116 - 20)
+    let pv.top.2 = dk.cy.2 - 48 - 170
+    // Away from the shore and from its previews or its menu, they sink.
+    let pv.near.2 = mon == 2 and mouse.y >= pv.top.2 - 24 and mouse.x >= min(dk.x0.2, pv.cx.2 - pv.n.2 * 116 - 24) and mouse.x <= max(dk.x0.2 + dkw.2, pv.cx.2 + pv.n.2 * 116 + 24)
+    on change pv.near.2 while not pv.near.2 {
+        pv.2 = -1
+        dmenu.2 = -1
+    }
+    on key Escape while dmenu.2 >= 0 or pv.2 >= 0 {
+        dmenu.2 = -1
+        pv.2 = -1
+    }
+    group {
+        z: 99984
+        show: shore.2 > 0.01 and screen.index == 2
+        measure tip.2.0
+        group {
+            show: dk.on.2 and dk.hk.2 == 0 and 0 < dk.n.2 and pv.2 < 0 and dmenu.2 < 0 and dkdrag.2 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.2 + 14 + 0 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.0; size: tip.2.0.width + 22, 26; corner: 13 }
+            }
+            text win.dock.2.0.name { at: (dk.x0.2 + 14 + 0 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.0; anchor: center; size: 12; weight: 600; color: ink; measure: tip.2.0; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.2.0.badge > 0 and 0 < dk.n.2
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.2 + 14 + 0 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.0; radius: 8.5 }
+            }
+            text "{win.dock.2.0.badge, 0}" { at: (dk.x0.2 + 14 + 0 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.0; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.2.1
+        group {
+            show: dk.on.2 and dk.hk.2 == 1 and 1 < dk.n.2 and pv.2 < 0 and dmenu.2 < 0 and dkdrag.2 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.2 + 14 + 1 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.1; size: tip.2.1.width + 22, 26; corner: 13 }
+            }
+            text win.dock.2.1.name { at: (dk.x0.2 + 14 + 1 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.1; anchor: center; size: 12; weight: 600; color: ink; measure: tip.2.1; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.2.1.badge > 0 and 1 < dk.n.2
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.2 + 14 + 1 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.1; radius: 8.5 }
+            }
+            text "{win.dock.2.1.badge, 0}" { at: (dk.x0.2 + 14 + 1 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.1; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.2.2
+        group {
+            show: dk.on.2 and dk.hk.2 == 2 and 2 < dk.n.2 and pv.2 < 0 and dmenu.2 < 0 and dkdrag.2 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.2 + 14 + 2 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.2; size: tip.2.2.width + 22, 26; corner: 13 }
+            }
+            text win.dock.2.2.name { at: (dk.x0.2 + 14 + 2 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.2; anchor: center; size: 12; weight: 600; color: ink; measure: tip.2.2; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.2.2.badge > 0 and 2 < dk.n.2
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.2 + 14 + 2 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.2; radius: 8.5 }
+            }
+            text "{win.dock.2.2.badge, 0}" { at: (dk.x0.2 + 14 + 2 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.2; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.2.3
+        group {
+            show: dk.on.2 and dk.hk.2 == 3 and 3 < dk.n.2 and pv.2 < 0 and dmenu.2 < 0 and dkdrag.2 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.2 + 14 + 3 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.3; size: tip.2.3.width + 22, 26; corner: 13 }
+            }
+            text win.dock.2.3.name { at: (dk.x0.2 + 14 + 3 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.3; anchor: center; size: 12; weight: 600; color: ink; measure: tip.2.3; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.2.3.badge > 0 and 3 < dk.n.2
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.2 + 14 + 3 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.3; radius: 8.5 }
+            }
+            text "{win.dock.2.3.badge, 0}" { at: (dk.x0.2 + 14 + 3 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.3; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.2.4
+        group {
+            show: dk.on.2 and dk.hk.2 == 4 and 4 < dk.n.2 and pv.2 < 0 and dmenu.2 < 0 and dkdrag.2 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.2 + 14 + 4 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.4; size: tip.2.4.width + 22, 26; corner: 13 }
+            }
+            text win.dock.2.4.name { at: (dk.x0.2 + 14 + 4 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.4; anchor: center; size: 12; weight: 600; color: ink; measure: tip.2.4; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.2.4.badge > 0 and 4 < dk.n.2
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.2 + 14 + 4 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.4; radius: 8.5 }
+            }
+            text "{win.dock.2.4.badge, 0}" { at: (dk.x0.2 + 14 + 4 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.4; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.2.5
+        group {
+            show: dk.on.2 and dk.hk.2 == 5 and 5 < dk.n.2 and pv.2 < 0 and dmenu.2 < 0 and dkdrag.2 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.2 + 14 + 5 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.5; size: tip.2.5.width + 22, 26; corner: 13 }
+            }
+            text win.dock.2.5.name { at: (dk.x0.2 + 14 + 5 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.5; anchor: center; size: 12; weight: 600; color: ink; measure: tip.2.5; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.2.5.badge > 0 and 5 < dk.n.2
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.2 + 14 + 5 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.5; radius: 8.5 }
+            }
+            text "{win.dock.2.5.badge, 0}" { at: (dk.x0.2 + 14 + 5 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.5; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.2.6
+        group {
+            show: dk.on.2 and dk.hk.2 == 6 and 6 < dk.n.2 and pv.2 < 0 and dmenu.2 < 0 and dkdrag.2 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.2 + 14 + 6 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.6; size: tip.2.6.width + 22, 26; corner: 13 }
+            }
+            text win.dock.2.6.name { at: (dk.x0.2 + 14 + 6 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.6; anchor: center; size: 12; weight: 600; color: ink; measure: tip.2.6; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.2.6.badge > 0 and 6 < dk.n.2
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.2 + 14 + 6 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.6; radius: 8.5 }
+            }
+            text "{win.dock.2.6.badge, 0}" { at: (dk.x0.2 + 14 + 6 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.6; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.2.7
+        group {
+            show: dk.on.2 and dk.hk.2 == 7 and 7 < dk.n.2 and pv.2 < 0 and dmenu.2 < 0 and dkdrag.2 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.2 + 14 + 7 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.7; size: tip.2.7.width + 22, 26; corner: 13 }
+            }
+            text win.dock.2.7.name { at: (dk.x0.2 + 14 + 7 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.7; anchor: center; size: 12; weight: 600; color: ink; measure: tip.2.7; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.2.7.badge > 0 and 7 < dk.n.2
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.2 + 14 + 7 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.7; radius: 8.5 }
+            }
+            text "{win.dock.2.7.badge, 0}" { at: (dk.x0.2 + 14 + 7 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.7; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.2.8
+        group {
+            show: dk.on.2 and dk.hk.2 == 8 and 8 < dk.n.2 and pv.2 < 0 and dmenu.2 < 0 and dkdrag.2 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.2 + 14 + 8 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.8; size: tip.2.8.width + 22, 26; corner: 13 }
+            }
+            text win.dock.2.8.name { at: (dk.x0.2 + 14 + 8 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.8; anchor: center; size: 12; weight: 600; color: ink; measure: tip.2.8; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.2.8.badge > 0 and 8 < dk.n.2
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.2 + 14 + 8 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.8; radius: 8.5 }
+            }
+            text "{win.dock.2.8.badge, 0}" { at: (dk.x0.2 + 14 + 8 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.8; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.2.9
+        group {
+            show: dk.on.2 and dk.hk.2 == 9 and 9 < dk.n.2 and pv.2 < 0 and dmenu.2 < 0 and dkdrag.2 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.2 + 14 + 9 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.9; size: tip.2.9.width + 22, 26; corner: 13 }
+            }
+            text win.dock.2.9.name { at: (dk.x0.2 + 14 + 9 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.9; anchor: center; size: 12; weight: 600; color: ink; measure: tip.2.9; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.2.9.badge > 0 and 9 < dk.n.2
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.2 + 14 + 9 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.9; radius: 8.5 }
+            }
+            text "{win.dock.2.9.badge, 0}" { at: (dk.x0.2 + 14 + 9 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.9; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.2.10
+        group {
+            show: dk.on.2 and dk.hk.2 == 10 and 10 < dk.n.2 and pv.2 < 0 and dmenu.2 < 0 and dkdrag.2 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.2 + 14 + 10 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.10; size: tip.2.10.width + 22, 26; corner: 13 }
+            }
+            text win.dock.2.10.name { at: (dk.x0.2 + 14 + 10 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.10; anchor: center; size: 12; weight: 600; color: ink; measure: tip.2.10; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.2.10.badge > 0 and 10 < dk.n.2
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.2 + 14 + 10 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.10; radius: 8.5 }
+            }
+            text "{win.dock.2.10.badge, 0}" { at: (dk.x0.2 + 14 + 10 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.10; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.2.11
+        group {
+            show: dk.on.2 and dk.hk.2 == 11 and 11 < dk.n.2 and pv.2 < 0 and dmenu.2 < 0 and dkdrag.2 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.2 + 14 + 11 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.11; size: tip.2.11.width + 22, 26; corner: 13 }
+            }
+            text win.dock.2.11.name { at: (dk.x0.2 + 14 + 11 * 60 + 30), dk.cy.2 - 66 - 12 * buoy.2.11; anchor: center; size: 12; weight: 600; color: ink; measure: tip.2.11; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.2.11.badge > 0 and 11 < dk.n.2
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.2 + 14 + 11 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.11; radius: 8.5 }
+            }
+            text "{win.dock.2.11.badge, 0}" { at: (dk.x0.2 + 14 + 11 * 60 + 30) + 17, dk.cy.2 - 20 - 12 * buoy.2.11; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        // Carried out of the shore: the icon at the mouse, and far enough, it
+        // says it will go.
+        group {
+            show: dkdrag.2 >= 0 and mon == 2
+            opacity: if(mouse.y < dk.cy.2 - 110, 55%, 90%)
+            image dockicon.2.0 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.2 == 0 }
+            image dockicon.2.1 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.2 == 1 }
+            image dockicon.2.2 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.2 == 2 }
+            image dockicon.2.3 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.2 == 3 }
+            image dockicon.2.4 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.2 == 4 }
+            image dockicon.2.5 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.2 == 5 }
+            image dockicon.2.6 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.2 == 6 }
+            image dockicon.2.7 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.2 == 7 }
+            image dockicon.2.8 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.2 == 8 }
+            image dockicon.2.9 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.2 == 9 }
+            image dockicon.2.10 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.2 == 10 }
+            image dockicon.2.11 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.2 == 11 }
+        }
+        // Unpinned, it bursts into drops where it was let go.
+        group {
+            show: poof.2 < 0.99
+            opacity: 1 - poof.2
+            ellipse { at: poofx.2, poofy.2; radius: 10 + 34 * poof.2; stroke: 2 * (1 - poof.2) + 0.4; color: ink; opacity: 60% }
+            ellipse { at: poofx.2 - 22 * poof.2, poofy.2 - 16 * poof.2 + 30 * poof.2 * poof.2; radius: 3.5 * (1 - poof.2); color: ink }
+            ellipse { at: poofx.2 + 20 * poof.2, poofy.2 - 20 * poof.2 + 34 * poof.2 * poof.2; radius: 3 * (1 - poof.2); color: ink }
+            ellipse { at: poofx.2 + 4 * poof.2, poofy.2 - 28 * poof.2 + 40 * poof.2 * poof.2; radius: 2.5 * (1 - poof.2); color: ink }
+        }
+        // Its menu, over its icon: keep it on the shore or let it go, and
+        // close its windows.
+        let mn.y.2 = dk.cy.2 - 50 - 40 * mnup.2
+        group {
+            show: mnup.2 > 0.01
+            opacity: mnup.2
+            pivot: (dk.x0.2 + 14 + max(dmenu.2, 0) * 60 + 30), dk.cy.2 - 40
+            scale: 0.9 + 0.1 * mnup.2
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 10, 26, 45%
+                box { at: (dk.x0.2 + 14 + max(dmenu.2, 0) * 60 + 30), mn.y.2 - if(pick(max(dmenu.2, 0), win.dock.2.0.windows, win.dock.2.1.windows, win.dock.2.2.windows, win.dock.2.3.windows, win.dock.2.4.windows, win.dock.2.5.windows, win.dock.2.6.windows, win.dock.2.7.windows, win.dock.2.8.windows, win.dock.2.9.windows, win.dock.2.10.windows, win.dock.2.11.windows) > 0, 17, 0); size: 172, if(pick(max(dmenu.2, 0), win.dock.2.0.windows, win.dock.2.1.windows, win.dock.2.2.windows, win.dock.2.3.windows, win.dock.2.4.windows, win.dock.2.5.windows, win.dock.2.6.windows, win.dock.2.7.windows, win.dock.2.8.windows, win.dock.2.9.windows, win.dock.2.10.windows, win.dock.2.11.windows) > 0, 72, 38); corner: 14 }
+            }
+            zone box dmpin.2 { at: (dk.x0.2 + 14 + max(dmenu.2, 0) * 60 + 30), mn.y.2 - if(pick(max(dmenu.2, 0), win.dock.2.0.windows, win.dock.2.1.windows, win.dock.2.2.windows, win.dock.2.3.windows, win.dock.2.4.windows, win.dock.2.5.windows, win.dock.2.6.windows, win.dock.2.7.windows, win.dock.2.8.windows, win.dock.2.9.windows, win.dock.2.10.windows, win.dock.2.11.windows) > 0, 34, 0); size: 160, 30; corner: 9; cursor: pointer; active: dmenu.2 >= 0 }
+            box { at: (dk.x0.2 + 14 + max(dmenu.2, 0) * 60 + 30), mn.y.2 - if(pick(max(dmenu.2, 0), win.dock.2.0.windows, win.dock.2.1.windows, win.dock.2.2.windows, win.dock.2.3.windows, win.dock.2.4.windows, win.dock.2.5.windows, win.dock.2.6.windows, win.dock.2.7.windows, win.dock.2.8.windows, win.dock.2.9.windows, win.dock.2.10.windows, win.dock.2.11.windows) > 0, 34, 0); size: 160, 28; corner: 9; color: ink; opacity: 8% * dmpin.2.hover }
+            text "Take off the shore" { at: (dk.x0.2 + 14 + max(dmenu.2, 0) * 60 + 30) - 68, mn.y.2 - if(pick(max(dmenu.2, 0), win.dock.2.0.windows, win.dock.2.1.windows, win.dock.2.2.windows, win.dock.2.3.windows, win.dock.2.4.windows, win.dock.2.5.windows, win.dock.2.6.windows, win.dock.2.7.windows, win.dock.2.8.windows, win.dock.2.9.windows, win.dock.2.10.windows, win.dock.2.11.windows) > 0, 34, 0); anchor: left center; size: 12; weight: 500; color: ink; show: pick(max(dmenu.2, 0), win.dock.2.0.pinned, win.dock.2.1.pinned, win.dock.2.2.pinned, win.dock.2.3.pinned, win.dock.2.4.pinned, win.dock.2.5.pinned, win.dock.2.6.pinned, win.dock.2.7.pinned, win.dock.2.8.pinned, win.dock.2.9.pinned, win.dock.2.10.pinned, win.dock.2.11.pinned) > 0.5 }
+            text "Keep on the shore" { at: (dk.x0.2 + 14 + max(dmenu.2, 0) * 60 + 30) - 68, mn.y.2 - if(pick(max(dmenu.2, 0), win.dock.2.0.windows, win.dock.2.1.windows, win.dock.2.2.windows, win.dock.2.3.windows, win.dock.2.4.windows, win.dock.2.5.windows, win.dock.2.6.windows, win.dock.2.7.windows, win.dock.2.8.windows, win.dock.2.9.windows, win.dock.2.10.windows, win.dock.2.11.windows) > 0, 34, 0); anchor: left center; size: 12; weight: 500; color: ink; show: pick(max(dmenu.2, 0), win.dock.2.0.pinned, win.dock.2.1.pinned, win.dock.2.2.pinned, win.dock.2.3.pinned, win.dock.2.4.pinned, win.dock.2.5.pinned, win.dock.2.6.pinned, win.dock.2.7.pinned, win.dock.2.8.pinned, win.dock.2.9.pinned, win.dock.2.10.pinned, win.dock.2.11.pinned) < 0.5 }
+            group {
+                show: pick(max(dmenu.2, 0), win.dock.2.0.windows, win.dock.2.1.windows, win.dock.2.2.windows, win.dock.2.3.windows, win.dock.2.4.windows, win.dock.2.5.windows, win.dock.2.6.windows, win.dock.2.7.windows, win.dock.2.8.windows, win.dock.2.9.windows, win.dock.2.10.windows, win.dock.2.11.windows) > 0
+                zone box dmclose.2 { at: (dk.x0.2 + 14 + max(dmenu.2, 0) * 60 + 30), mn.y.2; size: 160, 30; corner: 9; cursor: pointer; active: dmenu.2 >= 0 and pick(max(dmenu.2, 0), win.dock.2.0.windows, win.dock.2.1.windows, win.dock.2.2.windows, win.dock.2.3.windows, win.dock.2.4.windows, win.dock.2.5.windows, win.dock.2.6.windows, win.dock.2.7.windows, win.dock.2.8.windows, win.dock.2.9.windows, win.dock.2.10.windows, win.dock.2.11.windows) > 0 }
+                box { at: (dk.x0.2 + 14 + max(dmenu.2, 0) * 60 + 30), mn.y.2; size: 160, 28; corner: 9; color: #ef7a66; opacity: 12% * dmclose.2.hover }
+                text "Close its windows" { at: (dk.x0.2 + 14 + max(dmenu.2, 0) * 60 + 30) - 68, mn.y.2; anchor: left center; size: 12; weight: 500; color: #ef7a66 }
+            }
+        }
+    }
+    on press dmpin.2 while dmenu.2 == 0 and win.dock.2.0.pinned > 0.5 {
+        dock 0 on 2 unpin
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 0 and win.dock.2.0.pinned < 0.5 {
+        dock 0 on 2 pin
+        dmenu.2 = -1
+    }
+    on press dmclose.2 while dmenu.2 == 0 {
+        dock 0 on 2 close
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 1 and win.dock.2.1.pinned > 0.5 {
+        dock 1 on 2 unpin
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 1 and win.dock.2.1.pinned < 0.5 {
+        dock 1 on 2 pin
+        dmenu.2 = -1
+    }
+    on press dmclose.2 while dmenu.2 == 1 {
+        dock 1 on 2 close
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 2 and win.dock.2.2.pinned > 0.5 {
+        dock 2 on 2 unpin
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 2 and win.dock.2.2.pinned < 0.5 {
+        dock 2 on 2 pin
+        dmenu.2 = -1
+    }
+    on press dmclose.2 while dmenu.2 == 2 {
+        dock 2 on 2 close
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 3 and win.dock.2.3.pinned > 0.5 {
+        dock 3 on 2 unpin
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 3 and win.dock.2.3.pinned < 0.5 {
+        dock 3 on 2 pin
+        dmenu.2 = -1
+    }
+    on press dmclose.2 while dmenu.2 == 3 {
+        dock 3 on 2 close
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 4 and win.dock.2.4.pinned > 0.5 {
+        dock 4 on 2 unpin
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 4 and win.dock.2.4.pinned < 0.5 {
+        dock 4 on 2 pin
+        dmenu.2 = -1
+    }
+    on press dmclose.2 while dmenu.2 == 4 {
+        dock 4 on 2 close
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 5 and win.dock.2.5.pinned > 0.5 {
+        dock 5 on 2 unpin
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 5 and win.dock.2.5.pinned < 0.5 {
+        dock 5 on 2 pin
+        dmenu.2 = -1
+    }
+    on press dmclose.2 while dmenu.2 == 5 {
+        dock 5 on 2 close
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 6 and win.dock.2.6.pinned > 0.5 {
+        dock 6 on 2 unpin
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 6 and win.dock.2.6.pinned < 0.5 {
+        dock 6 on 2 pin
+        dmenu.2 = -1
+    }
+    on press dmclose.2 while dmenu.2 == 6 {
+        dock 6 on 2 close
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 7 and win.dock.2.7.pinned > 0.5 {
+        dock 7 on 2 unpin
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 7 and win.dock.2.7.pinned < 0.5 {
+        dock 7 on 2 pin
+        dmenu.2 = -1
+    }
+    on press dmclose.2 while dmenu.2 == 7 {
+        dock 7 on 2 close
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 8 and win.dock.2.8.pinned > 0.5 {
+        dock 8 on 2 unpin
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 8 and win.dock.2.8.pinned < 0.5 {
+        dock 8 on 2 pin
+        dmenu.2 = -1
+    }
+    on press dmclose.2 while dmenu.2 == 8 {
+        dock 8 on 2 close
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 9 and win.dock.2.9.pinned > 0.5 {
+        dock 9 on 2 unpin
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 9 and win.dock.2.9.pinned < 0.5 {
+        dock 9 on 2 pin
+        dmenu.2 = -1
+    }
+    on press dmclose.2 while dmenu.2 == 9 {
+        dock 9 on 2 close
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 10 and win.dock.2.10.pinned > 0.5 {
+        dock 10 on 2 unpin
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 10 and win.dock.2.10.pinned < 0.5 {
+        dock 10 on 2 pin
+        dmenu.2 = -1
+    }
+    on press dmclose.2 while dmenu.2 == 10 {
+        dock 10 on 2 close
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 11 and win.dock.2.11.pinned > 0.5 {
+        dock 11 on 2 unpin
+        dmenu.2 = -1
+    }
+    on press dmpin.2 while dmenu.2 == 11 and win.dock.2.11.pinned < 0.5 {
+        dock 11 on 2 pin
+        dmenu.2 = -1
+    }
+    on press dmclose.2 while dmenu.2 == 11 {
+        dock 11 on 2 close
+        dmenu.2 = -1
+    }
+    // Monitor 3's shore: the item being carried out of it, the one whose
+    // windows rise from the water, the one whose menu is open.
+    fact dkdrag.3 = -1
+    fact pv.3 = -1
+    fact dmenu.3 = -1
+    fact poofx.3 = 0
+    fact poofy.3 = 0
+    prop poof.3 = 1 ~700ms
+    prop pvup.3 = 0 ~pop
+    follow pvup.3 = if(pv.3 >= 0, 1, 0)
+    prop mnup.3 = 0 ~pop
+    follow mnup.3 = if(dmenu.3 >= 0, 1, 0)
+    let dk.hk.3 = clamp(floor(dk.t.3 + 0.5), 0, 11)
+    // The previews: as wide as there are windows of that item, over its icon.
+    let pv.n.3 = pick(max(pv.3, 0), win.dock.3.0.windows, win.dock.3.1.windows, win.dock.3.2.windows, win.dock.3.3.windows, win.dock.3.4.windows, win.dock.3.5.windows, win.dock.3.6.windows, win.dock.3.7.windows, win.dock.3.8.windows, win.dock.3.9.windows, win.dock.3.10.windows, win.dock.3.11.windows)
+    let pv.cx.3 = clamp(dk.x0.3 + 14 + max(pv.3, 0) * 60 + 30, pv.n.3 * 116 + 20, screen.3.width - pv.n.3 * 116 - 20)
+    let pv.top.3 = dk.cy.3 - 48 - 170
+    // Away from the shore and from its previews or its menu, they sink.
+    let pv.near.3 = mon == 3 and mouse.y >= pv.top.3 - 24 and mouse.x >= min(dk.x0.3, pv.cx.3 - pv.n.3 * 116 - 24) and mouse.x <= max(dk.x0.3 + dkw.3, pv.cx.3 + pv.n.3 * 116 + 24)
+    on change pv.near.3 while not pv.near.3 {
+        pv.3 = -1
+        dmenu.3 = -1
+    }
+    on key Escape while dmenu.3 >= 0 or pv.3 >= 0 {
+        dmenu.3 = -1
+        pv.3 = -1
+    }
+    group {
+        z: 99984
+        show: shore.3 > 0.01 and screen.index == 3
+        measure tip.3.0
+        group {
+            show: dk.on.3 and dk.hk.3 == 0 and 0 < dk.n.3 and pv.3 < 0 and dmenu.3 < 0 and dkdrag.3 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.3 + 14 + 0 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.0; size: tip.3.0.width + 22, 26; corner: 13 }
+            }
+            text win.dock.3.0.name { at: (dk.x0.3 + 14 + 0 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.0; anchor: center; size: 12; weight: 600; color: ink; measure: tip.3.0; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.3.0.badge > 0 and 0 < dk.n.3
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.3 + 14 + 0 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.0; radius: 8.5 }
+            }
+            text "{win.dock.3.0.badge, 0}" { at: (dk.x0.3 + 14 + 0 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.0; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.3.1
+        group {
+            show: dk.on.3 and dk.hk.3 == 1 and 1 < dk.n.3 and pv.3 < 0 and dmenu.3 < 0 and dkdrag.3 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.3 + 14 + 1 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.1; size: tip.3.1.width + 22, 26; corner: 13 }
+            }
+            text win.dock.3.1.name { at: (dk.x0.3 + 14 + 1 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.1; anchor: center; size: 12; weight: 600; color: ink; measure: tip.3.1; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.3.1.badge > 0 and 1 < dk.n.3
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.3 + 14 + 1 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.1; radius: 8.5 }
+            }
+            text "{win.dock.3.1.badge, 0}" { at: (dk.x0.3 + 14 + 1 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.1; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.3.2
+        group {
+            show: dk.on.3 and dk.hk.3 == 2 and 2 < dk.n.3 and pv.3 < 0 and dmenu.3 < 0 and dkdrag.3 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.3 + 14 + 2 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.2; size: tip.3.2.width + 22, 26; corner: 13 }
+            }
+            text win.dock.3.2.name { at: (dk.x0.3 + 14 + 2 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.2; anchor: center; size: 12; weight: 600; color: ink; measure: tip.3.2; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.3.2.badge > 0 and 2 < dk.n.3
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.3 + 14 + 2 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.2; radius: 8.5 }
+            }
+            text "{win.dock.3.2.badge, 0}" { at: (dk.x0.3 + 14 + 2 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.2; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.3.3
+        group {
+            show: dk.on.3 and dk.hk.3 == 3 and 3 < dk.n.3 and pv.3 < 0 and dmenu.3 < 0 and dkdrag.3 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.3 + 14 + 3 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.3; size: tip.3.3.width + 22, 26; corner: 13 }
+            }
+            text win.dock.3.3.name { at: (dk.x0.3 + 14 + 3 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.3; anchor: center; size: 12; weight: 600; color: ink; measure: tip.3.3; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.3.3.badge > 0 and 3 < dk.n.3
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.3 + 14 + 3 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.3; radius: 8.5 }
+            }
+            text "{win.dock.3.3.badge, 0}" { at: (dk.x0.3 + 14 + 3 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.3; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.3.4
+        group {
+            show: dk.on.3 and dk.hk.3 == 4 and 4 < dk.n.3 and pv.3 < 0 and dmenu.3 < 0 and dkdrag.3 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.3 + 14 + 4 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.4; size: tip.3.4.width + 22, 26; corner: 13 }
+            }
+            text win.dock.3.4.name { at: (dk.x0.3 + 14 + 4 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.4; anchor: center; size: 12; weight: 600; color: ink; measure: tip.3.4; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.3.4.badge > 0 and 4 < dk.n.3
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.3 + 14 + 4 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.4; radius: 8.5 }
+            }
+            text "{win.dock.3.4.badge, 0}" { at: (dk.x0.3 + 14 + 4 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.4; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.3.5
+        group {
+            show: dk.on.3 and dk.hk.3 == 5 and 5 < dk.n.3 and pv.3 < 0 and dmenu.3 < 0 and dkdrag.3 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.3 + 14 + 5 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.5; size: tip.3.5.width + 22, 26; corner: 13 }
+            }
+            text win.dock.3.5.name { at: (dk.x0.3 + 14 + 5 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.5; anchor: center; size: 12; weight: 600; color: ink; measure: tip.3.5; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.3.5.badge > 0 and 5 < dk.n.3
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.3 + 14 + 5 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.5; radius: 8.5 }
+            }
+            text "{win.dock.3.5.badge, 0}" { at: (dk.x0.3 + 14 + 5 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.5; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.3.6
+        group {
+            show: dk.on.3 and dk.hk.3 == 6 and 6 < dk.n.3 and pv.3 < 0 and dmenu.3 < 0 and dkdrag.3 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.3 + 14 + 6 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.6; size: tip.3.6.width + 22, 26; corner: 13 }
+            }
+            text win.dock.3.6.name { at: (dk.x0.3 + 14 + 6 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.6; anchor: center; size: 12; weight: 600; color: ink; measure: tip.3.6; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.3.6.badge > 0 and 6 < dk.n.3
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.3 + 14 + 6 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.6; radius: 8.5 }
+            }
+            text "{win.dock.3.6.badge, 0}" { at: (dk.x0.3 + 14 + 6 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.6; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.3.7
+        group {
+            show: dk.on.3 and dk.hk.3 == 7 and 7 < dk.n.3 and pv.3 < 0 and dmenu.3 < 0 and dkdrag.3 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.3 + 14 + 7 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.7; size: tip.3.7.width + 22, 26; corner: 13 }
+            }
+            text win.dock.3.7.name { at: (dk.x0.3 + 14 + 7 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.7; anchor: center; size: 12; weight: 600; color: ink; measure: tip.3.7; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.3.7.badge > 0 and 7 < dk.n.3
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.3 + 14 + 7 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.7; radius: 8.5 }
+            }
+            text "{win.dock.3.7.badge, 0}" { at: (dk.x0.3 + 14 + 7 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.7; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.3.8
+        group {
+            show: dk.on.3 and dk.hk.3 == 8 and 8 < dk.n.3 and pv.3 < 0 and dmenu.3 < 0 and dkdrag.3 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.3 + 14 + 8 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.8; size: tip.3.8.width + 22, 26; corner: 13 }
+            }
+            text win.dock.3.8.name { at: (dk.x0.3 + 14 + 8 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.8; anchor: center; size: 12; weight: 600; color: ink; measure: tip.3.8; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.3.8.badge > 0 and 8 < dk.n.3
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.3 + 14 + 8 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.8; radius: 8.5 }
+            }
+            text "{win.dock.3.8.badge, 0}" { at: (dk.x0.3 + 14 + 8 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.8; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.3.9
+        group {
+            show: dk.on.3 and dk.hk.3 == 9 and 9 < dk.n.3 and pv.3 < 0 and dmenu.3 < 0 and dkdrag.3 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.3 + 14 + 9 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.9; size: tip.3.9.width + 22, 26; corner: 13 }
+            }
+            text win.dock.3.9.name { at: (dk.x0.3 + 14 + 9 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.9; anchor: center; size: 12; weight: 600; color: ink; measure: tip.3.9; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.3.9.badge > 0 and 9 < dk.n.3
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.3 + 14 + 9 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.9; radius: 8.5 }
+            }
+            text "{win.dock.3.9.badge, 0}" { at: (dk.x0.3 + 14 + 9 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.9; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.3.10
+        group {
+            show: dk.on.3 and dk.hk.3 == 10 and 10 < dk.n.3 and pv.3 < 0 and dmenu.3 < 0 and dkdrag.3 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.3 + 14 + 10 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.10; size: tip.3.10.width + 22, 26; corner: 13 }
+            }
+            text win.dock.3.10.name { at: (dk.x0.3 + 14 + 10 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.10; anchor: center; size: 12; weight: 600; color: ink; measure: tip.3.10; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.3.10.badge > 0 and 10 < dk.n.3
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.3 + 14 + 10 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.10; radius: 8.5 }
+            }
+            text "{win.dock.3.10.badge, 0}" { at: (dk.x0.3 + 14 + 10 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.10; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        measure tip.3.11
+        group {
+            show: dk.on.3 and dk.hk.3 == 11 and 11 < dk.n.3 and pv.3 < 0 and dmenu.3 < 0 and dkdrag.3 < 0
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 6, 16, 40%
+                box { at: (dk.x0.3 + 14 + 11 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.11; size: tip.3.11.width + 22, 26; corner: 13 }
+            }
+            text win.dock.3.11.name { at: (dk.x0.3 + 14 + 11 * 60 + 30), dk.cy.3 - 66 - 12 * buoy.3.11; anchor: center; size: 12; weight: 600; color: ink; measure: tip.3.11; lines: 1 }
+        }
+        // Unread, a drop of coral on its corner.
+        group {
+            show: win.dock.3.11.badge > 0 and 11 < dk.n.3
+            body {
+                color: #ef7a66
+                rim: 20%
+                shadow: 0, 2, 5, 40%
+                ellipse { at: (dk.x0.3 + 14 + 11 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.11; radius: 8.5 }
+            }
+            text "{win.dock.3.11.badge, 0}" { at: (dk.x0.3 + 14 + 11 * 60 + 30) + 17, dk.cy.3 - 20 - 12 * buoy.3.11; anchor: center; size: 10; weight: 700; color: #1a0c09 }
+        }
+        // Carried out of the shore: the icon at the mouse, and far enough, it
+        // says it will go.
+        group {
+            show: dkdrag.3 >= 0 and mon == 3
+            opacity: if(mouse.y < dk.cy.3 - 110, 55%, 90%)
+            image dockicon.3.0 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.3 == 0 }
+            image dockicon.3.1 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.3 == 1 }
+            image dockicon.3.2 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.3 == 2 }
+            image dockicon.3.3 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.3 == 3 }
+            image dockicon.3.4 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.3 == 4 }
+            image dockicon.3.5 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.3 == 5 }
+            image dockicon.3.6 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.3 == 6 }
+            image dockicon.3.7 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.3 == 7 }
+            image dockicon.3.8 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.3 == 8 }
+            image dockicon.3.9 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.3 == 9 }
+            image dockicon.3.10 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.3 == 10 }
+            image dockicon.3.11 { at: mouse.x - 24, mouse.y - 24; size: 48, 48; show: dkdrag.3 == 11 }
+        }
+        // Unpinned, it bursts into drops where it was let go.
+        group {
+            show: poof.3 < 0.99
+            opacity: 1 - poof.3
+            ellipse { at: poofx.3, poofy.3; radius: 10 + 34 * poof.3; stroke: 2 * (1 - poof.3) + 0.4; color: ink; opacity: 60% }
+            ellipse { at: poofx.3 - 22 * poof.3, poofy.3 - 16 * poof.3 + 30 * poof.3 * poof.3; radius: 3.5 * (1 - poof.3); color: ink }
+            ellipse { at: poofx.3 + 20 * poof.3, poofy.3 - 20 * poof.3 + 34 * poof.3 * poof.3; radius: 3 * (1 - poof.3); color: ink }
+            ellipse { at: poofx.3 + 4 * poof.3, poofy.3 - 28 * poof.3 + 40 * poof.3 * poof.3; radius: 2.5 * (1 - poof.3); color: ink }
+        }
+        // Its menu, over its icon: keep it on the shore or let it go, and
+        // close its windows.
+        let mn.y.3 = dk.cy.3 - 50 - 40 * mnup.3
+        group {
+            show: mnup.3 > 0.01
+            opacity: mnup.3
+            pivot: (dk.x0.3 + 14 + max(dmenu.3, 0) * 60 + 30), dk.cy.3 - 40
+            scale: 0.9 + 0.1 * mnup.3
+            body {
+                color: #0c0e10
+                rim: 12%
+                shadow: 0, 10, 26, 45%
+                box { at: (dk.x0.3 + 14 + max(dmenu.3, 0) * 60 + 30), mn.y.3 - if(pick(max(dmenu.3, 0), win.dock.3.0.windows, win.dock.3.1.windows, win.dock.3.2.windows, win.dock.3.3.windows, win.dock.3.4.windows, win.dock.3.5.windows, win.dock.3.6.windows, win.dock.3.7.windows, win.dock.3.8.windows, win.dock.3.9.windows, win.dock.3.10.windows, win.dock.3.11.windows) > 0, 17, 0); size: 172, if(pick(max(dmenu.3, 0), win.dock.3.0.windows, win.dock.3.1.windows, win.dock.3.2.windows, win.dock.3.3.windows, win.dock.3.4.windows, win.dock.3.5.windows, win.dock.3.6.windows, win.dock.3.7.windows, win.dock.3.8.windows, win.dock.3.9.windows, win.dock.3.10.windows, win.dock.3.11.windows) > 0, 72, 38); corner: 14 }
+            }
+            zone box dmpin.3 { at: (dk.x0.3 + 14 + max(dmenu.3, 0) * 60 + 30), mn.y.3 - if(pick(max(dmenu.3, 0), win.dock.3.0.windows, win.dock.3.1.windows, win.dock.3.2.windows, win.dock.3.3.windows, win.dock.3.4.windows, win.dock.3.5.windows, win.dock.3.6.windows, win.dock.3.7.windows, win.dock.3.8.windows, win.dock.3.9.windows, win.dock.3.10.windows, win.dock.3.11.windows) > 0, 34, 0); size: 160, 30; corner: 9; cursor: pointer; active: dmenu.3 >= 0 }
+            box { at: (dk.x0.3 + 14 + max(dmenu.3, 0) * 60 + 30), mn.y.3 - if(pick(max(dmenu.3, 0), win.dock.3.0.windows, win.dock.3.1.windows, win.dock.3.2.windows, win.dock.3.3.windows, win.dock.3.4.windows, win.dock.3.5.windows, win.dock.3.6.windows, win.dock.3.7.windows, win.dock.3.8.windows, win.dock.3.9.windows, win.dock.3.10.windows, win.dock.3.11.windows) > 0, 34, 0); size: 160, 28; corner: 9; color: ink; opacity: 8% * dmpin.3.hover }
+            text "Take off the shore" { at: (dk.x0.3 + 14 + max(dmenu.3, 0) * 60 + 30) - 68, mn.y.3 - if(pick(max(dmenu.3, 0), win.dock.3.0.windows, win.dock.3.1.windows, win.dock.3.2.windows, win.dock.3.3.windows, win.dock.3.4.windows, win.dock.3.5.windows, win.dock.3.6.windows, win.dock.3.7.windows, win.dock.3.8.windows, win.dock.3.9.windows, win.dock.3.10.windows, win.dock.3.11.windows) > 0, 34, 0); anchor: left center; size: 12; weight: 500; color: ink; show: pick(max(dmenu.3, 0), win.dock.3.0.pinned, win.dock.3.1.pinned, win.dock.3.2.pinned, win.dock.3.3.pinned, win.dock.3.4.pinned, win.dock.3.5.pinned, win.dock.3.6.pinned, win.dock.3.7.pinned, win.dock.3.8.pinned, win.dock.3.9.pinned, win.dock.3.10.pinned, win.dock.3.11.pinned) > 0.5 }
+            text "Keep on the shore" { at: (dk.x0.3 + 14 + max(dmenu.3, 0) * 60 + 30) - 68, mn.y.3 - if(pick(max(dmenu.3, 0), win.dock.3.0.windows, win.dock.3.1.windows, win.dock.3.2.windows, win.dock.3.3.windows, win.dock.3.4.windows, win.dock.3.5.windows, win.dock.3.6.windows, win.dock.3.7.windows, win.dock.3.8.windows, win.dock.3.9.windows, win.dock.3.10.windows, win.dock.3.11.windows) > 0, 34, 0); anchor: left center; size: 12; weight: 500; color: ink; show: pick(max(dmenu.3, 0), win.dock.3.0.pinned, win.dock.3.1.pinned, win.dock.3.2.pinned, win.dock.3.3.pinned, win.dock.3.4.pinned, win.dock.3.5.pinned, win.dock.3.6.pinned, win.dock.3.7.pinned, win.dock.3.8.pinned, win.dock.3.9.pinned, win.dock.3.10.pinned, win.dock.3.11.pinned) < 0.5 }
+            group {
+                show: pick(max(dmenu.3, 0), win.dock.3.0.windows, win.dock.3.1.windows, win.dock.3.2.windows, win.dock.3.3.windows, win.dock.3.4.windows, win.dock.3.5.windows, win.dock.3.6.windows, win.dock.3.7.windows, win.dock.3.8.windows, win.dock.3.9.windows, win.dock.3.10.windows, win.dock.3.11.windows) > 0
+                zone box dmclose.3 { at: (dk.x0.3 + 14 + max(dmenu.3, 0) * 60 + 30), mn.y.3; size: 160, 30; corner: 9; cursor: pointer; active: dmenu.3 >= 0 and pick(max(dmenu.3, 0), win.dock.3.0.windows, win.dock.3.1.windows, win.dock.3.2.windows, win.dock.3.3.windows, win.dock.3.4.windows, win.dock.3.5.windows, win.dock.3.6.windows, win.dock.3.7.windows, win.dock.3.8.windows, win.dock.3.9.windows, win.dock.3.10.windows, win.dock.3.11.windows) > 0 }
+                box { at: (dk.x0.3 + 14 + max(dmenu.3, 0) * 60 + 30), mn.y.3; size: 160, 28; corner: 9; color: #ef7a66; opacity: 12% * dmclose.3.hover }
+                text "Close its windows" { at: (dk.x0.3 + 14 + max(dmenu.3, 0) * 60 + 30) - 68, mn.y.3; anchor: left center; size: 12; weight: 500; color: #ef7a66 }
+            }
+        }
+    }
+    on press dmpin.3 while dmenu.3 == 0 and win.dock.3.0.pinned > 0.5 {
+        dock 0 on 3 unpin
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 0 and win.dock.3.0.pinned < 0.5 {
+        dock 0 on 3 pin
+        dmenu.3 = -1
+    }
+    on press dmclose.3 while dmenu.3 == 0 {
+        dock 0 on 3 close
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 1 and win.dock.3.1.pinned > 0.5 {
+        dock 1 on 3 unpin
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 1 and win.dock.3.1.pinned < 0.5 {
+        dock 1 on 3 pin
+        dmenu.3 = -1
+    }
+    on press dmclose.3 while dmenu.3 == 1 {
+        dock 1 on 3 close
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 2 and win.dock.3.2.pinned > 0.5 {
+        dock 2 on 3 unpin
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 2 and win.dock.3.2.pinned < 0.5 {
+        dock 2 on 3 pin
+        dmenu.3 = -1
+    }
+    on press dmclose.3 while dmenu.3 == 2 {
+        dock 2 on 3 close
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 3 and win.dock.3.3.pinned > 0.5 {
+        dock 3 on 3 unpin
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 3 and win.dock.3.3.pinned < 0.5 {
+        dock 3 on 3 pin
+        dmenu.3 = -1
+    }
+    on press dmclose.3 while dmenu.3 == 3 {
+        dock 3 on 3 close
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 4 and win.dock.3.4.pinned > 0.5 {
+        dock 4 on 3 unpin
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 4 and win.dock.3.4.pinned < 0.5 {
+        dock 4 on 3 pin
+        dmenu.3 = -1
+    }
+    on press dmclose.3 while dmenu.3 == 4 {
+        dock 4 on 3 close
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 5 and win.dock.3.5.pinned > 0.5 {
+        dock 5 on 3 unpin
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 5 and win.dock.3.5.pinned < 0.5 {
+        dock 5 on 3 pin
+        dmenu.3 = -1
+    }
+    on press dmclose.3 while dmenu.3 == 5 {
+        dock 5 on 3 close
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 6 and win.dock.3.6.pinned > 0.5 {
+        dock 6 on 3 unpin
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 6 and win.dock.3.6.pinned < 0.5 {
+        dock 6 on 3 pin
+        dmenu.3 = -1
+    }
+    on press dmclose.3 while dmenu.3 == 6 {
+        dock 6 on 3 close
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 7 and win.dock.3.7.pinned > 0.5 {
+        dock 7 on 3 unpin
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 7 and win.dock.3.7.pinned < 0.5 {
+        dock 7 on 3 pin
+        dmenu.3 = -1
+    }
+    on press dmclose.3 while dmenu.3 == 7 {
+        dock 7 on 3 close
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 8 and win.dock.3.8.pinned > 0.5 {
+        dock 8 on 3 unpin
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 8 and win.dock.3.8.pinned < 0.5 {
+        dock 8 on 3 pin
+        dmenu.3 = -1
+    }
+    on press dmclose.3 while dmenu.3 == 8 {
+        dock 8 on 3 close
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 9 and win.dock.3.9.pinned > 0.5 {
+        dock 9 on 3 unpin
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 9 and win.dock.3.9.pinned < 0.5 {
+        dock 9 on 3 pin
+        dmenu.3 = -1
+    }
+    on press dmclose.3 while dmenu.3 == 9 {
+        dock 9 on 3 close
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 10 and win.dock.3.10.pinned > 0.5 {
+        dock 10 on 3 unpin
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 10 and win.dock.3.10.pinned < 0.5 {
+        dock 10 on 3 pin
+        dmenu.3 = -1
+    }
+    on press dmclose.3 while dmenu.3 == 10 {
+        dock 10 on 3 close
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 11 and win.dock.3.11.pinned > 0.5 {
+        dock 11 on 3 unpin
+        dmenu.3 = -1
+    }
+    on press dmpin.3 while dmenu.3 == 11 and win.dock.3.11.pinned < 0.5 {
+        dock 11 on 3 pin
+        dmenu.3 = -1
+    }
+    on press dmclose.3 while dmenu.3 == 11 {
+        dock 11 on 3 close
+        dmenu.3 = -1
+    }
 
     // ── the pools at a glance (Super+Tab): beside the windows of the pool
     // shown, a column of cards at the right of each monitor, one per pool,
@@ -3948,6 +7017,50 @@ scene Session {
             zone box dockmin.$i { at: dm.x, ty; size: dm.w + 10, dm.h + 10; corner: 8; cursor: pointer; active: not overview }
         }
         on press dockmin.$i { restore win.$i }
+        // Its preview, rising from the shore's water when its program's icon is
+        // hovered a moment: the window as it is, live, and its title; pressed,
+        // it is the one (brought back, if put away). A picture only: it asks
+        // the window for no size (`ask: -1, -1`).
+        let pvk = pick(sc, pv.0, pv.1, pv.2, pv.3)
+        let pvn = pick(sc, pv.n.0, pv.n.1, pv.n.2, pv.n.3)
+        let pvup = pick(sc, pvup.0, pvup.1, pvup.2, pvup.3)
+        let pvw = min(210, 132 * max(win.$i.width, 1) / max(win.$i.height, 1))
+        let pvh = min(132, 210 * max(win.$i.height, 1) / max(win.$i.width, 1))
+        let pvx = pick(sc, pv.cx.0, pv.cx.1, pv.cx.2, pv.cx.3) + (win.$i.dockturn - (pvn - 1) / 2) * 232
+        let pvy = pick(sc, pv.top.0, pv.top.1, pv.top.2, pv.top.3) + 78 + 30 * (1 - pvup)
+        group {
+            z: 99985
+            show: pvk >= 0 and win.$i.dockat == pvk and win.$i.dockturn >= 0 and pvup > 0.01 and sc == screen.index
+            opacity: pvup
+            zone box dockpv.$i { at: pvx, pvy + 10; size: 222, 170; corner: 14; cursor: pointer; active: pvup > 0.9 }
+            group {
+                pivot: pvx, pvy + 70
+                scale: 0.92 + 0.08 * pvup + 0.03 * dockpv.$i.hover
+                body {
+                    color: #0c0e10
+                    rim: 12% + 10% * dockpv.$i.hover
+                    shadow: 0, 12, 28, 45%
+                    box { at: pvx, pvy + 10; size: 222, 170; corner: 14 }
+                }
+                group {
+                    clip box { at: pvx, pvy; size: pvw, pvh; corner: 6 }
+                    window win.$i { at: pvx - pvw / 2, pvy - pvh / 2; size: pvw, pvh; ask: -1, -1 }
+                }
+                text win.$i.title { at: pvx, pvy + 80; anchor: center; size: 11; weight: 500; width: 196; lines: 1; color: ink; opacity: 85% }
+                box { at: pvx, pvy + 10; size: 222, 170; corner: 14; stroke: 1.4; color: mint; opacity: 70% * win.$i.focused }
+            }
+        }
+        on press dockpv.$i while win.$i.minimized {
+            restore win.$i
+            focus win.$i
+        }
+        on press dockpv.$i while not win.$i.minimized { focus win.$i }
+        on press dockpv.$i {
+            pv.0 = -1
+            pv.1 = -1
+            pv.2 = -1
+            pv.3 = -1
+        }
         // The ripple where it lands (or leaves from).
         prop splash.$i = 1 ~900ms
         on change win.$i.minimized while win.$i.minimized {

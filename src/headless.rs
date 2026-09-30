@@ -241,6 +241,10 @@ impl pleamar::Platform for Headless {
                         "down" | "up" => {
                             route.button(&screens, 0x110, what == "down");
                         }
+                        // The right button.
+                        "rdown" | "rup" => {
+                            route.button(&screens, 0x111, what == "rdown");
+                        }
                         // The mouse's side buttons: back and forward.
                         "back" | "forward" => {
                             let code = if what == "back" { 0x113 } else { 0x114 };
