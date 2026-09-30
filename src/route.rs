@@ -13,11 +13,16 @@ pub struct Route {
     pub hit: Hit,
     /// The program's surface a button was pressed on: it keeps the pointer until it is let go.
     grab: Option<u64>,
-    /// A button pressed on the scene: the scene keeps the pointer, and gets
-    /// the release, wherever it is let go —over a bar, over Marea—. Given to
-    /// the program under it instead, a window carried by its title bar never
-    /// heard it had been let go, and stayed stuck to the mouse.
-    scene_held: bool,
+    /// The buttons pressed on the scene: the scene keeps the pointer, and gets
+    /// their release, wherever they are let go —over a bar, over Marea—. Given
+    /// to the program under it instead, a window carried by its title bar never
+    /// heard it had been let go, and stayed stuck to the mouse. Each button on
+    /// its own: with one flag, letting go of the right one first gave the
+    /// left one's release to whatever was under the pointer.
+    scene_held: Vec<u32>,
+    /// And the ones pressed on a program's surface (`grab`): it keeps the
+    /// pointer until the last is let go, and gets each release.
+    client_held: Vec<u32>,
     /// The program's surface that took the keyboard when clicked.
     key_client: Option<u64>,
     /// Keys held down that went to a binding: their release is the binding's
@@ -41,7 +46,7 @@ pub struct Route {
 
 impl Route {
     pub fn new(to_render: Sender<ToRender>) -> Route {
-        Route { hit: Hit::Scene(None), grab: None, scene_held: false, key_client: None, bound: Vec::new(), repeating: None, repeat_new: false, layer_keys: Vec::new(), super_held: false, to_render }
+        Route { hit: Hit::Scene(None), grab: None, scene_held: Vec::new(), client_held: Vec::new(), key_client: None, bound: Vec::new(), repeating: None, repeat_new: false, layer_keys: Vec::new(), super_held: false, to_render }
     }
 
     /// The pointer at that point of a monitor, in its pixels. Says whether it
@@ -57,7 +62,7 @@ impl Route {
                     Some(c) => Hit::Client(id, (mx - c.rect[0] as f64, my - c.rect[1] as f64)),
                     None => self.hit,
                 },
-                None if self.scene_held && !layers::dragging() => match st.layers.iter().find(|l| l.main) {
+                None if !self.scene_held.is_empty() && !layers::dragging() => match st.layers.iter().find(|l| l.main) {
                     Some(l) => Hit::Scene(Some((l.origin.0 + (mx - l.rect[0] as f64) as f32 / l.scale, l.origin.1 + (my - l.rect[1] as f64) as f32 / l.scale))),
                     None => screen::pointer_at(&st, (mx, my)),
                 },
@@ -95,24 +100,34 @@ impl Route {
         // which drops it wherever the pointer is (a window, a surface, the scene).
         if layers::dragging() && !down {
             self.grab = None;
+            self.client_held.retain(|c| *c != code);
             layers::tell(ToLayers::Button { code, down });
             return true;
         }
         // Let go of what was pressed on the scene: the scene's, wherever it is.
-        if self.scene_held && !down {
-            self.scene_held = false;
+        if !down && self.scene_held.contains(&code) {
+            self.scene_held.retain(|c| *c != code);
             if let 0x110..=0x116 = code {
                 let _ = self.to_render.send(ToRender::Button((code - 0x110) as u8, false));
             }
             return false;
         }
+        if !down && self.client_held.contains(&code) {
+            self.client_held.retain(|c| *c != code);
+            if self.client_held.is_empty() {
+                self.grab = None;
+            }
+            layers::tell(ToLayers::Button { code, down });
+            return true;
+        }
         if let Hit::Client(id, _) = self.hit {
             if down {
                 self.grab = Some(id);
+                if !self.client_held.contains(&code) {
+                    self.client_held.push(code);
+                }
                 let takes = screens.iter().any(|s| screen::takes_keyboard_on_click(&s.0.lock().unwrap(), id));
                 self.set_key_client(if takes { Some(id) } else { None });
-            } else {
-                self.grab = None;
             }
             layers::tell(ToLayers::Button { code, down });
             return true;
@@ -120,7 +135,9 @@ impl Route {
         if down {
             self.set_key_client(None);
             layers::tell(ToLayers::ScenePress);
-            self.scene_held = true;
+            if !self.scene_held.contains(&code) {
+                self.scene_held.push(code);
+            }
         }
         // Left, right, middle; and the side ones (back, forward), which only
         // the windows use.

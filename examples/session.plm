@@ -253,6 +253,14 @@ scene Session {
         }
     }
 
+    // The mouse over a dialog (they are in the middle of their monitor): the
+    // window under it does not take the keyboard from it. Without this,
+    // going into a «Save as» to type a name gave the keys to the window
+    // beneath it.
+    let Wmon = pick(mon, screen.0.width, screen.1.width, screen.2.width, screen.3.width)
+    let Hmon = pick(mon, screen.0.height, screen.1.height, screen.2.height, screen.3.height)
+    let on.dialog = (win.0.dialog and win.0.open and win.0.screen == mon and win.0.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.0.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.0.height, 40) + tb) / 2) + (win.1.dialog and win.1.open and win.1.screen == mon and win.1.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.1.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.1.height, 40) + tb) / 2) + (win.2.dialog and win.2.open and win.2.screen == mon and win.2.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.2.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.2.height, 40) + tb) / 2) + (win.3.dialog and win.3.open and win.3.screen == mon and win.3.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.3.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.3.height, 40) + tb) / 2) + (win.4.dialog and win.4.open and win.4.screen == mon and win.4.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.4.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.4.height, 40) + tb) / 2) + (win.5.dialog and win.5.open and win.5.screen == mon and win.5.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.5.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.5.height, 40) + tb) / 2) + (win.6.dialog and win.6.open and win.6.screen == mon and win.6.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.6.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.6.height, 40) + tb) / 2) + (win.7.dialog and win.7.open and win.7.screen == mon and win.7.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.7.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.7.height, 40) + tb) / 2) + (win.8.dialog and win.8.open and win.8.screen == mon and win.8.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.8.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.8.height, 40) + tb) / 2) + (win.9.dialog and win.9.open and win.9.screen == mon and win.9.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.9.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.9.height, 40) + tb) / 2) + (win.10.dialog and win.10.open and win.10.screen == mon and win.10.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.10.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.10.height, 40) + tb) / 2) + (win.11.dialog and win.11.open and win.11.screen == mon and win.11.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.11.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.11.height, 40) + tb) / 2) + (win.12.dialog and win.12.open and win.12.screen == mon and win.12.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.12.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.12.height, 40) + tb) / 2) + (win.13.dialog and win.13.open and win.13.screen == mon and win.13.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.13.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.13.height, 40) + tb) / 2) + (win.14.dialog and win.14.open and win.14.screen == mon and win.14.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.14.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.14.height, 40) + tb) / 2) + (win.15.dialog and win.15.open and win.15.screen == mon and win.15.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.15.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.15.height, 40) + tb) / 2) > 0.5
+
     repeat i in 0..16 {
         // A window is laid out on its own monitor: how big that one is and how
         // many windows share it. Each copy of the scene draws only its own.
@@ -508,6 +516,12 @@ scene Session {
             fw.$i = 0
             maxed.$i = 0
         }
+        // Carried or being resized when it goes —closed, put away—: nothing
+        // is carried any more (the release would never come to it).
+        on change win.$i.open while not win.$i.open and dragging == i { dragging = -1 }
+        on change win.$i.open while not win.$i.open and sizing == i { sizing = -1 }
+        on change win.$i.minimized while win.$i.minimized and dragging == i { dragging = -1 }
+        on change win.$i.minimized while win.$i.minimized and sizing == i { sizing = -1 }
         // The one that gets the keyboard comes over the rest.
         on change win.$i.focused while win.$i.focused {
             stamp.$i = stamp.top + 1
@@ -907,7 +921,10 @@ scene Session {
         }
         // The keyboard goes to the window the mouse is over, as it enters it:
         // no click needed first (Super+Q closes the one under the mouse).
-        let pointed = win.$i.open and sc == mon and not win.$i.dialog and not win.$i.minimized and mouse.x >= x.$i and mouse.x < x.$i + w.$i and mouse.y >= y.$i and mouse.y < y.$i + h.$i
+        // (Only one that is seen: on the workspace its monitor shows, and not
+        // under a dialog. One on another workspace in the same place took
+        // the keys, unseen.)
+        let pointed = win.$i.open and sc == mon and ws.here and not win.$i.dialog and not win.$i.minimized and not on.dialog and mouse.x >= x.$i and mouse.x < x.$i + w.$i and mouse.y >= y.$i and mouse.y < y.$i + h.$i
         // (Free, they overlap: the keyboard goes with a click, as on Windows.)
         // (Only the one entered gives it. The one left said «nobody» too, and
         // when both changed in the same round and the leaving one spoke last,
@@ -1261,6 +1278,9 @@ scene Session {
         let dy = (H - dh) / 2
         prop dlg.$i = 0 ~220ms
         let dlg.ws = win.$i.workspace == pick(win.$i.screen, win.shown.0, win.shown.1, win.shown.2, win.shown.3)
+        // The mouse going into it gives it the keyboard, as it does a window.
+        let dlg.pointed = win.$i.dialog and win.$i.open and dlg.ws and win.$i.screen == mon and abs(mouse.x - Wmon / 2) <= dw / 2 and abs(mouse.y - Hmon / 2) <= dh / 2
+        on change dlg.pointed while dlg.pointed and dragging < 0 and not overview { focus win.$i }
         follow dlg.$i = if(win.$i.dialog and win.$i.open and dlg.ws, 1, 0)
         group {
             show: dlg.$i > 0.01 and win.$i.screen == screen.index

@@ -1928,10 +1928,14 @@ impl State {
             Toplevel::Xdg(t) => t.parent(),
             Toplevel::X11(_) => None,
         };
+        // Else one that is seen on the same monitor, as when one is put away:
+        // the one that leads may be on another workspace or monitor, and it
+        // had the keys unseen.
+        let monitor = layers::shown(slot).map(|(m, _)| m);
         let back_to = parent.and_then(|p| self.window_of(&p)).filter(|s| *s != slot).or_else(|| {
             let screen = self.slots[slot].as_ref().map(|w| w.screen);
             self.order.iter().copied().find(|s| *s != slot && self.slots[*s].as_ref().is_some_and(|w| w.fullscreen && Some(w.screen) == screen))
-        });
+        }).or_else(|| self.order.iter().copied().find(|s| *s != slot && monitor.is_some() && layers::shown(*s).is_some_and(|(m, _)| Some(&m) == monitor.as_ref())));
         if let Some(w) = self.slots[slot].take() {
             self.toplevel_list.remove_toplevel(&w.listed);
             if w.fullscreen {
@@ -1949,8 +1953,9 @@ impl State {
         self.tell(NestEvent::Closed(slot));
         self.tell(NestEvent::Order(self.order.clone()));
         if self.focus == Some(slot) {
-            // Else the keyboard goes to the one that leads, as when a window closes anywhere.
-            let next = back_to.or_else(|| self.order.first().copied());
+            // Nothing seen there: the one that leads (a window closed with no
+            // monitor known, headless or nested).
+            let next = back_to.or_else(|| if monitor.is_none() { self.order.first().copied() } else { None });
             self.set_focus(next);
         }
         // One that was waiting takes its place.
