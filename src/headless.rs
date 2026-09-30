@@ -198,6 +198,15 @@ impl pleamar::Platform for Headless {
                 }
                 crate::layers::register(screens[..last].iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * unit_w, y: 0, mhz: mhz_of(m), scale }, sc.clone())).collect());
                 crate::layers::tell(crate::layers::ToLayers::Monitors);
+                // `PLEAMAR_HEADLESS_REPLUG=s`: and back that long after, for the
+                // compositor inside (its picture is not drawn again: this is to
+                // see where the windows go).
+                if let Some(back) = std::env::var("PLEAMAR_HEADLESS_REPLUG").ok().and_then(|v| v.parse::<f32>().ok()) {
+                    std::thread::sleep(Duration::from_secs_f32(back));
+                    println!("headless · monitor HEADLESS-{} plugged back", last + 1);
+                    crate::layers::register(screens.iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * unit_w, y: 0, mhz: mhz_of(m), scale }, sc.clone())).collect());
+                    crate::layers::tell(crate::layers::ToLayers::Monitors);
+                }
             });
         }
         // `PLEAMAR_HEADLESS_INPUT="900,40@3000 down@3500 up@3600 key:Escape:1@4000"`:

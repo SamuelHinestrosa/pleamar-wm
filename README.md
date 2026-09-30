@@ -51,6 +51,12 @@ the open windows without closing anything.
   send the window, `Super+Ctrl+Up/Down` the pool above or below, and
   `Super+Ctrl+Shift+Left/Right` carries the whole pool to the monitor beside.
   Changing, a wave crosses the monitor, and the windows change under the water.
+  At a glance (`Super+Tab`), each monitor's pools are a column of cards with
+  their windows and icons: press one to go there, drag a window onto one to send
+  it, drag a card to the other monitor to carry the whole pool. Unplug a
+  monitor and its pools wait on the other one; plug it back and they return.
+  Anything that asks for a window (a dock, Marea's finder, a link) takes you
+  to its pool.
 - **Up to 16 windows and 4 monitors**, left to right; a window carried from
   one to another is seen crossing.
 - **Window rules**: `window app=pavucontrol float size 820x560`, `window

@@ -274,6 +274,9 @@ struct Window {
     /// to go back there.
     minimized: bool,
     was_at: usize,
+    /// The monitor it had to leave because it went away (unplugged): when it
+    /// comes back, the window goes back to it, with its workspace.
+    home: Option<String>,
 }
 
 /// A number for a program, the same for all its surfaces and buffers.
@@ -973,6 +976,8 @@ impl State {
             }
             ToNest::Send(slot, screen) => {
                 if let Some(Some(w)) = self.slots.get_mut(slot) {
+                    // Carried somewhere on purpose: where it came from no longer calls it back.
+                    w.home = None;
                     if w.screen != screen {
                         let (from, to) = (self.outputs.get(w.screen).cloned(), self.outputs.get(screen).cloned());
                         w.screen = screen;
@@ -1424,11 +1429,27 @@ impl State {
             }
         }
         let new_index = |old: usize| old_names.get(old).and_then(|n| monitors.iter().position(|m| &m.name == n));
-        // The windows, by the name of their monitor; the ones on one that left, to the first.
+        // The windows, by the name of their monitor; the ones on one that left,
+        // to the first, remembering it; the ones whose monitor came back, to it.
+        // Each with its workspace, whole (`Moved`), not mixed into the one shown.
         let mut moved = Vec::new();
         for (slot, w) in self.slots.iter_mut().enumerate() {
             let Some(w) = w else { continue };
-            let to = new_index(w.screen).unwrap_or(0);
+            let back = w.home.as_ref().and_then(|h| monitors.iter().position(|m| &m.name == h));
+            let to = match (back, new_index(w.screen)) {
+                (Some(b), _) => {
+                    println!("windows · {} back to {}", w.app, monitors[b].name);
+                    w.home = None;
+                    b
+                }
+                (None, Some(i)) => i,
+                (None, None) => {
+                    if w.home.is_none() {
+                        w.home = old_names.get(w.screen).cloned();
+                    }
+                    0
+                }
+            };
             if to != w.screen || new_index(w.screen).is_none() {
                 w.screen = to;
                 moved.push((slot, to, w.surface.clone()));
@@ -1438,7 +1459,7 @@ impl State {
             if let Some(o) = outputs.get(to) {
                 o.enter(&surface);
             }
-            self.tell(NestEvent::Screen(slot, to));
+            self.tell(NestEvent::Moved(slot, to));
         }
         // The programs' surfaces: on their monitor by its name; the ones on one that left, closed.
         let mut closed = Vec::new();
@@ -1906,7 +1927,7 @@ impl State {
         }
         self.outputs[screen.min(self.outputs.len() - 1)].enter(&surface);
         let listed = self.toplevel_list.new_toplevel::<State>(title.clone(), app.clone());
-        self.slots[slot] = Some(Window { toplevel, surface, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen, shown: None, listed, fullscreen: false, dialog: false, floating: false, ruled: None, minimized: false, was_at: 0 });
+        self.slots[slot] = Some(Window { toplevel, surface, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen, shown: None, listed, fullscreen: false, dialog: false, floating: false, ruled: None, minimized: false, was_at: 0, home: None });
         self.order.push(slot);
         layers::set_private(slot, false);
         self.tell(NestEvent::Opened { slot, title, app, screen });
@@ -3128,6 +3149,8 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, usize> for State {
         match request {
             // Given the keyboard, a window put away comes back.
             toplevel_handle::Request::Activate { .. } => {
+                // Asked for, it is seen: its monitor shows its workspace.
+                state.tell(NestEvent::Reveal(*slot));
                 if state.slots.get(*slot).and_then(Option::as_ref).is_some_and(|w| w.minimized) {
                     state.set_minimized(*slot, false);
                 } else {
@@ -3205,6 +3228,7 @@ impl XdgActivationHandler for State {
     fn request_activation(&mut self, token: XdgActivationToken, data: XdgActivationTokenData, surface: WlSurface) {
         if data.timestamp.elapsed() < Duration::from_secs(10) {
             if let Some(slot) = self.window_of(&surface) {
+                self.tell(NestEvent::Reveal(slot));
                 self.set_focus(Some(slot));
             }
         }
