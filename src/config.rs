@@ -81,6 +81,9 @@ pub struct Pointing {
 #[derive(Clone, Debug, Default)]
 pub struct Config {
     pub monitors: Vec<MonitorRule>,
+    /// The programs pinned to the dock of free monitors, in order: `dock
+    /// kitty zen-browser org.telegram.desktop`.
+    pub dock: Vec<String>,
     pub keyboard: Keyboard,
     pub pointer: Pointing,
     pub touchpad: Pointing,
@@ -294,6 +297,7 @@ pub fn parse(text: &str, c: &mut Config) {
                     c.touchpad = p;
                 }
             }
+            "dock" => c.dock.extend(rest.iter().cloned()),
             "window" => {
                 let mut r = WindowRule::default();
                 let mut k = 0;

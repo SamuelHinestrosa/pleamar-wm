@@ -4,6 +4,7 @@
 //! pleamar's own.
 
 mod config;
+mod desktop;
 mod nest;
 mod portal;
 mod headless;

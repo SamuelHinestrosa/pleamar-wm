@@ -736,6 +736,9 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
     state.export_environment();
     println!("windows · programs connect at WAYLAND_DISPLAY={socket}");
     let _ = state.to_render.send(ToRender::Nest(NestEvent::Socket(socket)));
+    // What the dock has pinned (`dock …` in session.conf).
+    let pins = crate::config::get().dock.iter().map(|w| crate::desktop::pin(w)).collect();
+    let _ = state.to_render.send(ToRender::Nest(NestEvent::Dock(pins)));
     let _ = ready.send(Some(()));
     // A session of its own starts what the desktop has (the wallpaper, Marea):
     // `PLEAMAR_WM_AUTOSTART`, or ~/.config/pleamar/autostart, one command a
@@ -1207,7 +1210,8 @@ impl State {
             h.app_id(app.clone());
             h.done();
         }
-        self.tell(NestEvent::App(slot, app));
+        self.tell(NestEvent::App(slot, app.clone()));
+        self.tell(NestEvent::Icon(slot, crate::desktop::icon_for(&app)));
         self.apply_rules(slot);
     }
 
@@ -1930,7 +1934,11 @@ impl State {
         self.slots[slot] = Some(Window { toplevel, surface, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen, shown: None, listed, fullscreen: false, dialog: false, floating: false, ruled: None, minimized: false, was_at: 0, home: None });
         self.order.push(slot);
         layers::set_private(slot, false);
+        let icon = (!app.is_empty()).then(|| crate::desktop::icon_for(&app));
         self.tell(NestEvent::Opened { slot, title, app, screen });
+        if let Some(icon) = icon {
+            self.tell(NestEvent::Icon(slot, icon));
+        }
         self.tell(NestEvent::Order(self.order.clone()));
         self.apply_rules(slot);
         for m in self.toplevel_managers.clone() {

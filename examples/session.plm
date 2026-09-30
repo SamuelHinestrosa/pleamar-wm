@@ -346,6 +346,1437 @@ scene Session {
         }
     }
 
+    // ── the shore: the dock of a free monitor. When a monitor goes free, the
+    // water rises at its bottom edge and leaves the shore there, joined to it
+    // by a neck, as Marea hangs from hers at the top: the programs pinned
+    // (`dock …` in session.conf) and the others with windows on the pool
+    // shown, each with a drop per window under it (mint, the one with the
+    // keyboard); the windows put away, floating as they are; and the pools of
+    // the monitor, last. Hovering, the icons rise like buoys on a passing
+    // wave; pressed, one dips and rings the water. Tiled, there is no shore,
+    // and nothing is put away ──
+    spring rise = 190, 20
+    prop shore.0 = 0 ~rise
+    follow shore.0 = if(free.0 > 0.5, 1, 0)
+    let dk.n.0 = win.docks.0
+    let dk.m.0 = win.mins.0
+    let dk.p.0 = max(win.pools.0, win.used.0 + 1)
+    let dk.tw.0 = 28 + dk.n.0 * 60 + if(dk.m.0 > 0, 20 + dk.m.0 * 76, 0) + 20 + dk.p.0 * 26
+    prop dkw.0 = 200 ~pop
+    follow dkw.0 = dk.tw.0
+    let dk.x0.0 = screen.0.width / 2 - dkw.0 / 2
+    let dk.cy.0 = screen.0.height + 42 - 88 * shore.0
+    let dk.on.0 = mon == 0 and shore.0 > 0.6 and mouse.y >= dk.cy.0 - 46 and mouse.x >= dk.x0.0 and mouse.x <= dk.x0.0 + dkw.0
+    let dk.t.0 = (mouse.x - dk.x0.0 - 14) / 60 - 0.5
+    let dk.px.0 = dk.x0.0 + dkw.0 - 14 - dk.p.0 * 26
+    image dockicon.0.0 = from win.dock.0.0.icon, 96, 96
+    prop buoy.0.0 = 0 ~pop
+    follow buoy.0.0 = if(dk.on.0, pow(max(0, 1 - abs(0 - dk.t.0) / 1.8), 2), 0)
+    prop here.0.0 = 0 ~pop
+    follow here.0.0 = if(0 < dk.n.0, 1, 0)
+    prop ring.0.0 = 1 ~760ms
+    image dockicon.0.1 = from win.dock.0.1.icon, 96, 96
+    prop buoy.0.1 = 0 ~pop
+    follow buoy.0.1 = if(dk.on.0, pow(max(0, 1 - abs(1 - dk.t.0) / 1.8), 2), 0)
+    prop here.0.1 = 0 ~pop
+    follow here.0.1 = if(1 < dk.n.0, 1, 0)
+    prop ring.0.1 = 1 ~760ms
+    image dockicon.0.2 = from win.dock.0.2.icon, 96, 96
+    prop buoy.0.2 = 0 ~pop
+    follow buoy.0.2 = if(dk.on.0, pow(max(0, 1 - abs(2 - dk.t.0) / 1.8), 2), 0)
+    prop here.0.2 = 0 ~pop
+    follow here.0.2 = if(2 < dk.n.0, 1, 0)
+    prop ring.0.2 = 1 ~760ms
+    image dockicon.0.3 = from win.dock.0.3.icon, 96, 96
+    prop buoy.0.3 = 0 ~pop
+    follow buoy.0.3 = if(dk.on.0, pow(max(0, 1 - abs(3 - dk.t.0) / 1.8), 2), 0)
+    prop here.0.3 = 0 ~pop
+    follow here.0.3 = if(3 < dk.n.0, 1, 0)
+    prop ring.0.3 = 1 ~760ms
+    image dockicon.0.4 = from win.dock.0.4.icon, 96, 96
+    prop buoy.0.4 = 0 ~pop
+    follow buoy.0.4 = if(dk.on.0, pow(max(0, 1 - abs(4 - dk.t.0) / 1.8), 2), 0)
+    prop here.0.4 = 0 ~pop
+    follow here.0.4 = if(4 < dk.n.0, 1, 0)
+    prop ring.0.4 = 1 ~760ms
+    image dockicon.0.5 = from win.dock.0.5.icon, 96, 96
+    prop buoy.0.5 = 0 ~pop
+    follow buoy.0.5 = if(dk.on.0, pow(max(0, 1 - abs(5 - dk.t.0) / 1.8), 2), 0)
+    prop here.0.5 = 0 ~pop
+    follow here.0.5 = if(5 < dk.n.0, 1, 0)
+    prop ring.0.5 = 1 ~760ms
+    image dockicon.0.6 = from win.dock.0.6.icon, 96, 96
+    prop buoy.0.6 = 0 ~pop
+    follow buoy.0.6 = if(dk.on.0, pow(max(0, 1 - abs(6 - dk.t.0) / 1.8), 2), 0)
+    prop here.0.6 = 0 ~pop
+    follow here.0.6 = if(6 < dk.n.0, 1, 0)
+    prop ring.0.6 = 1 ~760ms
+    image dockicon.0.7 = from win.dock.0.7.icon, 96, 96
+    prop buoy.0.7 = 0 ~pop
+    follow buoy.0.7 = if(dk.on.0, pow(max(0, 1 - abs(7 - dk.t.0) / 1.8), 2), 0)
+    prop here.0.7 = 0 ~pop
+    follow here.0.7 = if(7 < dk.n.0, 1, 0)
+    prop ring.0.7 = 1 ~760ms
+    image dockicon.0.8 = from win.dock.0.8.icon, 96, 96
+    prop buoy.0.8 = 0 ~pop
+    follow buoy.0.8 = if(dk.on.0, pow(max(0, 1 - abs(8 - dk.t.0) / 1.8), 2), 0)
+    prop here.0.8 = 0 ~pop
+    follow here.0.8 = if(8 < dk.n.0, 1, 0)
+    prop ring.0.8 = 1 ~760ms
+    image dockicon.0.9 = from win.dock.0.9.icon, 96, 96
+    prop buoy.0.9 = 0 ~pop
+    follow buoy.0.9 = if(dk.on.0, pow(max(0, 1 - abs(9 - dk.t.0) / 1.8), 2), 0)
+    prop here.0.9 = 0 ~pop
+    follow here.0.9 = if(9 < dk.n.0, 1, 0)
+    prop ring.0.9 = 1 ~760ms
+    image dockicon.0.10 = from win.dock.0.10.icon, 96, 96
+    prop buoy.0.10 = 0 ~pop
+    follow buoy.0.10 = if(dk.on.0, pow(max(0, 1 - abs(10 - dk.t.0) / 1.8), 2), 0)
+    prop here.0.10 = 0 ~pop
+    follow here.0.10 = if(10 < dk.n.0, 1, 0)
+    prop ring.0.10 = 1 ~760ms
+    image dockicon.0.11 = from win.dock.0.11.icon, 96, 96
+    prop buoy.0.11 = 0 ~pop
+    follow buoy.0.11 = if(dk.on.0, pow(max(0, 1 - abs(11 - dk.t.0) / 1.8), 2), 0)
+    prop here.0.11 = 0 ~pop
+    follow here.0.11 = if(11 < dk.n.0, 1, 0)
+    prop ring.0.11 = 1 ~760ms
+    group {
+        z: 99982
+        show: shore.0 > 0.01 and screen.index == 0
+        body {
+            gradient: 0, dk.cy.0 - 32 to 0, dk.cy.0 + 32, #15181b, #0c0e10 45%, #0a0b0d
+            rim: 12%
+            shadow: 0, 12, 34, 42%
+            box { from: -80, H; size: W + 160, 140 }
+            box { at: dk.x0.0 + dkw.0 / 2, dk.cy.0; size: dkw.0 * (0.55 + 0.45 * shore.0), 64; corner: 22; blend: 22 + 36 * 4 * shore.0 * (1 - shore.0) }
+        }
+        group {
+            show: here.0.0 > 0.01
+            opacity: here.0.0
+            ellipse { at: (dk.x0.0 + 14 + 0 * 60 + 30), dk.cy.0 + 22; radius: 18 + 30 * ring.0.0; scale: 1, 0.32; stroke: 1.4 * (1 - ring.0.0) + 0.3; color: ink; opacity: 45% * (1 - ring.0.0); show: ring.0.0 < 0.99 }
+            image dockicon.0.0 { at: (dk.x0.0 + 14 + 0 * 60 + 30) - 22 * (1 + 0.14 * buoy.0.0) * here.0.0, (dk.cy.0 - 3 - 12 * buoy.0.0) - 22 * (1 + 0.14 * buoy.0.0) * here.0.0; size: 44 * (1 + 0.14 * buoy.0.0) * here.0.0, 44 * (1 + 0.14 * buoy.0.0) * here.0.0 }
+            ellipse { at: (dk.x0.0 + 14 + 0 * 60 + 30), dk.cy.0 + 25; radius: if(win.dock.0.0.focused, 2.4, 2); color: if(win.dock.0.0.focused, mint, ink); opacity: if(win.dock.0.0.focused, 95%, 55%); show: win.dock.0.0.windows == 1 or win.dock.0.0.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 0 * 60 + 30) - 3.5, dk.cy.0 + 25; radius: if(win.dock.0.0.focused, 2.4, 2); color: if(win.dock.0.0.focused, mint, ink); opacity: if(win.dock.0.0.focused, 95%, 55%); show: win.dock.0.0.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 0 * 60 + 30) + 3.5, dk.cy.0 + 25; radius: if(win.dock.0.0.focused, 2.4, 2); color: if(win.dock.0.0.focused, mint, ink); opacity: if(win.dock.0.0.focused, 95%, 55%); show: win.dock.0.0.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 0 * 60 + 30) - 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.0.focused, mint, ink); opacity: if(win.dock.0.0.focused, 95%, 55%); show: win.dock.0.0.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 0 * 60 + 30) + 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.0.focused, mint, ink); opacity: if(win.dock.0.0.focused, 95%, 55%); show: win.dock.0.0.windows >= 3 }
+            zone box dockz.0.0 { at: (dk.x0.0 + 14 + 0 * 60 + 30), dk.cy.0; size: 60, 64; cursor: pointer; active: shore.0 > 0.6 and 0 < dk.n.0 and not overview }
+        }
+        group {
+            show: here.0.1 > 0.01
+            opacity: here.0.1
+            ellipse { at: (dk.x0.0 + 14 + 1 * 60 + 30), dk.cy.0 + 22; radius: 18 + 30 * ring.0.1; scale: 1, 0.32; stroke: 1.4 * (1 - ring.0.1) + 0.3; color: ink; opacity: 45% * (1 - ring.0.1); show: ring.0.1 < 0.99 }
+            image dockicon.0.1 { at: (dk.x0.0 + 14 + 1 * 60 + 30) - 22 * (1 + 0.14 * buoy.0.1) * here.0.1, (dk.cy.0 - 3 - 12 * buoy.0.1) - 22 * (1 + 0.14 * buoy.0.1) * here.0.1; size: 44 * (1 + 0.14 * buoy.0.1) * here.0.1, 44 * (1 + 0.14 * buoy.0.1) * here.0.1 }
+            ellipse { at: (dk.x0.0 + 14 + 1 * 60 + 30), dk.cy.0 + 25; radius: if(win.dock.0.1.focused, 2.4, 2); color: if(win.dock.0.1.focused, mint, ink); opacity: if(win.dock.0.1.focused, 95%, 55%); show: win.dock.0.1.windows == 1 or win.dock.0.1.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 1 * 60 + 30) - 3.5, dk.cy.0 + 25; radius: if(win.dock.0.1.focused, 2.4, 2); color: if(win.dock.0.1.focused, mint, ink); opacity: if(win.dock.0.1.focused, 95%, 55%); show: win.dock.0.1.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 1 * 60 + 30) + 3.5, dk.cy.0 + 25; radius: if(win.dock.0.1.focused, 2.4, 2); color: if(win.dock.0.1.focused, mint, ink); opacity: if(win.dock.0.1.focused, 95%, 55%); show: win.dock.0.1.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 1 * 60 + 30) - 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.1.focused, mint, ink); opacity: if(win.dock.0.1.focused, 95%, 55%); show: win.dock.0.1.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 1 * 60 + 30) + 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.1.focused, mint, ink); opacity: if(win.dock.0.1.focused, 95%, 55%); show: win.dock.0.1.windows >= 3 }
+            zone box dockz.1.0 { at: (dk.x0.0 + 14 + 1 * 60 + 30), dk.cy.0; size: 60, 64; cursor: pointer; active: shore.0 > 0.6 and 1 < dk.n.0 and not overview }
+        }
+        group {
+            show: here.0.2 > 0.01
+            opacity: here.0.2
+            ellipse { at: (dk.x0.0 + 14 + 2 * 60 + 30), dk.cy.0 + 22; radius: 18 + 30 * ring.0.2; scale: 1, 0.32; stroke: 1.4 * (1 - ring.0.2) + 0.3; color: ink; opacity: 45% * (1 - ring.0.2); show: ring.0.2 < 0.99 }
+            image dockicon.0.2 { at: (dk.x0.0 + 14 + 2 * 60 + 30) - 22 * (1 + 0.14 * buoy.0.2) * here.0.2, (dk.cy.0 - 3 - 12 * buoy.0.2) - 22 * (1 + 0.14 * buoy.0.2) * here.0.2; size: 44 * (1 + 0.14 * buoy.0.2) * here.0.2, 44 * (1 + 0.14 * buoy.0.2) * here.0.2 }
+            ellipse { at: (dk.x0.0 + 14 + 2 * 60 + 30), dk.cy.0 + 25; radius: if(win.dock.0.2.focused, 2.4, 2); color: if(win.dock.0.2.focused, mint, ink); opacity: if(win.dock.0.2.focused, 95%, 55%); show: win.dock.0.2.windows == 1 or win.dock.0.2.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 2 * 60 + 30) - 3.5, dk.cy.0 + 25; radius: if(win.dock.0.2.focused, 2.4, 2); color: if(win.dock.0.2.focused, mint, ink); opacity: if(win.dock.0.2.focused, 95%, 55%); show: win.dock.0.2.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 2 * 60 + 30) + 3.5, dk.cy.0 + 25; radius: if(win.dock.0.2.focused, 2.4, 2); color: if(win.dock.0.2.focused, mint, ink); opacity: if(win.dock.0.2.focused, 95%, 55%); show: win.dock.0.2.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 2 * 60 + 30) - 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.2.focused, mint, ink); opacity: if(win.dock.0.2.focused, 95%, 55%); show: win.dock.0.2.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 2 * 60 + 30) + 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.2.focused, mint, ink); opacity: if(win.dock.0.2.focused, 95%, 55%); show: win.dock.0.2.windows >= 3 }
+            zone box dockz.2.0 { at: (dk.x0.0 + 14 + 2 * 60 + 30), dk.cy.0; size: 60, 64; cursor: pointer; active: shore.0 > 0.6 and 2 < dk.n.0 and not overview }
+        }
+        group {
+            show: here.0.3 > 0.01
+            opacity: here.0.3
+            ellipse { at: (dk.x0.0 + 14 + 3 * 60 + 30), dk.cy.0 + 22; radius: 18 + 30 * ring.0.3; scale: 1, 0.32; stroke: 1.4 * (1 - ring.0.3) + 0.3; color: ink; opacity: 45% * (1 - ring.0.3); show: ring.0.3 < 0.99 }
+            image dockicon.0.3 { at: (dk.x0.0 + 14 + 3 * 60 + 30) - 22 * (1 + 0.14 * buoy.0.3) * here.0.3, (dk.cy.0 - 3 - 12 * buoy.0.3) - 22 * (1 + 0.14 * buoy.0.3) * here.0.3; size: 44 * (1 + 0.14 * buoy.0.3) * here.0.3, 44 * (1 + 0.14 * buoy.0.3) * here.0.3 }
+            ellipse { at: (dk.x0.0 + 14 + 3 * 60 + 30), dk.cy.0 + 25; radius: if(win.dock.0.3.focused, 2.4, 2); color: if(win.dock.0.3.focused, mint, ink); opacity: if(win.dock.0.3.focused, 95%, 55%); show: win.dock.0.3.windows == 1 or win.dock.0.3.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 3 * 60 + 30) - 3.5, dk.cy.0 + 25; radius: if(win.dock.0.3.focused, 2.4, 2); color: if(win.dock.0.3.focused, mint, ink); opacity: if(win.dock.0.3.focused, 95%, 55%); show: win.dock.0.3.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 3 * 60 + 30) + 3.5, dk.cy.0 + 25; radius: if(win.dock.0.3.focused, 2.4, 2); color: if(win.dock.0.3.focused, mint, ink); opacity: if(win.dock.0.3.focused, 95%, 55%); show: win.dock.0.3.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 3 * 60 + 30) - 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.3.focused, mint, ink); opacity: if(win.dock.0.3.focused, 95%, 55%); show: win.dock.0.3.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 3 * 60 + 30) + 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.3.focused, mint, ink); opacity: if(win.dock.0.3.focused, 95%, 55%); show: win.dock.0.3.windows >= 3 }
+            zone box dockz.3.0 { at: (dk.x0.0 + 14 + 3 * 60 + 30), dk.cy.0; size: 60, 64; cursor: pointer; active: shore.0 > 0.6 and 3 < dk.n.0 and not overview }
+        }
+        group {
+            show: here.0.4 > 0.01
+            opacity: here.0.4
+            ellipse { at: (dk.x0.0 + 14 + 4 * 60 + 30), dk.cy.0 + 22; radius: 18 + 30 * ring.0.4; scale: 1, 0.32; stroke: 1.4 * (1 - ring.0.4) + 0.3; color: ink; opacity: 45% * (1 - ring.0.4); show: ring.0.4 < 0.99 }
+            image dockicon.0.4 { at: (dk.x0.0 + 14 + 4 * 60 + 30) - 22 * (1 + 0.14 * buoy.0.4) * here.0.4, (dk.cy.0 - 3 - 12 * buoy.0.4) - 22 * (1 + 0.14 * buoy.0.4) * here.0.4; size: 44 * (1 + 0.14 * buoy.0.4) * here.0.4, 44 * (1 + 0.14 * buoy.0.4) * here.0.4 }
+            ellipse { at: (dk.x0.0 + 14 + 4 * 60 + 30), dk.cy.0 + 25; radius: if(win.dock.0.4.focused, 2.4, 2); color: if(win.dock.0.4.focused, mint, ink); opacity: if(win.dock.0.4.focused, 95%, 55%); show: win.dock.0.4.windows == 1 or win.dock.0.4.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 4 * 60 + 30) - 3.5, dk.cy.0 + 25; radius: if(win.dock.0.4.focused, 2.4, 2); color: if(win.dock.0.4.focused, mint, ink); opacity: if(win.dock.0.4.focused, 95%, 55%); show: win.dock.0.4.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 4 * 60 + 30) + 3.5, dk.cy.0 + 25; radius: if(win.dock.0.4.focused, 2.4, 2); color: if(win.dock.0.4.focused, mint, ink); opacity: if(win.dock.0.4.focused, 95%, 55%); show: win.dock.0.4.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 4 * 60 + 30) - 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.4.focused, mint, ink); opacity: if(win.dock.0.4.focused, 95%, 55%); show: win.dock.0.4.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 4 * 60 + 30) + 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.4.focused, mint, ink); opacity: if(win.dock.0.4.focused, 95%, 55%); show: win.dock.0.4.windows >= 3 }
+            zone box dockz.4.0 { at: (dk.x0.0 + 14 + 4 * 60 + 30), dk.cy.0; size: 60, 64; cursor: pointer; active: shore.0 > 0.6 and 4 < dk.n.0 and not overview }
+        }
+        group {
+            show: here.0.5 > 0.01
+            opacity: here.0.5
+            ellipse { at: (dk.x0.0 + 14 + 5 * 60 + 30), dk.cy.0 + 22; radius: 18 + 30 * ring.0.5; scale: 1, 0.32; stroke: 1.4 * (1 - ring.0.5) + 0.3; color: ink; opacity: 45% * (1 - ring.0.5); show: ring.0.5 < 0.99 }
+            image dockicon.0.5 { at: (dk.x0.0 + 14 + 5 * 60 + 30) - 22 * (1 + 0.14 * buoy.0.5) * here.0.5, (dk.cy.0 - 3 - 12 * buoy.0.5) - 22 * (1 + 0.14 * buoy.0.5) * here.0.5; size: 44 * (1 + 0.14 * buoy.0.5) * here.0.5, 44 * (1 + 0.14 * buoy.0.5) * here.0.5 }
+            ellipse { at: (dk.x0.0 + 14 + 5 * 60 + 30), dk.cy.0 + 25; radius: if(win.dock.0.5.focused, 2.4, 2); color: if(win.dock.0.5.focused, mint, ink); opacity: if(win.dock.0.5.focused, 95%, 55%); show: win.dock.0.5.windows == 1 or win.dock.0.5.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 5 * 60 + 30) - 3.5, dk.cy.0 + 25; radius: if(win.dock.0.5.focused, 2.4, 2); color: if(win.dock.0.5.focused, mint, ink); opacity: if(win.dock.0.5.focused, 95%, 55%); show: win.dock.0.5.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 5 * 60 + 30) + 3.5, dk.cy.0 + 25; radius: if(win.dock.0.5.focused, 2.4, 2); color: if(win.dock.0.5.focused, mint, ink); opacity: if(win.dock.0.5.focused, 95%, 55%); show: win.dock.0.5.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 5 * 60 + 30) - 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.5.focused, mint, ink); opacity: if(win.dock.0.5.focused, 95%, 55%); show: win.dock.0.5.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 5 * 60 + 30) + 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.5.focused, mint, ink); opacity: if(win.dock.0.5.focused, 95%, 55%); show: win.dock.0.5.windows >= 3 }
+            zone box dockz.5.0 { at: (dk.x0.0 + 14 + 5 * 60 + 30), dk.cy.0; size: 60, 64; cursor: pointer; active: shore.0 > 0.6 and 5 < dk.n.0 and not overview }
+        }
+        group {
+            show: here.0.6 > 0.01
+            opacity: here.0.6
+            ellipse { at: (dk.x0.0 + 14 + 6 * 60 + 30), dk.cy.0 + 22; radius: 18 + 30 * ring.0.6; scale: 1, 0.32; stroke: 1.4 * (1 - ring.0.6) + 0.3; color: ink; opacity: 45% * (1 - ring.0.6); show: ring.0.6 < 0.99 }
+            image dockicon.0.6 { at: (dk.x0.0 + 14 + 6 * 60 + 30) - 22 * (1 + 0.14 * buoy.0.6) * here.0.6, (dk.cy.0 - 3 - 12 * buoy.0.6) - 22 * (1 + 0.14 * buoy.0.6) * here.0.6; size: 44 * (1 + 0.14 * buoy.0.6) * here.0.6, 44 * (1 + 0.14 * buoy.0.6) * here.0.6 }
+            ellipse { at: (dk.x0.0 + 14 + 6 * 60 + 30), dk.cy.0 + 25; radius: if(win.dock.0.6.focused, 2.4, 2); color: if(win.dock.0.6.focused, mint, ink); opacity: if(win.dock.0.6.focused, 95%, 55%); show: win.dock.0.6.windows == 1 or win.dock.0.6.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 6 * 60 + 30) - 3.5, dk.cy.0 + 25; radius: if(win.dock.0.6.focused, 2.4, 2); color: if(win.dock.0.6.focused, mint, ink); opacity: if(win.dock.0.6.focused, 95%, 55%); show: win.dock.0.6.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 6 * 60 + 30) + 3.5, dk.cy.0 + 25; radius: if(win.dock.0.6.focused, 2.4, 2); color: if(win.dock.0.6.focused, mint, ink); opacity: if(win.dock.0.6.focused, 95%, 55%); show: win.dock.0.6.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 6 * 60 + 30) - 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.6.focused, mint, ink); opacity: if(win.dock.0.6.focused, 95%, 55%); show: win.dock.0.6.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 6 * 60 + 30) + 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.6.focused, mint, ink); opacity: if(win.dock.0.6.focused, 95%, 55%); show: win.dock.0.6.windows >= 3 }
+            zone box dockz.6.0 { at: (dk.x0.0 + 14 + 6 * 60 + 30), dk.cy.0; size: 60, 64; cursor: pointer; active: shore.0 > 0.6 and 6 < dk.n.0 and not overview }
+        }
+        group {
+            show: here.0.7 > 0.01
+            opacity: here.0.7
+            ellipse { at: (dk.x0.0 + 14 + 7 * 60 + 30), dk.cy.0 + 22; radius: 18 + 30 * ring.0.7; scale: 1, 0.32; stroke: 1.4 * (1 - ring.0.7) + 0.3; color: ink; opacity: 45% * (1 - ring.0.7); show: ring.0.7 < 0.99 }
+            image dockicon.0.7 { at: (dk.x0.0 + 14 + 7 * 60 + 30) - 22 * (1 + 0.14 * buoy.0.7) * here.0.7, (dk.cy.0 - 3 - 12 * buoy.0.7) - 22 * (1 + 0.14 * buoy.0.7) * here.0.7; size: 44 * (1 + 0.14 * buoy.0.7) * here.0.7, 44 * (1 + 0.14 * buoy.0.7) * here.0.7 }
+            ellipse { at: (dk.x0.0 + 14 + 7 * 60 + 30), dk.cy.0 + 25; radius: if(win.dock.0.7.focused, 2.4, 2); color: if(win.dock.0.7.focused, mint, ink); opacity: if(win.dock.0.7.focused, 95%, 55%); show: win.dock.0.7.windows == 1 or win.dock.0.7.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 7 * 60 + 30) - 3.5, dk.cy.0 + 25; radius: if(win.dock.0.7.focused, 2.4, 2); color: if(win.dock.0.7.focused, mint, ink); opacity: if(win.dock.0.7.focused, 95%, 55%); show: win.dock.0.7.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 7 * 60 + 30) + 3.5, dk.cy.0 + 25; radius: if(win.dock.0.7.focused, 2.4, 2); color: if(win.dock.0.7.focused, mint, ink); opacity: if(win.dock.0.7.focused, 95%, 55%); show: win.dock.0.7.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 7 * 60 + 30) - 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.7.focused, mint, ink); opacity: if(win.dock.0.7.focused, 95%, 55%); show: win.dock.0.7.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 7 * 60 + 30) + 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.7.focused, mint, ink); opacity: if(win.dock.0.7.focused, 95%, 55%); show: win.dock.0.7.windows >= 3 }
+            zone box dockz.7.0 { at: (dk.x0.0 + 14 + 7 * 60 + 30), dk.cy.0; size: 60, 64; cursor: pointer; active: shore.0 > 0.6 and 7 < dk.n.0 and not overview }
+        }
+        group {
+            show: here.0.8 > 0.01
+            opacity: here.0.8
+            ellipse { at: (dk.x0.0 + 14 + 8 * 60 + 30), dk.cy.0 + 22; radius: 18 + 30 * ring.0.8; scale: 1, 0.32; stroke: 1.4 * (1 - ring.0.8) + 0.3; color: ink; opacity: 45% * (1 - ring.0.8); show: ring.0.8 < 0.99 }
+            image dockicon.0.8 { at: (dk.x0.0 + 14 + 8 * 60 + 30) - 22 * (1 + 0.14 * buoy.0.8) * here.0.8, (dk.cy.0 - 3 - 12 * buoy.0.8) - 22 * (1 + 0.14 * buoy.0.8) * here.0.8; size: 44 * (1 + 0.14 * buoy.0.8) * here.0.8, 44 * (1 + 0.14 * buoy.0.8) * here.0.8 }
+            ellipse { at: (dk.x0.0 + 14 + 8 * 60 + 30), dk.cy.0 + 25; radius: if(win.dock.0.8.focused, 2.4, 2); color: if(win.dock.0.8.focused, mint, ink); opacity: if(win.dock.0.8.focused, 95%, 55%); show: win.dock.0.8.windows == 1 or win.dock.0.8.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 8 * 60 + 30) - 3.5, dk.cy.0 + 25; radius: if(win.dock.0.8.focused, 2.4, 2); color: if(win.dock.0.8.focused, mint, ink); opacity: if(win.dock.0.8.focused, 95%, 55%); show: win.dock.0.8.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 8 * 60 + 30) + 3.5, dk.cy.0 + 25; radius: if(win.dock.0.8.focused, 2.4, 2); color: if(win.dock.0.8.focused, mint, ink); opacity: if(win.dock.0.8.focused, 95%, 55%); show: win.dock.0.8.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 8 * 60 + 30) - 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.8.focused, mint, ink); opacity: if(win.dock.0.8.focused, 95%, 55%); show: win.dock.0.8.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 8 * 60 + 30) + 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.8.focused, mint, ink); opacity: if(win.dock.0.8.focused, 95%, 55%); show: win.dock.0.8.windows >= 3 }
+            zone box dockz.8.0 { at: (dk.x0.0 + 14 + 8 * 60 + 30), dk.cy.0; size: 60, 64; cursor: pointer; active: shore.0 > 0.6 and 8 < dk.n.0 and not overview }
+        }
+        group {
+            show: here.0.9 > 0.01
+            opacity: here.0.9
+            ellipse { at: (dk.x0.0 + 14 + 9 * 60 + 30), dk.cy.0 + 22; radius: 18 + 30 * ring.0.9; scale: 1, 0.32; stroke: 1.4 * (1 - ring.0.9) + 0.3; color: ink; opacity: 45% * (1 - ring.0.9); show: ring.0.9 < 0.99 }
+            image dockicon.0.9 { at: (dk.x0.0 + 14 + 9 * 60 + 30) - 22 * (1 + 0.14 * buoy.0.9) * here.0.9, (dk.cy.0 - 3 - 12 * buoy.0.9) - 22 * (1 + 0.14 * buoy.0.9) * here.0.9; size: 44 * (1 + 0.14 * buoy.0.9) * here.0.9, 44 * (1 + 0.14 * buoy.0.9) * here.0.9 }
+            ellipse { at: (dk.x0.0 + 14 + 9 * 60 + 30), dk.cy.0 + 25; radius: if(win.dock.0.9.focused, 2.4, 2); color: if(win.dock.0.9.focused, mint, ink); opacity: if(win.dock.0.9.focused, 95%, 55%); show: win.dock.0.9.windows == 1 or win.dock.0.9.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 9 * 60 + 30) - 3.5, dk.cy.0 + 25; radius: if(win.dock.0.9.focused, 2.4, 2); color: if(win.dock.0.9.focused, mint, ink); opacity: if(win.dock.0.9.focused, 95%, 55%); show: win.dock.0.9.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 9 * 60 + 30) + 3.5, dk.cy.0 + 25; radius: if(win.dock.0.9.focused, 2.4, 2); color: if(win.dock.0.9.focused, mint, ink); opacity: if(win.dock.0.9.focused, 95%, 55%); show: win.dock.0.9.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 9 * 60 + 30) - 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.9.focused, mint, ink); opacity: if(win.dock.0.9.focused, 95%, 55%); show: win.dock.0.9.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 9 * 60 + 30) + 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.9.focused, mint, ink); opacity: if(win.dock.0.9.focused, 95%, 55%); show: win.dock.0.9.windows >= 3 }
+            zone box dockz.9.0 { at: (dk.x0.0 + 14 + 9 * 60 + 30), dk.cy.0; size: 60, 64; cursor: pointer; active: shore.0 > 0.6 and 9 < dk.n.0 and not overview }
+        }
+        group {
+            show: here.0.10 > 0.01
+            opacity: here.0.10
+            ellipse { at: (dk.x0.0 + 14 + 10 * 60 + 30), dk.cy.0 + 22; radius: 18 + 30 * ring.0.10; scale: 1, 0.32; stroke: 1.4 * (1 - ring.0.10) + 0.3; color: ink; opacity: 45% * (1 - ring.0.10); show: ring.0.10 < 0.99 }
+            image dockicon.0.10 { at: (dk.x0.0 + 14 + 10 * 60 + 30) - 22 * (1 + 0.14 * buoy.0.10) * here.0.10, (dk.cy.0 - 3 - 12 * buoy.0.10) - 22 * (1 + 0.14 * buoy.0.10) * here.0.10; size: 44 * (1 + 0.14 * buoy.0.10) * here.0.10, 44 * (1 + 0.14 * buoy.0.10) * here.0.10 }
+            ellipse { at: (dk.x0.0 + 14 + 10 * 60 + 30), dk.cy.0 + 25; radius: if(win.dock.0.10.focused, 2.4, 2); color: if(win.dock.0.10.focused, mint, ink); opacity: if(win.dock.0.10.focused, 95%, 55%); show: win.dock.0.10.windows == 1 or win.dock.0.10.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 10 * 60 + 30) - 3.5, dk.cy.0 + 25; radius: if(win.dock.0.10.focused, 2.4, 2); color: if(win.dock.0.10.focused, mint, ink); opacity: if(win.dock.0.10.focused, 95%, 55%); show: win.dock.0.10.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 10 * 60 + 30) + 3.5, dk.cy.0 + 25; radius: if(win.dock.0.10.focused, 2.4, 2); color: if(win.dock.0.10.focused, mint, ink); opacity: if(win.dock.0.10.focused, 95%, 55%); show: win.dock.0.10.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 10 * 60 + 30) - 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.10.focused, mint, ink); opacity: if(win.dock.0.10.focused, 95%, 55%); show: win.dock.0.10.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 10 * 60 + 30) + 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.10.focused, mint, ink); opacity: if(win.dock.0.10.focused, 95%, 55%); show: win.dock.0.10.windows >= 3 }
+            zone box dockz.10.0 { at: (dk.x0.0 + 14 + 10 * 60 + 30), dk.cy.0; size: 60, 64; cursor: pointer; active: shore.0 > 0.6 and 10 < dk.n.0 and not overview }
+        }
+        group {
+            show: here.0.11 > 0.01
+            opacity: here.0.11
+            ellipse { at: (dk.x0.0 + 14 + 11 * 60 + 30), dk.cy.0 + 22; radius: 18 + 30 * ring.0.11; scale: 1, 0.32; stroke: 1.4 * (1 - ring.0.11) + 0.3; color: ink; opacity: 45% * (1 - ring.0.11); show: ring.0.11 < 0.99 }
+            image dockicon.0.11 { at: (dk.x0.0 + 14 + 11 * 60 + 30) - 22 * (1 + 0.14 * buoy.0.11) * here.0.11, (dk.cy.0 - 3 - 12 * buoy.0.11) - 22 * (1 + 0.14 * buoy.0.11) * here.0.11; size: 44 * (1 + 0.14 * buoy.0.11) * here.0.11, 44 * (1 + 0.14 * buoy.0.11) * here.0.11 }
+            ellipse { at: (dk.x0.0 + 14 + 11 * 60 + 30), dk.cy.0 + 25; radius: if(win.dock.0.11.focused, 2.4, 2); color: if(win.dock.0.11.focused, mint, ink); opacity: if(win.dock.0.11.focused, 95%, 55%); show: win.dock.0.11.windows == 1 or win.dock.0.11.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 11 * 60 + 30) - 3.5, dk.cy.0 + 25; radius: if(win.dock.0.11.focused, 2.4, 2); color: if(win.dock.0.11.focused, mint, ink); opacity: if(win.dock.0.11.focused, 95%, 55%); show: win.dock.0.11.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 11 * 60 + 30) + 3.5, dk.cy.0 + 25; radius: if(win.dock.0.11.focused, 2.4, 2); color: if(win.dock.0.11.focused, mint, ink); opacity: if(win.dock.0.11.focused, 95%, 55%); show: win.dock.0.11.windows == 2 }
+            ellipse { at: (dk.x0.0 + 14 + 11 * 60 + 30) - 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.11.focused, mint, ink); opacity: if(win.dock.0.11.focused, 95%, 55%); show: win.dock.0.11.windows >= 3 }
+            ellipse { at: (dk.x0.0 + 14 + 11 * 60 + 30) + 6, dk.cy.0 + 25; radius: 2; color: if(win.dock.0.11.focused, mint, ink); opacity: if(win.dock.0.11.focused, 95%, 55%); show: win.dock.0.11.windows >= 3 }
+            zone box dockz.11.0 { at: (dk.x0.0 + 14 + 11 * 60 + 30), dk.cy.0; size: 60, 64; cursor: pointer; active: shore.0 > 0.6 and 11 < dk.n.0 and not overview }
+        }
+        // Between the programs and what is put away, and before the pools: a line of water.
+        box { at: dk.x0.0 + 14 + dk.n.0 * 60 + 10, dk.cy.0; size: 1, 30; color: ink; opacity: 18%; show: dk.m.0 > 0 }
+        box { at: dk.px.0 - 10, dk.cy.0; size: 1, 30; color: ink; opacity: 18% }
+        ellipse { at: (dk.px.0 + 0 * 26 + 13), dk.cy.0; radius: 8; stroke: 1.3; color: ink; opacity: if(1 == dk.p.0 and win.used.0 < 1, 22%, 45%); show: 0 < dk.p.0 and win.shown.0 != 1 }
+        ellipse { at: (dk.px.0 + 0 * 26 + 13), dk.cy.0; radius: 8; color: mint; opacity: 90%; show: 0 < dk.p.0 and win.shown.0 == 1 }
+        text "1" { at: (dk.px.0 + 0 * 26 + 13), dk.cy.0; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 0 < dk.p.0 and win.shown.0 == 1 }
+        zone ellipse dkpool.0.0 { at: (dk.px.0 + 0 * 26 + 13), dk.cy.0; radius: 12; cursor: pointer; active: shore.0 > 0.6 and 0 < dk.p.0 and not overview }
+        ellipse { at: (dk.px.0 + 1 * 26 + 13), dk.cy.0; radius: 8; stroke: 1.3; color: ink; opacity: if(2 == dk.p.0 and win.used.0 < 2, 22%, 45%); show: 1 < dk.p.0 and win.shown.0 != 2 }
+        ellipse { at: (dk.px.0 + 1 * 26 + 13), dk.cy.0; radius: 8; color: mint; opacity: 90%; show: 1 < dk.p.0 and win.shown.0 == 2 }
+        text "2" { at: (dk.px.0 + 1 * 26 + 13), dk.cy.0; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 1 < dk.p.0 and win.shown.0 == 2 }
+        zone ellipse dkpool.1.0 { at: (dk.px.0 + 1 * 26 + 13), dk.cy.0; radius: 12; cursor: pointer; active: shore.0 > 0.6 and 1 < dk.p.0 and not overview }
+        ellipse { at: (dk.px.0 + 2 * 26 + 13), dk.cy.0; radius: 8; stroke: 1.3; color: ink; opacity: if(3 == dk.p.0 and win.used.0 < 3, 22%, 45%); show: 2 < dk.p.0 and win.shown.0 != 3 }
+        ellipse { at: (dk.px.0 + 2 * 26 + 13), dk.cy.0; radius: 8; color: mint; opacity: 90%; show: 2 < dk.p.0 and win.shown.0 == 3 }
+        text "3" { at: (dk.px.0 + 2 * 26 + 13), dk.cy.0; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 2 < dk.p.0 and win.shown.0 == 3 }
+        zone ellipse dkpool.2.0 { at: (dk.px.0 + 2 * 26 + 13), dk.cy.0; radius: 12; cursor: pointer; active: shore.0 > 0.6 and 2 < dk.p.0 and not overview }
+        ellipse { at: (dk.px.0 + 3 * 26 + 13), dk.cy.0; radius: 8; stroke: 1.3; color: ink; opacity: if(4 == dk.p.0 and win.used.0 < 4, 22%, 45%); show: 3 < dk.p.0 and win.shown.0 != 4 }
+        ellipse { at: (dk.px.0 + 3 * 26 + 13), dk.cy.0; radius: 8; color: mint; opacity: 90%; show: 3 < dk.p.0 and win.shown.0 == 4 }
+        text "4" { at: (dk.px.0 + 3 * 26 + 13), dk.cy.0; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 3 < dk.p.0 and win.shown.0 == 4 }
+        zone ellipse dkpool.3.0 { at: (dk.px.0 + 3 * 26 + 13), dk.cy.0; radius: 12; cursor: pointer; active: shore.0 > 0.6 and 3 < dk.p.0 and not overview }
+        ellipse { at: (dk.px.0 + 4 * 26 + 13), dk.cy.0; radius: 8; stroke: 1.3; color: ink; opacity: if(5 == dk.p.0 and win.used.0 < 5, 22%, 45%); show: 4 < dk.p.0 and win.shown.0 != 5 }
+        ellipse { at: (dk.px.0 + 4 * 26 + 13), dk.cy.0; radius: 8; color: mint; opacity: 90%; show: 4 < dk.p.0 and win.shown.0 == 5 }
+        text "5" { at: (dk.px.0 + 4 * 26 + 13), dk.cy.0; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 4 < dk.p.0 and win.shown.0 == 5 }
+        zone ellipse dkpool.4.0 { at: (dk.px.0 + 4 * 26 + 13), dk.cy.0; radius: 12; cursor: pointer; active: shore.0 > 0.6 and 4 < dk.p.0 and not overview }
+        ellipse { at: (dk.px.0 + 5 * 26 + 13), dk.cy.0; radius: 8; stroke: 1.3; color: ink; opacity: if(6 == dk.p.0 and win.used.0 < 6, 22%, 45%); show: 5 < dk.p.0 and win.shown.0 != 6 }
+        ellipse { at: (dk.px.0 + 5 * 26 + 13), dk.cy.0; radius: 8; color: mint; opacity: 90%; show: 5 < dk.p.0 and win.shown.0 == 6 }
+        text "6" { at: (dk.px.0 + 5 * 26 + 13), dk.cy.0; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 5 < dk.p.0 and win.shown.0 == 6 }
+        zone ellipse dkpool.5.0 { at: (dk.px.0 + 5 * 26 + 13), dk.cy.0; radius: 12; cursor: pointer; active: shore.0 > 0.6 and 5 < dk.p.0 and not overview }
+        ellipse { at: (dk.px.0 + 6 * 26 + 13), dk.cy.0; radius: 8; stroke: 1.3; color: ink; opacity: if(7 == dk.p.0 and win.used.0 < 7, 22%, 45%); show: 6 < dk.p.0 and win.shown.0 != 7 }
+        ellipse { at: (dk.px.0 + 6 * 26 + 13), dk.cy.0; radius: 8; color: mint; opacity: 90%; show: 6 < dk.p.0 and win.shown.0 == 7 }
+        text "7" { at: (dk.px.0 + 6 * 26 + 13), dk.cy.0; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 6 < dk.p.0 and win.shown.0 == 7 }
+        zone ellipse dkpool.6.0 { at: (dk.px.0 + 6 * 26 + 13), dk.cy.0; radius: 12; cursor: pointer; active: shore.0 > 0.6 and 6 < dk.p.0 and not overview }
+        ellipse { at: (dk.px.0 + 7 * 26 + 13), dk.cy.0; radius: 8; stroke: 1.3; color: ink; opacity: if(8 == dk.p.0 and win.used.0 < 8, 22%, 45%); show: 7 < dk.p.0 and win.shown.0 != 8 }
+        ellipse { at: (dk.px.0 + 7 * 26 + 13), dk.cy.0; radius: 8; color: mint; opacity: 90%; show: 7 < dk.p.0 and win.shown.0 == 8 }
+        text "8" { at: (dk.px.0 + 7 * 26 + 13), dk.cy.0; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 7 < dk.p.0 and win.shown.0 == 8 }
+        zone ellipse dkpool.7.0 { at: (dk.px.0 + 7 * 26 + 13), dk.cy.0; radius: 12; cursor: pointer; active: shore.0 > 0.6 and 7 < dk.p.0 and not overview }
+    }
+    on press dockz.0.0 {
+        dock 0 on 0
+        impulse buoy.0.0 -9
+        ring.0.0: 0 ~0ms
+        ring.0.0: 1 ~760ms after 16ms
+    }
+    on press dockz.1.0 {
+        dock 1 on 0
+        impulse buoy.0.1 -9
+        ring.0.1: 0 ~0ms
+        ring.0.1: 1 ~760ms after 16ms
+    }
+    on press dockz.2.0 {
+        dock 2 on 0
+        impulse buoy.0.2 -9
+        ring.0.2: 0 ~0ms
+        ring.0.2: 1 ~760ms after 16ms
+    }
+    on press dockz.3.0 {
+        dock 3 on 0
+        impulse buoy.0.3 -9
+        ring.0.3: 0 ~0ms
+        ring.0.3: 1 ~760ms after 16ms
+    }
+    on press dockz.4.0 {
+        dock 4 on 0
+        impulse buoy.0.4 -9
+        ring.0.4: 0 ~0ms
+        ring.0.4: 1 ~760ms after 16ms
+    }
+    on press dockz.5.0 {
+        dock 5 on 0
+        impulse buoy.0.5 -9
+        ring.0.5: 0 ~0ms
+        ring.0.5: 1 ~760ms after 16ms
+    }
+    on press dockz.6.0 {
+        dock 6 on 0
+        impulse buoy.0.6 -9
+        ring.0.6: 0 ~0ms
+        ring.0.6: 1 ~760ms after 16ms
+    }
+    on press dockz.7.0 {
+        dock 7 on 0
+        impulse buoy.0.7 -9
+        ring.0.7: 0 ~0ms
+        ring.0.7: 1 ~760ms after 16ms
+    }
+    on press dockz.8.0 {
+        dock 8 on 0
+        impulse buoy.0.8 -9
+        ring.0.8: 0 ~0ms
+        ring.0.8: 1 ~760ms after 16ms
+    }
+    on press dockz.9.0 {
+        dock 9 on 0
+        impulse buoy.0.9 -9
+        ring.0.9: 0 ~0ms
+        ring.0.9: 1 ~760ms after 16ms
+    }
+    on press dockz.10.0 {
+        dock 10 on 0
+        impulse buoy.0.10 -9
+        ring.0.10: 0 ~0ms
+        ring.0.10: 1 ~760ms after 16ms
+    }
+    on press dockz.11.0 {
+        dock 11 on 0
+        impulse buoy.0.11 -9
+        ring.0.11: 0 ~0ms
+        ring.0.11: 1 ~760ms after 16ms
+    }
+    on press dkpool.0.0 { workspace 1 on 0 }
+    on press dkpool.1.0 { workspace 2 on 0 }
+    on press dkpool.2.0 { workspace 3 on 0 }
+    on press dkpool.3.0 { workspace 4 on 0 }
+    on press dkpool.4.0 { workspace 5 on 0 }
+    on press dkpool.5.0 { workspace 6 on 0 }
+    on press dkpool.6.0 { workspace 7 on 0 }
+    on press dkpool.7.0 { workspace 8 on 0 }
+    prop shore.1 = 0 ~rise
+    follow shore.1 = if(free.1 > 0.5, 1, 0)
+    let dk.n.1 = win.docks.1
+    let dk.m.1 = win.mins.1
+    let dk.p.1 = max(win.pools.1, win.used.1 + 1)
+    let dk.tw.1 = 28 + dk.n.1 * 60 + if(dk.m.1 > 0, 20 + dk.m.1 * 76, 0) + 20 + dk.p.1 * 26
+    prop dkw.1 = 200 ~pop
+    follow dkw.1 = dk.tw.1
+    let dk.x0.1 = screen.1.width / 2 - dkw.1 / 2
+    let dk.cy.1 = screen.1.height + 42 - 88 * shore.1
+    let dk.on.1 = mon == 1 and shore.1 > 0.6 and mouse.y >= dk.cy.1 - 46 and mouse.x >= dk.x0.1 and mouse.x <= dk.x0.1 + dkw.1
+    let dk.t.1 = (mouse.x - dk.x0.1 - 14) / 60 - 0.5
+    let dk.px.1 = dk.x0.1 + dkw.1 - 14 - dk.p.1 * 26
+    image dockicon.1.0 = from win.dock.1.0.icon, 96, 96
+    prop buoy.1.0 = 0 ~pop
+    follow buoy.1.0 = if(dk.on.1, pow(max(0, 1 - abs(0 - dk.t.1) / 1.8), 2), 0)
+    prop here.1.0 = 0 ~pop
+    follow here.1.0 = if(0 < dk.n.1, 1, 0)
+    prop ring.1.0 = 1 ~760ms
+    image dockicon.1.1 = from win.dock.1.1.icon, 96, 96
+    prop buoy.1.1 = 0 ~pop
+    follow buoy.1.1 = if(dk.on.1, pow(max(0, 1 - abs(1 - dk.t.1) / 1.8), 2), 0)
+    prop here.1.1 = 0 ~pop
+    follow here.1.1 = if(1 < dk.n.1, 1, 0)
+    prop ring.1.1 = 1 ~760ms
+    image dockicon.1.2 = from win.dock.1.2.icon, 96, 96
+    prop buoy.1.2 = 0 ~pop
+    follow buoy.1.2 = if(dk.on.1, pow(max(0, 1 - abs(2 - dk.t.1) / 1.8), 2), 0)
+    prop here.1.2 = 0 ~pop
+    follow here.1.2 = if(2 < dk.n.1, 1, 0)
+    prop ring.1.2 = 1 ~760ms
+    image dockicon.1.3 = from win.dock.1.3.icon, 96, 96
+    prop buoy.1.3 = 0 ~pop
+    follow buoy.1.3 = if(dk.on.1, pow(max(0, 1 - abs(3 - dk.t.1) / 1.8), 2), 0)
+    prop here.1.3 = 0 ~pop
+    follow here.1.3 = if(3 < dk.n.1, 1, 0)
+    prop ring.1.3 = 1 ~760ms
+    image dockicon.1.4 = from win.dock.1.4.icon, 96, 96
+    prop buoy.1.4 = 0 ~pop
+    follow buoy.1.4 = if(dk.on.1, pow(max(0, 1 - abs(4 - dk.t.1) / 1.8), 2), 0)
+    prop here.1.4 = 0 ~pop
+    follow here.1.4 = if(4 < dk.n.1, 1, 0)
+    prop ring.1.4 = 1 ~760ms
+    image dockicon.1.5 = from win.dock.1.5.icon, 96, 96
+    prop buoy.1.5 = 0 ~pop
+    follow buoy.1.5 = if(dk.on.1, pow(max(0, 1 - abs(5 - dk.t.1) / 1.8), 2), 0)
+    prop here.1.5 = 0 ~pop
+    follow here.1.5 = if(5 < dk.n.1, 1, 0)
+    prop ring.1.5 = 1 ~760ms
+    image dockicon.1.6 = from win.dock.1.6.icon, 96, 96
+    prop buoy.1.6 = 0 ~pop
+    follow buoy.1.6 = if(dk.on.1, pow(max(0, 1 - abs(6 - dk.t.1) / 1.8), 2), 0)
+    prop here.1.6 = 0 ~pop
+    follow here.1.6 = if(6 < dk.n.1, 1, 0)
+    prop ring.1.6 = 1 ~760ms
+    image dockicon.1.7 = from win.dock.1.7.icon, 96, 96
+    prop buoy.1.7 = 0 ~pop
+    follow buoy.1.7 = if(dk.on.1, pow(max(0, 1 - abs(7 - dk.t.1) / 1.8), 2), 0)
+    prop here.1.7 = 0 ~pop
+    follow here.1.7 = if(7 < dk.n.1, 1, 0)
+    prop ring.1.7 = 1 ~760ms
+    image dockicon.1.8 = from win.dock.1.8.icon, 96, 96
+    prop buoy.1.8 = 0 ~pop
+    follow buoy.1.8 = if(dk.on.1, pow(max(0, 1 - abs(8 - dk.t.1) / 1.8), 2), 0)
+    prop here.1.8 = 0 ~pop
+    follow here.1.8 = if(8 < dk.n.1, 1, 0)
+    prop ring.1.8 = 1 ~760ms
+    image dockicon.1.9 = from win.dock.1.9.icon, 96, 96
+    prop buoy.1.9 = 0 ~pop
+    follow buoy.1.9 = if(dk.on.1, pow(max(0, 1 - abs(9 - dk.t.1) / 1.8), 2), 0)
+    prop here.1.9 = 0 ~pop
+    follow here.1.9 = if(9 < dk.n.1, 1, 0)
+    prop ring.1.9 = 1 ~760ms
+    image dockicon.1.10 = from win.dock.1.10.icon, 96, 96
+    prop buoy.1.10 = 0 ~pop
+    follow buoy.1.10 = if(dk.on.1, pow(max(0, 1 - abs(10 - dk.t.1) / 1.8), 2), 0)
+    prop here.1.10 = 0 ~pop
+    follow here.1.10 = if(10 < dk.n.1, 1, 0)
+    prop ring.1.10 = 1 ~760ms
+    image dockicon.1.11 = from win.dock.1.11.icon, 96, 96
+    prop buoy.1.11 = 0 ~pop
+    follow buoy.1.11 = if(dk.on.1, pow(max(0, 1 - abs(11 - dk.t.1) / 1.8), 2), 0)
+    prop here.1.11 = 0 ~pop
+    follow here.1.11 = if(11 < dk.n.1, 1, 0)
+    prop ring.1.11 = 1 ~760ms
+    group {
+        z: 99982
+        show: shore.1 > 0.01 and screen.index == 1
+        body {
+            gradient: 0, dk.cy.1 - 32 to 0, dk.cy.1 + 32, #15181b, #0c0e10 45%, #0a0b0d
+            rim: 12%
+            shadow: 0, 12, 34, 42%
+            box { from: -80, H; size: W + 160, 140 }
+            box { at: dk.x0.1 + dkw.1 / 2, dk.cy.1; size: dkw.1 * (0.55 + 0.45 * shore.1), 64; corner: 22; blend: 22 + 36 * 4 * shore.1 * (1 - shore.1) }
+        }
+        group {
+            show: here.1.0 > 0.01
+            opacity: here.1.0
+            ellipse { at: (dk.x0.1 + 14 + 0 * 60 + 30), dk.cy.1 + 22; radius: 18 + 30 * ring.1.0; scale: 1, 0.32; stroke: 1.4 * (1 - ring.1.0) + 0.3; color: ink; opacity: 45% * (1 - ring.1.0); show: ring.1.0 < 0.99 }
+            image dockicon.1.0 { at: (dk.x0.1 + 14 + 0 * 60 + 30) - 22 * (1 + 0.14 * buoy.1.0) * here.1.0, (dk.cy.1 - 3 - 12 * buoy.1.0) - 22 * (1 + 0.14 * buoy.1.0) * here.1.0; size: 44 * (1 + 0.14 * buoy.1.0) * here.1.0, 44 * (1 + 0.14 * buoy.1.0) * here.1.0 }
+            ellipse { at: (dk.x0.1 + 14 + 0 * 60 + 30), dk.cy.1 + 25; radius: if(win.dock.1.0.focused, 2.4, 2); color: if(win.dock.1.0.focused, mint, ink); opacity: if(win.dock.1.0.focused, 95%, 55%); show: win.dock.1.0.windows == 1 or win.dock.1.0.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 0 * 60 + 30) - 3.5, dk.cy.1 + 25; radius: if(win.dock.1.0.focused, 2.4, 2); color: if(win.dock.1.0.focused, mint, ink); opacity: if(win.dock.1.0.focused, 95%, 55%); show: win.dock.1.0.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 0 * 60 + 30) + 3.5, dk.cy.1 + 25; radius: if(win.dock.1.0.focused, 2.4, 2); color: if(win.dock.1.0.focused, mint, ink); opacity: if(win.dock.1.0.focused, 95%, 55%); show: win.dock.1.0.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 0 * 60 + 30) - 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.0.focused, mint, ink); opacity: if(win.dock.1.0.focused, 95%, 55%); show: win.dock.1.0.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 0 * 60 + 30) + 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.0.focused, mint, ink); opacity: if(win.dock.1.0.focused, 95%, 55%); show: win.dock.1.0.windows >= 3 }
+            zone box dockz.0.1 { at: (dk.x0.1 + 14 + 0 * 60 + 30), dk.cy.1; size: 60, 64; cursor: pointer; active: shore.1 > 0.6 and 0 < dk.n.1 and not overview }
+        }
+        group {
+            show: here.1.1 > 0.01
+            opacity: here.1.1
+            ellipse { at: (dk.x0.1 + 14 + 1 * 60 + 30), dk.cy.1 + 22; radius: 18 + 30 * ring.1.1; scale: 1, 0.32; stroke: 1.4 * (1 - ring.1.1) + 0.3; color: ink; opacity: 45% * (1 - ring.1.1); show: ring.1.1 < 0.99 }
+            image dockicon.1.1 { at: (dk.x0.1 + 14 + 1 * 60 + 30) - 22 * (1 + 0.14 * buoy.1.1) * here.1.1, (dk.cy.1 - 3 - 12 * buoy.1.1) - 22 * (1 + 0.14 * buoy.1.1) * here.1.1; size: 44 * (1 + 0.14 * buoy.1.1) * here.1.1, 44 * (1 + 0.14 * buoy.1.1) * here.1.1 }
+            ellipse { at: (dk.x0.1 + 14 + 1 * 60 + 30), dk.cy.1 + 25; radius: if(win.dock.1.1.focused, 2.4, 2); color: if(win.dock.1.1.focused, mint, ink); opacity: if(win.dock.1.1.focused, 95%, 55%); show: win.dock.1.1.windows == 1 or win.dock.1.1.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 1 * 60 + 30) - 3.5, dk.cy.1 + 25; radius: if(win.dock.1.1.focused, 2.4, 2); color: if(win.dock.1.1.focused, mint, ink); opacity: if(win.dock.1.1.focused, 95%, 55%); show: win.dock.1.1.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 1 * 60 + 30) + 3.5, dk.cy.1 + 25; radius: if(win.dock.1.1.focused, 2.4, 2); color: if(win.dock.1.1.focused, mint, ink); opacity: if(win.dock.1.1.focused, 95%, 55%); show: win.dock.1.1.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 1 * 60 + 30) - 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.1.focused, mint, ink); opacity: if(win.dock.1.1.focused, 95%, 55%); show: win.dock.1.1.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 1 * 60 + 30) + 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.1.focused, mint, ink); opacity: if(win.dock.1.1.focused, 95%, 55%); show: win.dock.1.1.windows >= 3 }
+            zone box dockz.1.1 { at: (dk.x0.1 + 14 + 1 * 60 + 30), dk.cy.1; size: 60, 64; cursor: pointer; active: shore.1 > 0.6 and 1 < dk.n.1 and not overview }
+        }
+        group {
+            show: here.1.2 > 0.01
+            opacity: here.1.2
+            ellipse { at: (dk.x0.1 + 14 + 2 * 60 + 30), dk.cy.1 + 22; radius: 18 + 30 * ring.1.2; scale: 1, 0.32; stroke: 1.4 * (1 - ring.1.2) + 0.3; color: ink; opacity: 45% * (1 - ring.1.2); show: ring.1.2 < 0.99 }
+            image dockicon.1.2 { at: (dk.x0.1 + 14 + 2 * 60 + 30) - 22 * (1 + 0.14 * buoy.1.2) * here.1.2, (dk.cy.1 - 3 - 12 * buoy.1.2) - 22 * (1 + 0.14 * buoy.1.2) * here.1.2; size: 44 * (1 + 0.14 * buoy.1.2) * here.1.2, 44 * (1 + 0.14 * buoy.1.2) * here.1.2 }
+            ellipse { at: (dk.x0.1 + 14 + 2 * 60 + 30), dk.cy.1 + 25; radius: if(win.dock.1.2.focused, 2.4, 2); color: if(win.dock.1.2.focused, mint, ink); opacity: if(win.dock.1.2.focused, 95%, 55%); show: win.dock.1.2.windows == 1 or win.dock.1.2.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 2 * 60 + 30) - 3.5, dk.cy.1 + 25; radius: if(win.dock.1.2.focused, 2.4, 2); color: if(win.dock.1.2.focused, mint, ink); opacity: if(win.dock.1.2.focused, 95%, 55%); show: win.dock.1.2.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 2 * 60 + 30) + 3.5, dk.cy.1 + 25; radius: if(win.dock.1.2.focused, 2.4, 2); color: if(win.dock.1.2.focused, mint, ink); opacity: if(win.dock.1.2.focused, 95%, 55%); show: win.dock.1.2.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 2 * 60 + 30) - 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.2.focused, mint, ink); opacity: if(win.dock.1.2.focused, 95%, 55%); show: win.dock.1.2.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 2 * 60 + 30) + 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.2.focused, mint, ink); opacity: if(win.dock.1.2.focused, 95%, 55%); show: win.dock.1.2.windows >= 3 }
+            zone box dockz.2.1 { at: (dk.x0.1 + 14 + 2 * 60 + 30), dk.cy.1; size: 60, 64; cursor: pointer; active: shore.1 > 0.6 and 2 < dk.n.1 and not overview }
+        }
+        group {
+            show: here.1.3 > 0.01
+            opacity: here.1.3
+            ellipse { at: (dk.x0.1 + 14 + 3 * 60 + 30), dk.cy.1 + 22; radius: 18 + 30 * ring.1.3; scale: 1, 0.32; stroke: 1.4 * (1 - ring.1.3) + 0.3; color: ink; opacity: 45% * (1 - ring.1.3); show: ring.1.3 < 0.99 }
+            image dockicon.1.3 { at: (dk.x0.1 + 14 + 3 * 60 + 30) - 22 * (1 + 0.14 * buoy.1.3) * here.1.3, (dk.cy.1 - 3 - 12 * buoy.1.3) - 22 * (1 + 0.14 * buoy.1.3) * here.1.3; size: 44 * (1 + 0.14 * buoy.1.3) * here.1.3, 44 * (1 + 0.14 * buoy.1.3) * here.1.3 }
+            ellipse { at: (dk.x0.1 + 14 + 3 * 60 + 30), dk.cy.1 + 25; radius: if(win.dock.1.3.focused, 2.4, 2); color: if(win.dock.1.3.focused, mint, ink); opacity: if(win.dock.1.3.focused, 95%, 55%); show: win.dock.1.3.windows == 1 or win.dock.1.3.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 3 * 60 + 30) - 3.5, dk.cy.1 + 25; radius: if(win.dock.1.3.focused, 2.4, 2); color: if(win.dock.1.3.focused, mint, ink); opacity: if(win.dock.1.3.focused, 95%, 55%); show: win.dock.1.3.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 3 * 60 + 30) + 3.5, dk.cy.1 + 25; radius: if(win.dock.1.3.focused, 2.4, 2); color: if(win.dock.1.3.focused, mint, ink); opacity: if(win.dock.1.3.focused, 95%, 55%); show: win.dock.1.3.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 3 * 60 + 30) - 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.3.focused, mint, ink); opacity: if(win.dock.1.3.focused, 95%, 55%); show: win.dock.1.3.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 3 * 60 + 30) + 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.3.focused, mint, ink); opacity: if(win.dock.1.3.focused, 95%, 55%); show: win.dock.1.3.windows >= 3 }
+            zone box dockz.3.1 { at: (dk.x0.1 + 14 + 3 * 60 + 30), dk.cy.1; size: 60, 64; cursor: pointer; active: shore.1 > 0.6 and 3 < dk.n.1 and not overview }
+        }
+        group {
+            show: here.1.4 > 0.01
+            opacity: here.1.4
+            ellipse { at: (dk.x0.1 + 14 + 4 * 60 + 30), dk.cy.1 + 22; radius: 18 + 30 * ring.1.4; scale: 1, 0.32; stroke: 1.4 * (1 - ring.1.4) + 0.3; color: ink; opacity: 45% * (1 - ring.1.4); show: ring.1.4 < 0.99 }
+            image dockicon.1.4 { at: (dk.x0.1 + 14 + 4 * 60 + 30) - 22 * (1 + 0.14 * buoy.1.4) * here.1.4, (dk.cy.1 - 3 - 12 * buoy.1.4) - 22 * (1 + 0.14 * buoy.1.4) * here.1.4; size: 44 * (1 + 0.14 * buoy.1.4) * here.1.4, 44 * (1 + 0.14 * buoy.1.4) * here.1.4 }
+            ellipse { at: (dk.x0.1 + 14 + 4 * 60 + 30), dk.cy.1 + 25; radius: if(win.dock.1.4.focused, 2.4, 2); color: if(win.dock.1.4.focused, mint, ink); opacity: if(win.dock.1.4.focused, 95%, 55%); show: win.dock.1.4.windows == 1 or win.dock.1.4.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 4 * 60 + 30) - 3.5, dk.cy.1 + 25; radius: if(win.dock.1.4.focused, 2.4, 2); color: if(win.dock.1.4.focused, mint, ink); opacity: if(win.dock.1.4.focused, 95%, 55%); show: win.dock.1.4.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 4 * 60 + 30) + 3.5, dk.cy.1 + 25; radius: if(win.dock.1.4.focused, 2.4, 2); color: if(win.dock.1.4.focused, mint, ink); opacity: if(win.dock.1.4.focused, 95%, 55%); show: win.dock.1.4.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 4 * 60 + 30) - 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.4.focused, mint, ink); opacity: if(win.dock.1.4.focused, 95%, 55%); show: win.dock.1.4.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 4 * 60 + 30) + 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.4.focused, mint, ink); opacity: if(win.dock.1.4.focused, 95%, 55%); show: win.dock.1.4.windows >= 3 }
+            zone box dockz.4.1 { at: (dk.x0.1 + 14 + 4 * 60 + 30), dk.cy.1; size: 60, 64; cursor: pointer; active: shore.1 > 0.6 and 4 < dk.n.1 and not overview }
+        }
+        group {
+            show: here.1.5 > 0.01
+            opacity: here.1.5
+            ellipse { at: (dk.x0.1 + 14 + 5 * 60 + 30), dk.cy.1 + 22; radius: 18 + 30 * ring.1.5; scale: 1, 0.32; stroke: 1.4 * (1 - ring.1.5) + 0.3; color: ink; opacity: 45% * (1 - ring.1.5); show: ring.1.5 < 0.99 }
+            image dockicon.1.5 { at: (dk.x0.1 + 14 + 5 * 60 + 30) - 22 * (1 + 0.14 * buoy.1.5) * here.1.5, (dk.cy.1 - 3 - 12 * buoy.1.5) - 22 * (1 + 0.14 * buoy.1.5) * here.1.5; size: 44 * (1 + 0.14 * buoy.1.5) * here.1.5, 44 * (1 + 0.14 * buoy.1.5) * here.1.5 }
+            ellipse { at: (dk.x0.1 + 14 + 5 * 60 + 30), dk.cy.1 + 25; radius: if(win.dock.1.5.focused, 2.4, 2); color: if(win.dock.1.5.focused, mint, ink); opacity: if(win.dock.1.5.focused, 95%, 55%); show: win.dock.1.5.windows == 1 or win.dock.1.5.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 5 * 60 + 30) - 3.5, dk.cy.1 + 25; radius: if(win.dock.1.5.focused, 2.4, 2); color: if(win.dock.1.5.focused, mint, ink); opacity: if(win.dock.1.5.focused, 95%, 55%); show: win.dock.1.5.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 5 * 60 + 30) + 3.5, dk.cy.1 + 25; radius: if(win.dock.1.5.focused, 2.4, 2); color: if(win.dock.1.5.focused, mint, ink); opacity: if(win.dock.1.5.focused, 95%, 55%); show: win.dock.1.5.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 5 * 60 + 30) - 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.5.focused, mint, ink); opacity: if(win.dock.1.5.focused, 95%, 55%); show: win.dock.1.5.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 5 * 60 + 30) + 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.5.focused, mint, ink); opacity: if(win.dock.1.5.focused, 95%, 55%); show: win.dock.1.5.windows >= 3 }
+            zone box dockz.5.1 { at: (dk.x0.1 + 14 + 5 * 60 + 30), dk.cy.1; size: 60, 64; cursor: pointer; active: shore.1 > 0.6 and 5 < dk.n.1 and not overview }
+        }
+        group {
+            show: here.1.6 > 0.01
+            opacity: here.1.6
+            ellipse { at: (dk.x0.1 + 14 + 6 * 60 + 30), dk.cy.1 + 22; radius: 18 + 30 * ring.1.6; scale: 1, 0.32; stroke: 1.4 * (1 - ring.1.6) + 0.3; color: ink; opacity: 45% * (1 - ring.1.6); show: ring.1.6 < 0.99 }
+            image dockicon.1.6 { at: (dk.x0.1 + 14 + 6 * 60 + 30) - 22 * (1 + 0.14 * buoy.1.6) * here.1.6, (dk.cy.1 - 3 - 12 * buoy.1.6) - 22 * (1 + 0.14 * buoy.1.6) * here.1.6; size: 44 * (1 + 0.14 * buoy.1.6) * here.1.6, 44 * (1 + 0.14 * buoy.1.6) * here.1.6 }
+            ellipse { at: (dk.x0.1 + 14 + 6 * 60 + 30), dk.cy.1 + 25; radius: if(win.dock.1.6.focused, 2.4, 2); color: if(win.dock.1.6.focused, mint, ink); opacity: if(win.dock.1.6.focused, 95%, 55%); show: win.dock.1.6.windows == 1 or win.dock.1.6.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 6 * 60 + 30) - 3.5, dk.cy.1 + 25; radius: if(win.dock.1.6.focused, 2.4, 2); color: if(win.dock.1.6.focused, mint, ink); opacity: if(win.dock.1.6.focused, 95%, 55%); show: win.dock.1.6.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 6 * 60 + 30) + 3.5, dk.cy.1 + 25; radius: if(win.dock.1.6.focused, 2.4, 2); color: if(win.dock.1.6.focused, mint, ink); opacity: if(win.dock.1.6.focused, 95%, 55%); show: win.dock.1.6.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 6 * 60 + 30) - 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.6.focused, mint, ink); opacity: if(win.dock.1.6.focused, 95%, 55%); show: win.dock.1.6.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 6 * 60 + 30) + 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.6.focused, mint, ink); opacity: if(win.dock.1.6.focused, 95%, 55%); show: win.dock.1.6.windows >= 3 }
+            zone box dockz.6.1 { at: (dk.x0.1 + 14 + 6 * 60 + 30), dk.cy.1; size: 60, 64; cursor: pointer; active: shore.1 > 0.6 and 6 < dk.n.1 and not overview }
+        }
+        group {
+            show: here.1.7 > 0.01
+            opacity: here.1.7
+            ellipse { at: (dk.x0.1 + 14 + 7 * 60 + 30), dk.cy.1 + 22; radius: 18 + 30 * ring.1.7; scale: 1, 0.32; stroke: 1.4 * (1 - ring.1.7) + 0.3; color: ink; opacity: 45% * (1 - ring.1.7); show: ring.1.7 < 0.99 }
+            image dockicon.1.7 { at: (dk.x0.1 + 14 + 7 * 60 + 30) - 22 * (1 + 0.14 * buoy.1.7) * here.1.7, (dk.cy.1 - 3 - 12 * buoy.1.7) - 22 * (1 + 0.14 * buoy.1.7) * here.1.7; size: 44 * (1 + 0.14 * buoy.1.7) * here.1.7, 44 * (1 + 0.14 * buoy.1.7) * here.1.7 }
+            ellipse { at: (dk.x0.1 + 14 + 7 * 60 + 30), dk.cy.1 + 25; radius: if(win.dock.1.7.focused, 2.4, 2); color: if(win.dock.1.7.focused, mint, ink); opacity: if(win.dock.1.7.focused, 95%, 55%); show: win.dock.1.7.windows == 1 or win.dock.1.7.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 7 * 60 + 30) - 3.5, dk.cy.1 + 25; radius: if(win.dock.1.7.focused, 2.4, 2); color: if(win.dock.1.7.focused, mint, ink); opacity: if(win.dock.1.7.focused, 95%, 55%); show: win.dock.1.7.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 7 * 60 + 30) + 3.5, dk.cy.1 + 25; radius: if(win.dock.1.7.focused, 2.4, 2); color: if(win.dock.1.7.focused, mint, ink); opacity: if(win.dock.1.7.focused, 95%, 55%); show: win.dock.1.7.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 7 * 60 + 30) - 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.7.focused, mint, ink); opacity: if(win.dock.1.7.focused, 95%, 55%); show: win.dock.1.7.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 7 * 60 + 30) + 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.7.focused, mint, ink); opacity: if(win.dock.1.7.focused, 95%, 55%); show: win.dock.1.7.windows >= 3 }
+            zone box dockz.7.1 { at: (dk.x0.1 + 14 + 7 * 60 + 30), dk.cy.1; size: 60, 64; cursor: pointer; active: shore.1 > 0.6 and 7 < dk.n.1 and not overview }
+        }
+        group {
+            show: here.1.8 > 0.01
+            opacity: here.1.8
+            ellipse { at: (dk.x0.1 + 14 + 8 * 60 + 30), dk.cy.1 + 22; radius: 18 + 30 * ring.1.8; scale: 1, 0.32; stroke: 1.4 * (1 - ring.1.8) + 0.3; color: ink; opacity: 45% * (1 - ring.1.8); show: ring.1.8 < 0.99 }
+            image dockicon.1.8 { at: (dk.x0.1 + 14 + 8 * 60 + 30) - 22 * (1 + 0.14 * buoy.1.8) * here.1.8, (dk.cy.1 - 3 - 12 * buoy.1.8) - 22 * (1 + 0.14 * buoy.1.8) * here.1.8; size: 44 * (1 + 0.14 * buoy.1.8) * here.1.8, 44 * (1 + 0.14 * buoy.1.8) * here.1.8 }
+            ellipse { at: (dk.x0.1 + 14 + 8 * 60 + 30), dk.cy.1 + 25; radius: if(win.dock.1.8.focused, 2.4, 2); color: if(win.dock.1.8.focused, mint, ink); opacity: if(win.dock.1.8.focused, 95%, 55%); show: win.dock.1.8.windows == 1 or win.dock.1.8.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 8 * 60 + 30) - 3.5, dk.cy.1 + 25; radius: if(win.dock.1.8.focused, 2.4, 2); color: if(win.dock.1.8.focused, mint, ink); opacity: if(win.dock.1.8.focused, 95%, 55%); show: win.dock.1.8.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 8 * 60 + 30) + 3.5, dk.cy.1 + 25; radius: if(win.dock.1.8.focused, 2.4, 2); color: if(win.dock.1.8.focused, mint, ink); opacity: if(win.dock.1.8.focused, 95%, 55%); show: win.dock.1.8.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 8 * 60 + 30) - 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.8.focused, mint, ink); opacity: if(win.dock.1.8.focused, 95%, 55%); show: win.dock.1.8.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 8 * 60 + 30) + 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.8.focused, mint, ink); opacity: if(win.dock.1.8.focused, 95%, 55%); show: win.dock.1.8.windows >= 3 }
+            zone box dockz.8.1 { at: (dk.x0.1 + 14 + 8 * 60 + 30), dk.cy.1; size: 60, 64; cursor: pointer; active: shore.1 > 0.6 and 8 < dk.n.1 and not overview }
+        }
+        group {
+            show: here.1.9 > 0.01
+            opacity: here.1.9
+            ellipse { at: (dk.x0.1 + 14 + 9 * 60 + 30), dk.cy.1 + 22; radius: 18 + 30 * ring.1.9; scale: 1, 0.32; stroke: 1.4 * (1 - ring.1.9) + 0.3; color: ink; opacity: 45% * (1 - ring.1.9); show: ring.1.9 < 0.99 }
+            image dockicon.1.9 { at: (dk.x0.1 + 14 + 9 * 60 + 30) - 22 * (1 + 0.14 * buoy.1.9) * here.1.9, (dk.cy.1 - 3 - 12 * buoy.1.9) - 22 * (1 + 0.14 * buoy.1.9) * here.1.9; size: 44 * (1 + 0.14 * buoy.1.9) * here.1.9, 44 * (1 + 0.14 * buoy.1.9) * here.1.9 }
+            ellipse { at: (dk.x0.1 + 14 + 9 * 60 + 30), dk.cy.1 + 25; radius: if(win.dock.1.9.focused, 2.4, 2); color: if(win.dock.1.9.focused, mint, ink); opacity: if(win.dock.1.9.focused, 95%, 55%); show: win.dock.1.9.windows == 1 or win.dock.1.9.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 9 * 60 + 30) - 3.5, dk.cy.1 + 25; radius: if(win.dock.1.9.focused, 2.4, 2); color: if(win.dock.1.9.focused, mint, ink); opacity: if(win.dock.1.9.focused, 95%, 55%); show: win.dock.1.9.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 9 * 60 + 30) + 3.5, dk.cy.1 + 25; radius: if(win.dock.1.9.focused, 2.4, 2); color: if(win.dock.1.9.focused, mint, ink); opacity: if(win.dock.1.9.focused, 95%, 55%); show: win.dock.1.9.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 9 * 60 + 30) - 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.9.focused, mint, ink); opacity: if(win.dock.1.9.focused, 95%, 55%); show: win.dock.1.9.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 9 * 60 + 30) + 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.9.focused, mint, ink); opacity: if(win.dock.1.9.focused, 95%, 55%); show: win.dock.1.9.windows >= 3 }
+            zone box dockz.9.1 { at: (dk.x0.1 + 14 + 9 * 60 + 30), dk.cy.1; size: 60, 64; cursor: pointer; active: shore.1 > 0.6 and 9 < dk.n.1 and not overview }
+        }
+        group {
+            show: here.1.10 > 0.01
+            opacity: here.1.10
+            ellipse { at: (dk.x0.1 + 14 + 10 * 60 + 30), dk.cy.1 + 22; radius: 18 + 30 * ring.1.10; scale: 1, 0.32; stroke: 1.4 * (1 - ring.1.10) + 0.3; color: ink; opacity: 45% * (1 - ring.1.10); show: ring.1.10 < 0.99 }
+            image dockicon.1.10 { at: (dk.x0.1 + 14 + 10 * 60 + 30) - 22 * (1 + 0.14 * buoy.1.10) * here.1.10, (dk.cy.1 - 3 - 12 * buoy.1.10) - 22 * (1 + 0.14 * buoy.1.10) * here.1.10; size: 44 * (1 + 0.14 * buoy.1.10) * here.1.10, 44 * (1 + 0.14 * buoy.1.10) * here.1.10 }
+            ellipse { at: (dk.x0.1 + 14 + 10 * 60 + 30), dk.cy.1 + 25; radius: if(win.dock.1.10.focused, 2.4, 2); color: if(win.dock.1.10.focused, mint, ink); opacity: if(win.dock.1.10.focused, 95%, 55%); show: win.dock.1.10.windows == 1 or win.dock.1.10.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 10 * 60 + 30) - 3.5, dk.cy.1 + 25; radius: if(win.dock.1.10.focused, 2.4, 2); color: if(win.dock.1.10.focused, mint, ink); opacity: if(win.dock.1.10.focused, 95%, 55%); show: win.dock.1.10.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 10 * 60 + 30) + 3.5, dk.cy.1 + 25; radius: if(win.dock.1.10.focused, 2.4, 2); color: if(win.dock.1.10.focused, mint, ink); opacity: if(win.dock.1.10.focused, 95%, 55%); show: win.dock.1.10.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 10 * 60 + 30) - 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.10.focused, mint, ink); opacity: if(win.dock.1.10.focused, 95%, 55%); show: win.dock.1.10.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 10 * 60 + 30) + 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.10.focused, mint, ink); opacity: if(win.dock.1.10.focused, 95%, 55%); show: win.dock.1.10.windows >= 3 }
+            zone box dockz.10.1 { at: (dk.x0.1 + 14 + 10 * 60 + 30), dk.cy.1; size: 60, 64; cursor: pointer; active: shore.1 > 0.6 and 10 < dk.n.1 and not overview }
+        }
+        group {
+            show: here.1.11 > 0.01
+            opacity: here.1.11
+            ellipse { at: (dk.x0.1 + 14 + 11 * 60 + 30), dk.cy.1 + 22; radius: 18 + 30 * ring.1.11; scale: 1, 0.32; stroke: 1.4 * (1 - ring.1.11) + 0.3; color: ink; opacity: 45% * (1 - ring.1.11); show: ring.1.11 < 0.99 }
+            image dockicon.1.11 { at: (dk.x0.1 + 14 + 11 * 60 + 30) - 22 * (1 + 0.14 * buoy.1.11) * here.1.11, (dk.cy.1 - 3 - 12 * buoy.1.11) - 22 * (1 + 0.14 * buoy.1.11) * here.1.11; size: 44 * (1 + 0.14 * buoy.1.11) * here.1.11, 44 * (1 + 0.14 * buoy.1.11) * here.1.11 }
+            ellipse { at: (dk.x0.1 + 14 + 11 * 60 + 30), dk.cy.1 + 25; radius: if(win.dock.1.11.focused, 2.4, 2); color: if(win.dock.1.11.focused, mint, ink); opacity: if(win.dock.1.11.focused, 95%, 55%); show: win.dock.1.11.windows == 1 or win.dock.1.11.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 11 * 60 + 30) - 3.5, dk.cy.1 + 25; radius: if(win.dock.1.11.focused, 2.4, 2); color: if(win.dock.1.11.focused, mint, ink); opacity: if(win.dock.1.11.focused, 95%, 55%); show: win.dock.1.11.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 11 * 60 + 30) + 3.5, dk.cy.1 + 25; radius: if(win.dock.1.11.focused, 2.4, 2); color: if(win.dock.1.11.focused, mint, ink); opacity: if(win.dock.1.11.focused, 95%, 55%); show: win.dock.1.11.windows == 2 }
+            ellipse { at: (dk.x0.1 + 14 + 11 * 60 + 30) - 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.11.focused, mint, ink); opacity: if(win.dock.1.11.focused, 95%, 55%); show: win.dock.1.11.windows >= 3 }
+            ellipse { at: (dk.x0.1 + 14 + 11 * 60 + 30) + 6, dk.cy.1 + 25; radius: 2; color: if(win.dock.1.11.focused, mint, ink); opacity: if(win.dock.1.11.focused, 95%, 55%); show: win.dock.1.11.windows >= 3 }
+            zone box dockz.11.1 { at: (dk.x0.1 + 14 + 11 * 60 + 30), dk.cy.1; size: 60, 64; cursor: pointer; active: shore.1 > 0.6 and 11 < dk.n.1 and not overview }
+        }
+        // Between the programs and what is put away, and before the pools: a line of water.
+        box { at: dk.x0.1 + 14 + dk.n.1 * 60 + 10, dk.cy.1; size: 1, 30; color: ink; opacity: 18%; show: dk.m.1 > 0 }
+        box { at: dk.px.1 - 10, dk.cy.1; size: 1, 30; color: ink; opacity: 18% }
+        ellipse { at: (dk.px.1 + 0 * 26 + 13), dk.cy.1; radius: 8; stroke: 1.3; color: ink; opacity: if(1 == dk.p.1 and win.used.1 < 1, 22%, 45%); show: 0 < dk.p.1 and win.shown.1 != 1 }
+        ellipse { at: (dk.px.1 + 0 * 26 + 13), dk.cy.1; radius: 8; color: mint; opacity: 90%; show: 0 < dk.p.1 and win.shown.1 == 1 }
+        text "1" { at: (dk.px.1 + 0 * 26 + 13), dk.cy.1; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 0 < dk.p.1 and win.shown.1 == 1 }
+        zone ellipse dkpool.0.1 { at: (dk.px.1 + 0 * 26 + 13), dk.cy.1; radius: 12; cursor: pointer; active: shore.1 > 0.6 and 0 < dk.p.1 and not overview }
+        ellipse { at: (dk.px.1 + 1 * 26 + 13), dk.cy.1; radius: 8; stroke: 1.3; color: ink; opacity: if(2 == dk.p.1 and win.used.1 < 2, 22%, 45%); show: 1 < dk.p.1 and win.shown.1 != 2 }
+        ellipse { at: (dk.px.1 + 1 * 26 + 13), dk.cy.1; radius: 8; color: mint; opacity: 90%; show: 1 < dk.p.1 and win.shown.1 == 2 }
+        text "2" { at: (dk.px.1 + 1 * 26 + 13), dk.cy.1; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 1 < dk.p.1 and win.shown.1 == 2 }
+        zone ellipse dkpool.1.1 { at: (dk.px.1 + 1 * 26 + 13), dk.cy.1; radius: 12; cursor: pointer; active: shore.1 > 0.6 and 1 < dk.p.1 and not overview }
+        ellipse { at: (dk.px.1 + 2 * 26 + 13), dk.cy.1; radius: 8; stroke: 1.3; color: ink; opacity: if(3 == dk.p.1 and win.used.1 < 3, 22%, 45%); show: 2 < dk.p.1 and win.shown.1 != 3 }
+        ellipse { at: (dk.px.1 + 2 * 26 + 13), dk.cy.1; radius: 8; color: mint; opacity: 90%; show: 2 < dk.p.1 and win.shown.1 == 3 }
+        text "3" { at: (dk.px.1 + 2 * 26 + 13), dk.cy.1; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 2 < dk.p.1 and win.shown.1 == 3 }
+        zone ellipse dkpool.2.1 { at: (dk.px.1 + 2 * 26 + 13), dk.cy.1; radius: 12; cursor: pointer; active: shore.1 > 0.6 and 2 < dk.p.1 and not overview }
+        ellipse { at: (dk.px.1 + 3 * 26 + 13), dk.cy.1; radius: 8; stroke: 1.3; color: ink; opacity: if(4 == dk.p.1 and win.used.1 < 4, 22%, 45%); show: 3 < dk.p.1 and win.shown.1 != 4 }
+        ellipse { at: (dk.px.1 + 3 * 26 + 13), dk.cy.1; radius: 8; color: mint; opacity: 90%; show: 3 < dk.p.1 and win.shown.1 == 4 }
+        text "4" { at: (dk.px.1 + 3 * 26 + 13), dk.cy.1; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 3 < dk.p.1 and win.shown.1 == 4 }
+        zone ellipse dkpool.3.1 { at: (dk.px.1 + 3 * 26 + 13), dk.cy.1; radius: 12; cursor: pointer; active: shore.1 > 0.6 and 3 < dk.p.1 and not overview }
+        ellipse { at: (dk.px.1 + 4 * 26 + 13), dk.cy.1; radius: 8; stroke: 1.3; color: ink; opacity: if(5 == dk.p.1 and win.used.1 < 5, 22%, 45%); show: 4 < dk.p.1 and win.shown.1 != 5 }
+        ellipse { at: (dk.px.1 + 4 * 26 + 13), dk.cy.1; radius: 8; color: mint; opacity: 90%; show: 4 < dk.p.1 and win.shown.1 == 5 }
+        text "5" { at: (dk.px.1 + 4 * 26 + 13), dk.cy.1; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 4 < dk.p.1 and win.shown.1 == 5 }
+        zone ellipse dkpool.4.1 { at: (dk.px.1 + 4 * 26 + 13), dk.cy.1; radius: 12; cursor: pointer; active: shore.1 > 0.6 and 4 < dk.p.1 and not overview }
+        ellipse { at: (dk.px.1 + 5 * 26 + 13), dk.cy.1; radius: 8; stroke: 1.3; color: ink; opacity: if(6 == dk.p.1 and win.used.1 < 6, 22%, 45%); show: 5 < dk.p.1 and win.shown.1 != 6 }
+        ellipse { at: (dk.px.1 + 5 * 26 + 13), dk.cy.1; radius: 8; color: mint; opacity: 90%; show: 5 < dk.p.1 and win.shown.1 == 6 }
+        text "6" { at: (dk.px.1 + 5 * 26 + 13), dk.cy.1; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 5 < dk.p.1 and win.shown.1 == 6 }
+        zone ellipse dkpool.5.1 { at: (dk.px.1 + 5 * 26 + 13), dk.cy.1; radius: 12; cursor: pointer; active: shore.1 > 0.6 and 5 < dk.p.1 and not overview }
+        ellipse { at: (dk.px.1 + 6 * 26 + 13), dk.cy.1; radius: 8; stroke: 1.3; color: ink; opacity: if(7 == dk.p.1 and win.used.1 < 7, 22%, 45%); show: 6 < dk.p.1 and win.shown.1 != 7 }
+        ellipse { at: (dk.px.1 + 6 * 26 + 13), dk.cy.1; radius: 8; color: mint; opacity: 90%; show: 6 < dk.p.1 and win.shown.1 == 7 }
+        text "7" { at: (dk.px.1 + 6 * 26 + 13), dk.cy.1; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 6 < dk.p.1 and win.shown.1 == 7 }
+        zone ellipse dkpool.6.1 { at: (dk.px.1 + 6 * 26 + 13), dk.cy.1; radius: 12; cursor: pointer; active: shore.1 > 0.6 and 6 < dk.p.1 and not overview }
+        ellipse { at: (dk.px.1 + 7 * 26 + 13), dk.cy.1; radius: 8; stroke: 1.3; color: ink; opacity: if(8 == dk.p.1 and win.used.1 < 8, 22%, 45%); show: 7 < dk.p.1 and win.shown.1 != 8 }
+        ellipse { at: (dk.px.1 + 7 * 26 + 13), dk.cy.1; radius: 8; color: mint; opacity: 90%; show: 7 < dk.p.1 and win.shown.1 == 8 }
+        text "8" { at: (dk.px.1 + 7 * 26 + 13), dk.cy.1; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 7 < dk.p.1 and win.shown.1 == 8 }
+        zone ellipse dkpool.7.1 { at: (dk.px.1 + 7 * 26 + 13), dk.cy.1; radius: 12; cursor: pointer; active: shore.1 > 0.6 and 7 < dk.p.1 and not overview }
+    }
+    on press dockz.0.1 {
+        dock 0 on 1
+        impulse buoy.1.0 -9
+        ring.1.0: 0 ~0ms
+        ring.1.0: 1 ~760ms after 16ms
+    }
+    on press dockz.1.1 {
+        dock 1 on 1
+        impulse buoy.1.1 -9
+        ring.1.1: 0 ~0ms
+        ring.1.1: 1 ~760ms after 16ms
+    }
+    on press dockz.2.1 {
+        dock 2 on 1
+        impulse buoy.1.2 -9
+        ring.1.2: 0 ~0ms
+        ring.1.2: 1 ~760ms after 16ms
+    }
+    on press dockz.3.1 {
+        dock 3 on 1
+        impulse buoy.1.3 -9
+        ring.1.3: 0 ~0ms
+        ring.1.3: 1 ~760ms after 16ms
+    }
+    on press dockz.4.1 {
+        dock 4 on 1
+        impulse buoy.1.4 -9
+        ring.1.4: 0 ~0ms
+        ring.1.4: 1 ~760ms after 16ms
+    }
+    on press dockz.5.1 {
+        dock 5 on 1
+        impulse buoy.1.5 -9
+        ring.1.5: 0 ~0ms
+        ring.1.5: 1 ~760ms after 16ms
+    }
+    on press dockz.6.1 {
+        dock 6 on 1
+        impulse buoy.1.6 -9
+        ring.1.6: 0 ~0ms
+        ring.1.6: 1 ~760ms after 16ms
+    }
+    on press dockz.7.1 {
+        dock 7 on 1
+        impulse buoy.1.7 -9
+        ring.1.7: 0 ~0ms
+        ring.1.7: 1 ~760ms after 16ms
+    }
+    on press dockz.8.1 {
+        dock 8 on 1
+        impulse buoy.1.8 -9
+        ring.1.8: 0 ~0ms
+        ring.1.8: 1 ~760ms after 16ms
+    }
+    on press dockz.9.1 {
+        dock 9 on 1
+        impulse buoy.1.9 -9
+        ring.1.9: 0 ~0ms
+        ring.1.9: 1 ~760ms after 16ms
+    }
+    on press dockz.10.1 {
+        dock 10 on 1
+        impulse buoy.1.10 -9
+        ring.1.10: 0 ~0ms
+        ring.1.10: 1 ~760ms after 16ms
+    }
+    on press dockz.11.1 {
+        dock 11 on 1
+        impulse buoy.1.11 -9
+        ring.1.11: 0 ~0ms
+        ring.1.11: 1 ~760ms after 16ms
+    }
+    on press dkpool.0.1 { workspace 1 on 1 }
+    on press dkpool.1.1 { workspace 2 on 1 }
+    on press dkpool.2.1 { workspace 3 on 1 }
+    on press dkpool.3.1 { workspace 4 on 1 }
+    on press dkpool.4.1 { workspace 5 on 1 }
+    on press dkpool.5.1 { workspace 6 on 1 }
+    on press dkpool.6.1 { workspace 7 on 1 }
+    on press dkpool.7.1 { workspace 8 on 1 }
+    prop shore.2 = 0 ~rise
+    follow shore.2 = if(free.2 > 0.5, 1, 0)
+    let dk.n.2 = win.docks.2
+    let dk.m.2 = win.mins.2
+    let dk.p.2 = max(win.pools.2, win.used.2 + 1)
+    let dk.tw.2 = 28 + dk.n.2 * 60 + if(dk.m.2 > 0, 20 + dk.m.2 * 76, 0) + 20 + dk.p.2 * 26
+    prop dkw.2 = 200 ~pop
+    follow dkw.2 = dk.tw.2
+    let dk.x0.2 = screen.2.width / 2 - dkw.2 / 2
+    let dk.cy.2 = screen.2.height + 42 - 88 * shore.2
+    let dk.on.2 = mon == 2 and shore.2 > 0.6 and mouse.y >= dk.cy.2 - 46 and mouse.x >= dk.x0.2 and mouse.x <= dk.x0.2 + dkw.2
+    let dk.t.2 = (mouse.x - dk.x0.2 - 14) / 60 - 0.5
+    let dk.px.2 = dk.x0.2 + dkw.2 - 14 - dk.p.2 * 26
+    image dockicon.2.0 = from win.dock.2.0.icon, 96, 96
+    prop buoy.2.0 = 0 ~pop
+    follow buoy.2.0 = if(dk.on.2, pow(max(0, 1 - abs(0 - dk.t.2) / 1.8), 2), 0)
+    prop here.2.0 = 0 ~pop
+    follow here.2.0 = if(0 < dk.n.2, 1, 0)
+    prop ring.2.0 = 1 ~760ms
+    image dockicon.2.1 = from win.dock.2.1.icon, 96, 96
+    prop buoy.2.1 = 0 ~pop
+    follow buoy.2.1 = if(dk.on.2, pow(max(0, 1 - abs(1 - dk.t.2) / 1.8), 2), 0)
+    prop here.2.1 = 0 ~pop
+    follow here.2.1 = if(1 < dk.n.2, 1, 0)
+    prop ring.2.1 = 1 ~760ms
+    image dockicon.2.2 = from win.dock.2.2.icon, 96, 96
+    prop buoy.2.2 = 0 ~pop
+    follow buoy.2.2 = if(dk.on.2, pow(max(0, 1 - abs(2 - dk.t.2) / 1.8), 2), 0)
+    prop here.2.2 = 0 ~pop
+    follow here.2.2 = if(2 < dk.n.2, 1, 0)
+    prop ring.2.2 = 1 ~760ms
+    image dockicon.2.3 = from win.dock.2.3.icon, 96, 96
+    prop buoy.2.3 = 0 ~pop
+    follow buoy.2.3 = if(dk.on.2, pow(max(0, 1 - abs(3 - dk.t.2) / 1.8), 2), 0)
+    prop here.2.3 = 0 ~pop
+    follow here.2.3 = if(3 < dk.n.2, 1, 0)
+    prop ring.2.3 = 1 ~760ms
+    image dockicon.2.4 = from win.dock.2.4.icon, 96, 96
+    prop buoy.2.4 = 0 ~pop
+    follow buoy.2.4 = if(dk.on.2, pow(max(0, 1 - abs(4 - dk.t.2) / 1.8), 2), 0)
+    prop here.2.4 = 0 ~pop
+    follow here.2.4 = if(4 < dk.n.2, 1, 0)
+    prop ring.2.4 = 1 ~760ms
+    image dockicon.2.5 = from win.dock.2.5.icon, 96, 96
+    prop buoy.2.5 = 0 ~pop
+    follow buoy.2.5 = if(dk.on.2, pow(max(0, 1 - abs(5 - dk.t.2) / 1.8), 2), 0)
+    prop here.2.5 = 0 ~pop
+    follow here.2.5 = if(5 < dk.n.2, 1, 0)
+    prop ring.2.5 = 1 ~760ms
+    image dockicon.2.6 = from win.dock.2.6.icon, 96, 96
+    prop buoy.2.6 = 0 ~pop
+    follow buoy.2.6 = if(dk.on.2, pow(max(0, 1 - abs(6 - dk.t.2) / 1.8), 2), 0)
+    prop here.2.6 = 0 ~pop
+    follow here.2.6 = if(6 < dk.n.2, 1, 0)
+    prop ring.2.6 = 1 ~760ms
+    image dockicon.2.7 = from win.dock.2.7.icon, 96, 96
+    prop buoy.2.7 = 0 ~pop
+    follow buoy.2.7 = if(dk.on.2, pow(max(0, 1 - abs(7 - dk.t.2) / 1.8), 2), 0)
+    prop here.2.7 = 0 ~pop
+    follow here.2.7 = if(7 < dk.n.2, 1, 0)
+    prop ring.2.7 = 1 ~760ms
+    image dockicon.2.8 = from win.dock.2.8.icon, 96, 96
+    prop buoy.2.8 = 0 ~pop
+    follow buoy.2.8 = if(dk.on.2, pow(max(0, 1 - abs(8 - dk.t.2) / 1.8), 2), 0)
+    prop here.2.8 = 0 ~pop
+    follow here.2.8 = if(8 < dk.n.2, 1, 0)
+    prop ring.2.8 = 1 ~760ms
+    image dockicon.2.9 = from win.dock.2.9.icon, 96, 96
+    prop buoy.2.9 = 0 ~pop
+    follow buoy.2.9 = if(dk.on.2, pow(max(0, 1 - abs(9 - dk.t.2) / 1.8), 2), 0)
+    prop here.2.9 = 0 ~pop
+    follow here.2.9 = if(9 < dk.n.2, 1, 0)
+    prop ring.2.9 = 1 ~760ms
+    image dockicon.2.10 = from win.dock.2.10.icon, 96, 96
+    prop buoy.2.10 = 0 ~pop
+    follow buoy.2.10 = if(dk.on.2, pow(max(0, 1 - abs(10 - dk.t.2) / 1.8), 2), 0)
+    prop here.2.10 = 0 ~pop
+    follow here.2.10 = if(10 < dk.n.2, 1, 0)
+    prop ring.2.10 = 1 ~760ms
+    image dockicon.2.11 = from win.dock.2.11.icon, 96, 96
+    prop buoy.2.11 = 0 ~pop
+    follow buoy.2.11 = if(dk.on.2, pow(max(0, 1 - abs(11 - dk.t.2) / 1.8), 2), 0)
+    prop here.2.11 = 0 ~pop
+    follow here.2.11 = if(11 < dk.n.2, 1, 0)
+    prop ring.2.11 = 1 ~760ms
+    group {
+        z: 99982
+        show: shore.2 > 0.01 and screen.index == 2
+        body {
+            gradient: 0, dk.cy.2 - 32 to 0, dk.cy.2 + 32, #15181b, #0c0e10 45%, #0a0b0d
+            rim: 12%
+            shadow: 0, 12, 34, 42%
+            box { from: -80, H; size: W + 160, 140 }
+            box { at: dk.x0.2 + dkw.2 / 2, dk.cy.2; size: dkw.2 * (0.55 + 0.45 * shore.2), 64; corner: 22; blend: 22 + 36 * 4 * shore.2 * (1 - shore.2) }
+        }
+        group {
+            show: here.2.0 > 0.01
+            opacity: here.2.0
+            ellipse { at: (dk.x0.2 + 14 + 0 * 60 + 30), dk.cy.2 + 22; radius: 18 + 30 * ring.2.0; scale: 1, 0.32; stroke: 1.4 * (1 - ring.2.0) + 0.3; color: ink; opacity: 45% * (1 - ring.2.0); show: ring.2.0 < 0.99 }
+            image dockicon.2.0 { at: (dk.x0.2 + 14 + 0 * 60 + 30) - 22 * (1 + 0.14 * buoy.2.0) * here.2.0, (dk.cy.2 - 3 - 12 * buoy.2.0) - 22 * (1 + 0.14 * buoy.2.0) * here.2.0; size: 44 * (1 + 0.14 * buoy.2.0) * here.2.0, 44 * (1 + 0.14 * buoy.2.0) * here.2.0 }
+            ellipse { at: (dk.x0.2 + 14 + 0 * 60 + 30), dk.cy.2 + 25; radius: if(win.dock.2.0.focused, 2.4, 2); color: if(win.dock.2.0.focused, mint, ink); opacity: if(win.dock.2.0.focused, 95%, 55%); show: win.dock.2.0.windows == 1 or win.dock.2.0.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 0 * 60 + 30) - 3.5, dk.cy.2 + 25; radius: if(win.dock.2.0.focused, 2.4, 2); color: if(win.dock.2.0.focused, mint, ink); opacity: if(win.dock.2.0.focused, 95%, 55%); show: win.dock.2.0.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 0 * 60 + 30) + 3.5, dk.cy.2 + 25; radius: if(win.dock.2.0.focused, 2.4, 2); color: if(win.dock.2.0.focused, mint, ink); opacity: if(win.dock.2.0.focused, 95%, 55%); show: win.dock.2.0.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 0 * 60 + 30) - 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.0.focused, mint, ink); opacity: if(win.dock.2.0.focused, 95%, 55%); show: win.dock.2.0.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 0 * 60 + 30) + 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.0.focused, mint, ink); opacity: if(win.dock.2.0.focused, 95%, 55%); show: win.dock.2.0.windows >= 3 }
+            zone box dockz.0.2 { at: (dk.x0.2 + 14 + 0 * 60 + 30), dk.cy.2; size: 60, 64; cursor: pointer; active: shore.2 > 0.6 and 0 < dk.n.2 and not overview }
+        }
+        group {
+            show: here.2.1 > 0.01
+            opacity: here.2.1
+            ellipse { at: (dk.x0.2 + 14 + 1 * 60 + 30), dk.cy.2 + 22; radius: 18 + 30 * ring.2.1; scale: 1, 0.32; stroke: 1.4 * (1 - ring.2.1) + 0.3; color: ink; opacity: 45% * (1 - ring.2.1); show: ring.2.1 < 0.99 }
+            image dockicon.2.1 { at: (dk.x0.2 + 14 + 1 * 60 + 30) - 22 * (1 + 0.14 * buoy.2.1) * here.2.1, (dk.cy.2 - 3 - 12 * buoy.2.1) - 22 * (1 + 0.14 * buoy.2.1) * here.2.1; size: 44 * (1 + 0.14 * buoy.2.1) * here.2.1, 44 * (1 + 0.14 * buoy.2.1) * here.2.1 }
+            ellipse { at: (dk.x0.2 + 14 + 1 * 60 + 30), dk.cy.2 + 25; radius: if(win.dock.2.1.focused, 2.4, 2); color: if(win.dock.2.1.focused, mint, ink); opacity: if(win.dock.2.1.focused, 95%, 55%); show: win.dock.2.1.windows == 1 or win.dock.2.1.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 1 * 60 + 30) - 3.5, dk.cy.2 + 25; radius: if(win.dock.2.1.focused, 2.4, 2); color: if(win.dock.2.1.focused, mint, ink); opacity: if(win.dock.2.1.focused, 95%, 55%); show: win.dock.2.1.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 1 * 60 + 30) + 3.5, dk.cy.2 + 25; radius: if(win.dock.2.1.focused, 2.4, 2); color: if(win.dock.2.1.focused, mint, ink); opacity: if(win.dock.2.1.focused, 95%, 55%); show: win.dock.2.1.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 1 * 60 + 30) - 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.1.focused, mint, ink); opacity: if(win.dock.2.1.focused, 95%, 55%); show: win.dock.2.1.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 1 * 60 + 30) + 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.1.focused, mint, ink); opacity: if(win.dock.2.1.focused, 95%, 55%); show: win.dock.2.1.windows >= 3 }
+            zone box dockz.1.2 { at: (dk.x0.2 + 14 + 1 * 60 + 30), dk.cy.2; size: 60, 64; cursor: pointer; active: shore.2 > 0.6 and 1 < dk.n.2 and not overview }
+        }
+        group {
+            show: here.2.2 > 0.01
+            opacity: here.2.2
+            ellipse { at: (dk.x0.2 + 14 + 2 * 60 + 30), dk.cy.2 + 22; radius: 18 + 30 * ring.2.2; scale: 1, 0.32; stroke: 1.4 * (1 - ring.2.2) + 0.3; color: ink; opacity: 45% * (1 - ring.2.2); show: ring.2.2 < 0.99 }
+            image dockicon.2.2 { at: (dk.x0.2 + 14 + 2 * 60 + 30) - 22 * (1 + 0.14 * buoy.2.2) * here.2.2, (dk.cy.2 - 3 - 12 * buoy.2.2) - 22 * (1 + 0.14 * buoy.2.2) * here.2.2; size: 44 * (1 + 0.14 * buoy.2.2) * here.2.2, 44 * (1 + 0.14 * buoy.2.2) * here.2.2 }
+            ellipse { at: (dk.x0.2 + 14 + 2 * 60 + 30), dk.cy.2 + 25; radius: if(win.dock.2.2.focused, 2.4, 2); color: if(win.dock.2.2.focused, mint, ink); opacity: if(win.dock.2.2.focused, 95%, 55%); show: win.dock.2.2.windows == 1 or win.dock.2.2.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 2 * 60 + 30) - 3.5, dk.cy.2 + 25; radius: if(win.dock.2.2.focused, 2.4, 2); color: if(win.dock.2.2.focused, mint, ink); opacity: if(win.dock.2.2.focused, 95%, 55%); show: win.dock.2.2.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 2 * 60 + 30) + 3.5, dk.cy.2 + 25; radius: if(win.dock.2.2.focused, 2.4, 2); color: if(win.dock.2.2.focused, mint, ink); opacity: if(win.dock.2.2.focused, 95%, 55%); show: win.dock.2.2.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 2 * 60 + 30) - 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.2.focused, mint, ink); opacity: if(win.dock.2.2.focused, 95%, 55%); show: win.dock.2.2.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 2 * 60 + 30) + 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.2.focused, mint, ink); opacity: if(win.dock.2.2.focused, 95%, 55%); show: win.dock.2.2.windows >= 3 }
+            zone box dockz.2.2 { at: (dk.x0.2 + 14 + 2 * 60 + 30), dk.cy.2; size: 60, 64; cursor: pointer; active: shore.2 > 0.6 and 2 < dk.n.2 and not overview }
+        }
+        group {
+            show: here.2.3 > 0.01
+            opacity: here.2.3
+            ellipse { at: (dk.x0.2 + 14 + 3 * 60 + 30), dk.cy.2 + 22; radius: 18 + 30 * ring.2.3; scale: 1, 0.32; stroke: 1.4 * (1 - ring.2.3) + 0.3; color: ink; opacity: 45% * (1 - ring.2.3); show: ring.2.3 < 0.99 }
+            image dockicon.2.3 { at: (dk.x0.2 + 14 + 3 * 60 + 30) - 22 * (1 + 0.14 * buoy.2.3) * here.2.3, (dk.cy.2 - 3 - 12 * buoy.2.3) - 22 * (1 + 0.14 * buoy.2.3) * here.2.3; size: 44 * (1 + 0.14 * buoy.2.3) * here.2.3, 44 * (1 + 0.14 * buoy.2.3) * here.2.3 }
+            ellipse { at: (dk.x0.2 + 14 + 3 * 60 + 30), dk.cy.2 + 25; radius: if(win.dock.2.3.focused, 2.4, 2); color: if(win.dock.2.3.focused, mint, ink); opacity: if(win.dock.2.3.focused, 95%, 55%); show: win.dock.2.3.windows == 1 or win.dock.2.3.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 3 * 60 + 30) - 3.5, dk.cy.2 + 25; radius: if(win.dock.2.3.focused, 2.4, 2); color: if(win.dock.2.3.focused, mint, ink); opacity: if(win.dock.2.3.focused, 95%, 55%); show: win.dock.2.3.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 3 * 60 + 30) + 3.5, dk.cy.2 + 25; radius: if(win.dock.2.3.focused, 2.4, 2); color: if(win.dock.2.3.focused, mint, ink); opacity: if(win.dock.2.3.focused, 95%, 55%); show: win.dock.2.3.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 3 * 60 + 30) - 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.3.focused, mint, ink); opacity: if(win.dock.2.3.focused, 95%, 55%); show: win.dock.2.3.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 3 * 60 + 30) + 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.3.focused, mint, ink); opacity: if(win.dock.2.3.focused, 95%, 55%); show: win.dock.2.3.windows >= 3 }
+            zone box dockz.3.2 { at: (dk.x0.2 + 14 + 3 * 60 + 30), dk.cy.2; size: 60, 64; cursor: pointer; active: shore.2 > 0.6 and 3 < dk.n.2 and not overview }
+        }
+        group {
+            show: here.2.4 > 0.01
+            opacity: here.2.4
+            ellipse { at: (dk.x0.2 + 14 + 4 * 60 + 30), dk.cy.2 + 22; radius: 18 + 30 * ring.2.4; scale: 1, 0.32; stroke: 1.4 * (1 - ring.2.4) + 0.3; color: ink; opacity: 45% * (1 - ring.2.4); show: ring.2.4 < 0.99 }
+            image dockicon.2.4 { at: (dk.x0.2 + 14 + 4 * 60 + 30) - 22 * (1 + 0.14 * buoy.2.4) * here.2.4, (dk.cy.2 - 3 - 12 * buoy.2.4) - 22 * (1 + 0.14 * buoy.2.4) * here.2.4; size: 44 * (1 + 0.14 * buoy.2.4) * here.2.4, 44 * (1 + 0.14 * buoy.2.4) * here.2.4 }
+            ellipse { at: (dk.x0.2 + 14 + 4 * 60 + 30), dk.cy.2 + 25; radius: if(win.dock.2.4.focused, 2.4, 2); color: if(win.dock.2.4.focused, mint, ink); opacity: if(win.dock.2.4.focused, 95%, 55%); show: win.dock.2.4.windows == 1 or win.dock.2.4.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 4 * 60 + 30) - 3.5, dk.cy.2 + 25; radius: if(win.dock.2.4.focused, 2.4, 2); color: if(win.dock.2.4.focused, mint, ink); opacity: if(win.dock.2.4.focused, 95%, 55%); show: win.dock.2.4.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 4 * 60 + 30) + 3.5, dk.cy.2 + 25; radius: if(win.dock.2.4.focused, 2.4, 2); color: if(win.dock.2.4.focused, mint, ink); opacity: if(win.dock.2.4.focused, 95%, 55%); show: win.dock.2.4.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 4 * 60 + 30) - 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.4.focused, mint, ink); opacity: if(win.dock.2.4.focused, 95%, 55%); show: win.dock.2.4.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 4 * 60 + 30) + 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.4.focused, mint, ink); opacity: if(win.dock.2.4.focused, 95%, 55%); show: win.dock.2.4.windows >= 3 }
+            zone box dockz.4.2 { at: (dk.x0.2 + 14 + 4 * 60 + 30), dk.cy.2; size: 60, 64; cursor: pointer; active: shore.2 > 0.6 and 4 < dk.n.2 and not overview }
+        }
+        group {
+            show: here.2.5 > 0.01
+            opacity: here.2.5
+            ellipse { at: (dk.x0.2 + 14 + 5 * 60 + 30), dk.cy.2 + 22; radius: 18 + 30 * ring.2.5; scale: 1, 0.32; stroke: 1.4 * (1 - ring.2.5) + 0.3; color: ink; opacity: 45% * (1 - ring.2.5); show: ring.2.5 < 0.99 }
+            image dockicon.2.5 { at: (dk.x0.2 + 14 + 5 * 60 + 30) - 22 * (1 + 0.14 * buoy.2.5) * here.2.5, (dk.cy.2 - 3 - 12 * buoy.2.5) - 22 * (1 + 0.14 * buoy.2.5) * here.2.5; size: 44 * (1 + 0.14 * buoy.2.5) * here.2.5, 44 * (1 + 0.14 * buoy.2.5) * here.2.5 }
+            ellipse { at: (dk.x0.2 + 14 + 5 * 60 + 30), dk.cy.2 + 25; radius: if(win.dock.2.5.focused, 2.4, 2); color: if(win.dock.2.5.focused, mint, ink); opacity: if(win.dock.2.5.focused, 95%, 55%); show: win.dock.2.5.windows == 1 or win.dock.2.5.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 5 * 60 + 30) - 3.5, dk.cy.2 + 25; radius: if(win.dock.2.5.focused, 2.4, 2); color: if(win.dock.2.5.focused, mint, ink); opacity: if(win.dock.2.5.focused, 95%, 55%); show: win.dock.2.5.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 5 * 60 + 30) + 3.5, dk.cy.2 + 25; radius: if(win.dock.2.5.focused, 2.4, 2); color: if(win.dock.2.5.focused, mint, ink); opacity: if(win.dock.2.5.focused, 95%, 55%); show: win.dock.2.5.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 5 * 60 + 30) - 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.5.focused, mint, ink); opacity: if(win.dock.2.5.focused, 95%, 55%); show: win.dock.2.5.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 5 * 60 + 30) + 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.5.focused, mint, ink); opacity: if(win.dock.2.5.focused, 95%, 55%); show: win.dock.2.5.windows >= 3 }
+            zone box dockz.5.2 { at: (dk.x0.2 + 14 + 5 * 60 + 30), dk.cy.2; size: 60, 64; cursor: pointer; active: shore.2 > 0.6 and 5 < dk.n.2 and not overview }
+        }
+        group {
+            show: here.2.6 > 0.01
+            opacity: here.2.6
+            ellipse { at: (dk.x0.2 + 14 + 6 * 60 + 30), dk.cy.2 + 22; radius: 18 + 30 * ring.2.6; scale: 1, 0.32; stroke: 1.4 * (1 - ring.2.6) + 0.3; color: ink; opacity: 45% * (1 - ring.2.6); show: ring.2.6 < 0.99 }
+            image dockicon.2.6 { at: (dk.x0.2 + 14 + 6 * 60 + 30) - 22 * (1 + 0.14 * buoy.2.6) * here.2.6, (dk.cy.2 - 3 - 12 * buoy.2.6) - 22 * (1 + 0.14 * buoy.2.6) * here.2.6; size: 44 * (1 + 0.14 * buoy.2.6) * here.2.6, 44 * (1 + 0.14 * buoy.2.6) * here.2.6 }
+            ellipse { at: (dk.x0.2 + 14 + 6 * 60 + 30), dk.cy.2 + 25; radius: if(win.dock.2.6.focused, 2.4, 2); color: if(win.dock.2.6.focused, mint, ink); opacity: if(win.dock.2.6.focused, 95%, 55%); show: win.dock.2.6.windows == 1 or win.dock.2.6.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 6 * 60 + 30) - 3.5, dk.cy.2 + 25; radius: if(win.dock.2.6.focused, 2.4, 2); color: if(win.dock.2.6.focused, mint, ink); opacity: if(win.dock.2.6.focused, 95%, 55%); show: win.dock.2.6.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 6 * 60 + 30) + 3.5, dk.cy.2 + 25; radius: if(win.dock.2.6.focused, 2.4, 2); color: if(win.dock.2.6.focused, mint, ink); opacity: if(win.dock.2.6.focused, 95%, 55%); show: win.dock.2.6.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 6 * 60 + 30) - 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.6.focused, mint, ink); opacity: if(win.dock.2.6.focused, 95%, 55%); show: win.dock.2.6.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 6 * 60 + 30) + 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.6.focused, mint, ink); opacity: if(win.dock.2.6.focused, 95%, 55%); show: win.dock.2.6.windows >= 3 }
+            zone box dockz.6.2 { at: (dk.x0.2 + 14 + 6 * 60 + 30), dk.cy.2; size: 60, 64; cursor: pointer; active: shore.2 > 0.6 and 6 < dk.n.2 and not overview }
+        }
+        group {
+            show: here.2.7 > 0.01
+            opacity: here.2.7
+            ellipse { at: (dk.x0.2 + 14 + 7 * 60 + 30), dk.cy.2 + 22; radius: 18 + 30 * ring.2.7; scale: 1, 0.32; stroke: 1.4 * (1 - ring.2.7) + 0.3; color: ink; opacity: 45% * (1 - ring.2.7); show: ring.2.7 < 0.99 }
+            image dockicon.2.7 { at: (dk.x0.2 + 14 + 7 * 60 + 30) - 22 * (1 + 0.14 * buoy.2.7) * here.2.7, (dk.cy.2 - 3 - 12 * buoy.2.7) - 22 * (1 + 0.14 * buoy.2.7) * here.2.7; size: 44 * (1 + 0.14 * buoy.2.7) * here.2.7, 44 * (1 + 0.14 * buoy.2.7) * here.2.7 }
+            ellipse { at: (dk.x0.2 + 14 + 7 * 60 + 30), dk.cy.2 + 25; radius: if(win.dock.2.7.focused, 2.4, 2); color: if(win.dock.2.7.focused, mint, ink); opacity: if(win.dock.2.7.focused, 95%, 55%); show: win.dock.2.7.windows == 1 or win.dock.2.7.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 7 * 60 + 30) - 3.5, dk.cy.2 + 25; radius: if(win.dock.2.7.focused, 2.4, 2); color: if(win.dock.2.7.focused, mint, ink); opacity: if(win.dock.2.7.focused, 95%, 55%); show: win.dock.2.7.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 7 * 60 + 30) + 3.5, dk.cy.2 + 25; radius: if(win.dock.2.7.focused, 2.4, 2); color: if(win.dock.2.7.focused, mint, ink); opacity: if(win.dock.2.7.focused, 95%, 55%); show: win.dock.2.7.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 7 * 60 + 30) - 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.7.focused, mint, ink); opacity: if(win.dock.2.7.focused, 95%, 55%); show: win.dock.2.7.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 7 * 60 + 30) + 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.7.focused, mint, ink); opacity: if(win.dock.2.7.focused, 95%, 55%); show: win.dock.2.7.windows >= 3 }
+            zone box dockz.7.2 { at: (dk.x0.2 + 14 + 7 * 60 + 30), dk.cy.2; size: 60, 64; cursor: pointer; active: shore.2 > 0.6 and 7 < dk.n.2 and not overview }
+        }
+        group {
+            show: here.2.8 > 0.01
+            opacity: here.2.8
+            ellipse { at: (dk.x0.2 + 14 + 8 * 60 + 30), dk.cy.2 + 22; radius: 18 + 30 * ring.2.8; scale: 1, 0.32; stroke: 1.4 * (1 - ring.2.8) + 0.3; color: ink; opacity: 45% * (1 - ring.2.8); show: ring.2.8 < 0.99 }
+            image dockicon.2.8 { at: (dk.x0.2 + 14 + 8 * 60 + 30) - 22 * (1 + 0.14 * buoy.2.8) * here.2.8, (dk.cy.2 - 3 - 12 * buoy.2.8) - 22 * (1 + 0.14 * buoy.2.8) * here.2.8; size: 44 * (1 + 0.14 * buoy.2.8) * here.2.8, 44 * (1 + 0.14 * buoy.2.8) * here.2.8 }
+            ellipse { at: (dk.x0.2 + 14 + 8 * 60 + 30), dk.cy.2 + 25; radius: if(win.dock.2.8.focused, 2.4, 2); color: if(win.dock.2.8.focused, mint, ink); opacity: if(win.dock.2.8.focused, 95%, 55%); show: win.dock.2.8.windows == 1 or win.dock.2.8.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 8 * 60 + 30) - 3.5, dk.cy.2 + 25; radius: if(win.dock.2.8.focused, 2.4, 2); color: if(win.dock.2.8.focused, mint, ink); opacity: if(win.dock.2.8.focused, 95%, 55%); show: win.dock.2.8.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 8 * 60 + 30) + 3.5, dk.cy.2 + 25; radius: if(win.dock.2.8.focused, 2.4, 2); color: if(win.dock.2.8.focused, mint, ink); opacity: if(win.dock.2.8.focused, 95%, 55%); show: win.dock.2.8.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 8 * 60 + 30) - 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.8.focused, mint, ink); opacity: if(win.dock.2.8.focused, 95%, 55%); show: win.dock.2.8.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 8 * 60 + 30) + 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.8.focused, mint, ink); opacity: if(win.dock.2.8.focused, 95%, 55%); show: win.dock.2.8.windows >= 3 }
+            zone box dockz.8.2 { at: (dk.x0.2 + 14 + 8 * 60 + 30), dk.cy.2; size: 60, 64; cursor: pointer; active: shore.2 > 0.6 and 8 < dk.n.2 and not overview }
+        }
+        group {
+            show: here.2.9 > 0.01
+            opacity: here.2.9
+            ellipse { at: (dk.x0.2 + 14 + 9 * 60 + 30), dk.cy.2 + 22; radius: 18 + 30 * ring.2.9; scale: 1, 0.32; stroke: 1.4 * (1 - ring.2.9) + 0.3; color: ink; opacity: 45% * (1 - ring.2.9); show: ring.2.9 < 0.99 }
+            image dockicon.2.9 { at: (dk.x0.2 + 14 + 9 * 60 + 30) - 22 * (1 + 0.14 * buoy.2.9) * here.2.9, (dk.cy.2 - 3 - 12 * buoy.2.9) - 22 * (1 + 0.14 * buoy.2.9) * here.2.9; size: 44 * (1 + 0.14 * buoy.2.9) * here.2.9, 44 * (1 + 0.14 * buoy.2.9) * here.2.9 }
+            ellipse { at: (dk.x0.2 + 14 + 9 * 60 + 30), dk.cy.2 + 25; radius: if(win.dock.2.9.focused, 2.4, 2); color: if(win.dock.2.9.focused, mint, ink); opacity: if(win.dock.2.9.focused, 95%, 55%); show: win.dock.2.9.windows == 1 or win.dock.2.9.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 9 * 60 + 30) - 3.5, dk.cy.2 + 25; radius: if(win.dock.2.9.focused, 2.4, 2); color: if(win.dock.2.9.focused, mint, ink); opacity: if(win.dock.2.9.focused, 95%, 55%); show: win.dock.2.9.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 9 * 60 + 30) + 3.5, dk.cy.2 + 25; radius: if(win.dock.2.9.focused, 2.4, 2); color: if(win.dock.2.9.focused, mint, ink); opacity: if(win.dock.2.9.focused, 95%, 55%); show: win.dock.2.9.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 9 * 60 + 30) - 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.9.focused, mint, ink); opacity: if(win.dock.2.9.focused, 95%, 55%); show: win.dock.2.9.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 9 * 60 + 30) + 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.9.focused, mint, ink); opacity: if(win.dock.2.9.focused, 95%, 55%); show: win.dock.2.9.windows >= 3 }
+            zone box dockz.9.2 { at: (dk.x0.2 + 14 + 9 * 60 + 30), dk.cy.2; size: 60, 64; cursor: pointer; active: shore.2 > 0.6 and 9 < dk.n.2 and not overview }
+        }
+        group {
+            show: here.2.10 > 0.01
+            opacity: here.2.10
+            ellipse { at: (dk.x0.2 + 14 + 10 * 60 + 30), dk.cy.2 + 22; radius: 18 + 30 * ring.2.10; scale: 1, 0.32; stroke: 1.4 * (1 - ring.2.10) + 0.3; color: ink; opacity: 45% * (1 - ring.2.10); show: ring.2.10 < 0.99 }
+            image dockicon.2.10 { at: (dk.x0.2 + 14 + 10 * 60 + 30) - 22 * (1 + 0.14 * buoy.2.10) * here.2.10, (dk.cy.2 - 3 - 12 * buoy.2.10) - 22 * (1 + 0.14 * buoy.2.10) * here.2.10; size: 44 * (1 + 0.14 * buoy.2.10) * here.2.10, 44 * (1 + 0.14 * buoy.2.10) * here.2.10 }
+            ellipse { at: (dk.x0.2 + 14 + 10 * 60 + 30), dk.cy.2 + 25; radius: if(win.dock.2.10.focused, 2.4, 2); color: if(win.dock.2.10.focused, mint, ink); opacity: if(win.dock.2.10.focused, 95%, 55%); show: win.dock.2.10.windows == 1 or win.dock.2.10.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 10 * 60 + 30) - 3.5, dk.cy.2 + 25; radius: if(win.dock.2.10.focused, 2.4, 2); color: if(win.dock.2.10.focused, mint, ink); opacity: if(win.dock.2.10.focused, 95%, 55%); show: win.dock.2.10.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 10 * 60 + 30) + 3.5, dk.cy.2 + 25; radius: if(win.dock.2.10.focused, 2.4, 2); color: if(win.dock.2.10.focused, mint, ink); opacity: if(win.dock.2.10.focused, 95%, 55%); show: win.dock.2.10.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 10 * 60 + 30) - 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.10.focused, mint, ink); opacity: if(win.dock.2.10.focused, 95%, 55%); show: win.dock.2.10.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 10 * 60 + 30) + 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.10.focused, mint, ink); opacity: if(win.dock.2.10.focused, 95%, 55%); show: win.dock.2.10.windows >= 3 }
+            zone box dockz.10.2 { at: (dk.x0.2 + 14 + 10 * 60 + 30), dk.cy.2; size: 60, 64; cursor: pointer; active: shore.2 > 0.6 and 10 < dk.n.2 and not overview }
+        }
+        group {
+            show: here.2.11 > 0.01
+            opacity: here.2.11
+            ellipse { at: (dk.x0.2 + 14 + 11 * 60 + 30), dk.cy.2 + 22; radius: 18 + 30 * ring.2.11; scale: 1, 0.32; stroke: 1.4 * (1 - ring.2.11) + 0.3; color: ink; opacity: 45% * (1 - ring.2.11); show: ring.2.11 < 0.99 }
+            image dockicon.2.11 { at: (dk.x0.2 + 14 + 11 * 60 + 30) - 22 * (1 + 0.14 * buoy.2.11) * here.2.11, (dk.cy.2 - 3 - 12 * buoy.2.11) - 22 * (1 + 0.14 * buoy.2.11) * here.2.11; size: 44 * (1 + 0.14 * buoy.2.11) * here.2.11, 44 * (1 + 0.14 * buoy.2.11) * here.2.11 }
+            ellipse { at: (dk.x0.2 + 14 + 11 * 60 + 30), dk.cy.2 + 25; radius: if(win.dock.2.11.focused, 2.4, 2); color: if(win.dock.2.11.focused, mint, ink); opacity: if(win.dock.2.11.focused, 95%, 55%); show: win.dock.2.11.windows == 1 or win.dock.2.11.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 11 * 60 + 30) - 3.5, dk.cy.2 + 25; radius: if(win.dock.2.11.focused, 2.4, 2); color: if(win.dock.2.11.focused, mint, ink); opacity: if(win.dock.2.11.focused, 95%, 55%); show: win.dock.2.11.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 11 * 60 + 30) + 3.5, dk.cy.2 + 25; radius: if(win.dock.2.11.focused, 2.4, 2); color: if(win.dock.2.11.focused, mint, ink); opacity: if(win.dock.2.11.focused, 95%, 55%); show: win.dock.2.11.windows == 2 }
+            ellipse { at: (dk.x0.2 + 14 + 11 * 60 + 30) - 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.11.focused, mint, ink); opacity: if(win.dock.2.11.focused, 95%, 55%); show: win.dock.2.11.windows >= 3 }
+            ellipse { at: (dk.x0.2 + 14 + 11 * 60 + 30) + 6, dk.cy.2 + 25; radius: 2; color: if(win.dock.2.11.focused, mint, ink); opacity: if(win.dock.2.11.focused, 95%, 55%); show: win.dock.2.11.windows >= 3 }
+            zone box dockz.11.2 { at: (dk.x0.2 + 14 + 11 * 60 + 30), dk.cy.2; size: 60, 64; cursor: pointer; active: shore.2 > 0.6 and 11 < dk.n.2 and not overview }
+        }
+        // Between the programs and what is put away, and before the pools: a line of water.
+        box { at: dk.x0.2 + 14 + dk.n.2 * 60 + 10, dk.cy.2; size: 1, 30; color: ink; opacity: 18%; show: dk.m.2 > 0 }
+        box { at: dk.px.2 - 10, dk.cy.2; size: 1, 30; color: ink; opacity: 18% }
+        ellipse { at: (dk.px.2 + 0 * 26 + 13), dk.cy.2; radius: 8; stroke: 1.3; color: ink; opacity: if(1 == dk.p.2 and win.used.2 < 1, 22%, 45%); show: 0 < dk.p.2 and win.shown.2 != 1 }
+        ellipse { at: (dk.px.2 + 0 * 26 + 13), dk.cy.2; radius: 8; color: mint; opacity: 90%; show: 0 < dk.p.2 and win.shown.2 == 1 }
+        text "1" { at: (dk.px.2 + 0 * 26 + 13), dk.cy.2; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 0 < dk.p.2 and win.shown.2 == 1 }
+        zone ellipse dkpool.0.2 { at: (dk.px.2 + 0 * 26 + 13), dk.cy.2; radius: 12; cursor: pointer; active: shore.2 > 0.6 and 0 < dk.p.2 and not overview }
+        ellipse { at: (dk.px.2 + 1 * 26 + 13), dk.cy.2; radius: 8; stroke: 1.3; color: ink; opacity: if(2 == dk.p.2 and win.used.2 < 2, 22%, 45%); show: 1 < dk.p.2 and win.shown.2 != 2 }
+        ellipse { at: (dk.px.2 + 1 * 26 + 13), dk.cy.2; radius: 8; color: mint; opacity: 90%; show: 1 < dk.p.2 and win.shown.2 == 2 }
+        text "2" { at: (dk.px.2 + 1 * 26 + 13), dk.cy.2; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 1 < dk.p.2 and win.shown.2 == 2 }
+        zone ellipse dkpool.1.2 { at: (dk.px.2 + 1 * 26 + 13), dk.cy.2; radius: 12; cursor: pointer; active: shore.2 > 0.6 and 1 < dk.p.2 and not overview }
+        ellipse { at: (dk.px.2 + 2 * 26 + 13), dk.cy.2; radius: 8; stroke: 1.3; color: ink; opacity: if(3 == dk.p.2 and win.used.2 < 3, 22%, 45%); show: 2 < dk.p.2 and win.shown.2 != 3 }
+        ellipse { at: (dk.px.2 + 2 * 26 + 13), dk.cy.2; radius: 8; color: mint; opacity: 90%; show: 2 < dk.p.2 and win.shown.2 == 3 }
+        text "3" { at: (dk.px.2 + 2 * 26 + 13), dk.cy.2; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 2 < dk.p.2 and win.shown.2 == 3 }
+        zone ellipse dkpool.2.2 { at: (dk.px.2 + 2 * 26 + 13), dk.cy.2; radius: 12; cursor: pointer; active: shore.2 > 0.6 and 2 < dk.p.2 and not overview }
+        ellipse { at: (dk.px.2 + 3 * 26 + 13), dk.cy.2; radius: 8; stroke: 1.3; color: ink; opacity: if(4 == dk.p.2 and win.used.2 < 4, 22%, 45%); show: 3 < dk.p.2 and win.shown.2 != 4 }
+        ellipse { at: (dk.px.2 + 3 * 26 + 13), dk.cy.2; radius: 8; color: mint; opacity: 90%; show: 3 < dk.p.2 and win.shown.2 == 4 }
+        text "4" { at: (dk.px.2 + 3 * 26 + 13), dk.cy.2; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 3 < dk.p.2 and win.shown.2 == 4 }
+        zone ellipse dkpool.3.2 { at: (dk.px.2 + 3 * 26 + 13), dk.cy.2; radius: 12; cursor: pointer; active: shore.2 > 0.6 and 3 < dk.p.2 and not overview }
+        ellipse { at: (dk.px.2 + 4 * 26 + 13), dk.cy.2; radius: 8; stroke: 1.3; color: ink; opacity: if(5 == dk.p.2 and win.used.2 < 5, 22%, 45%); show: 4 < dk.p.2 and win.shown.2 != 5 }
+        ellipse { at: (dk.px.2 + 4 * 26 + 13), dk.cy.2; radius: 8; color: mint; opacity: 90%; show: 4 < dk.p.2 and win.shown.2 == 5 }
+        text "5" { at: (dk.px.2 + 4 * 26 + 13), dk.cy.2; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 4 < dk.p.2 and win.shown.2 == 5 }
+        zone ellipse dkpool.4.2 { at: (dk.px.2 + 4 * 26 + 13), dk.cy.2; radius: 12; cursor: pointer; active: shore.2 > 0.6 and 4 < dk.p.2 and not overview }
+        ellipse { at: (dk.px.2 + 5 * 26 + 13), dk.cy.2; radius: 8; stroke: 1.3; color: ink; opacity: if(6 == dk.p.2 and win.used.2 < 6, 22%, 45%); show: 5 < dk.p.2 and win.shown.2 != 6 }
+        ellipse { at: (dk.px.2 + 5 * 26 + 13), dk.cy.2; radius: 8; color: mint; opacity: 90%; show: 5 < dk.p.2 and win.shown.2 == 6 }
+        text "6" { at: (dk.px.2 + 5 * 26 + 13), dk.cy.2; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 5 < dk.p.2 and win.shown.2 == 6 }
+        zone ellipse dkpool.5.2 { at: (dk.px.2 + 5 * 26 + 13), dk.cy.2; radius: 12; cursor: pointer; active: shore.2 > 0.6 and 5 < dk.p.2 and not overview }
+        ellipse { at: (dk.px.2 + 6 * 26 + 13), dk.cy.2; radius: 8; stroke: 1.3; color: ink; opacity: if(7 == dk.p.2 and win.used.2 < 7, 22%, 45%); show: 6 < dk.p.2 and win.shown.2 != 7 }
+        ellipse { at: (dk.px.2 + 6 * 26 + 13), dk.cy.2; radius: 8; color: mint; opacity: 90%; show: 6 < dk.p.2 and win.shown.2 == 7 }
+        text "7" { at: (dk.px.2 + 6 * 26 + 13), dk.cy.2; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 6 < dk.p.2 and win.shown.2 == 7 }
+        zone ellipse dkpool.6.2 { at: (dk.px.2 + 6 * 26 + 13), dk.cy.2; radius: 12; cursor: pointer; active: shore.2 > 0.6 and 6 < dk.p.2 and not overview }
+        ellipse { at: (dk.px.2 + 7 * 26 + 13), dk.cy.2; radius: 8; stroke: 1.3; color: ink; opacity: if(8 == dk.p.2 and win.used.2 < 8, 22%, 45%); show: 7 < dk.p.2 and win.shown.2 != 8 }
+        ellipse { at: (dk.px.2 + 7 * 26 + 13), dk.cy.2; radius: 8; color: mint; opacity: 90%; show: 7 < dk.p.2 and win.shown.2 == 8 }
+        text "8" { at: (dk.px.2 + 7 * 26 + 13), dk.cy.2; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 7 < dk.p.2 and win.shown.2 == 8 }
+        zone ellipse dkpool.7.2 { at: (dk.px.2 + 7 * 26 + 13), dk.cy.2; radius: 12; cursor: pointer; active: shore.2 > 0.6 and 7 < dk.p.2 and not overview }
+    }
+    on press dockz.0.2 {
+        dock 0 on 2
+        impulse buoy.2.0 -9
+        ring.2.0: 0 ~0ms
+        ring.2.0: 1 ~760ms after 16ms
+    }
+    on press dockz.1.2 {
+        dock 1 on 2
+        impulse buoy.2.1 -9
+        ring.2.1: 0 ~0ms
+        ring.2.1: 1 ~760ms after 16ms
+    }
+    on press dockz.2.2 {
+        dock 2 on 2
+        impulse buoy.2.2 -9
+        ring.2.2: 0 ~0ms
+        ring.2.2: 1 ~760ms after 16ms
+    }
+    on press dockz.3.2 {
+        dock 3 on 2
+        impulse buoy.2.3 -9
+        ring.2.3: 0 ~0ms
+        ring.2.3: 1 ~760ms after 16ms
+    }
+    on press dockz.4.2 {
+        dock 4 on 2
+        impulse buoy.2.4 -9
+        ring.2.4: 0 ~0ms
+        ring.2.4: 1 ~760ms after 16ms
+    }
+    on press dockz.5.2 {
+        dock 5 on 2
+        impulse buoy.2.5 -9
+        ring.2.5: 0 ~0ms
+        ring.2.5: 1 ~760ms after 16ms
+    }
+    on press dockz.6.2 {
+        dock 6 on 2
+        impulse buoy.2.6 -9
+        ring.2.6: 0 ~0ms
+        ring.2.6: 1 ~760ms after 16ms
+    }
+    on press dockz.7.2 {
+        dock 7 on 2
+        impulse buoy.2.7 -9
+        ring.2.7: 0 ~0ms
+        ring.2.7: 1 ~760ms after 16ms
+    }
+    on press dockz.8.2 {
+        dock 8 on 2
+        impulse buoy.2.8 -9
+        ring.2.8: 0 ~0ms
+        ring.2.8: 1 ~760ms after 16ms
+    }
+    on press dockz.9.2 {
+        dock 9 on 2
+        impulse buoy.2.9 -9
+        ring.2.9: 0 ~0ms
+        ring.2.9: 1 ~760ms after 16ms
+    }
+    on press dockz.10.2 {
+        dock 10 on 2
+        impulse buoy.2.10 -9
+        ring.2.10: 0 ~0ms
+        ring.2.10: 1 ~760ms after 16ms
+    }
+    on press dockz.11.2 {
+        dock 11 on 2
+        impulse buoy.2.11 -9
+        ring.2.11: 0 ~0ms
+        ring.2.11: 1 ~760ms after 16ms
+    }
+    on press dkpool.0.2 { workspace 1 on 2 }
+    on press dkpool.1.2 { workspace 2 on 2 }
+    on press dkpool.2.2 { workspace 3 on 2 }
+    on press dkpool.3.2 { workspace 4 on 2 }
+    on press dkpool.4.2 { workspace 5 on 2 }
+    on press dkpool.5.2 { workspace 6 on 2 }
+    on press dkpool.6.2 { workspace 7 on 2 }
+    on press dkpool.7.2 { workspace 8 on 2 }
+    prop shore.3 = 0 ~rise
+    follow shore.3 = if(free.3 > 0.5, 1, 0)
+    let dk.n.3 = win.docks.3
+    let dk.m.3 = win.mins.3
+    let dk.p.3 = max(win.pools.3, win.used.3 + 1)
+    let dk.tw.3 = 28 + dk.n.3 * 60 + if(dk.m.3 > 0, 20 + dk.m.3 * 76, 0) + 20 + dk.p.3 * 26
+    prop dkw.3 = 200 ~pop
+    follow dkw.3 = dk.tw.3
+    let dk.x0.3 = screen.3.width / 2 - dkw.3 / 2
+    let dk.cy.3 = screen.3.height + 42 - 88 * shore.3
+    let dk.on.3 = mon == 3 and shore.3 > 0.6 and mouse.y >= dk.cy.3 - 46 and mouse.x >= dk.x0.3 and mouse.x <= dk.x0.3 + dkw.3
+    let dk.t.3 = (mouse.x - dk.x0.3 - 14) / 60 - 0.5
+    let dk.px.3 = dk.x0.3 + dkw.3 - 14 - dk.p.3 * 26
+    image dockicon.3.0 = from win.dock.3.0.icon, 96, 96
+    prop buoy.3.0 = 0 ~pop
+    follow buoy.3.0 = if(dk.on.3, pow(max(0, 1 - abs(0 - dk.t.3) / 1.8), 2), 0)
+    prop here.3.0 = 0 ~pop
+    follow here.3.0 = if(0 < dk.n.3, 1, 0)
+    prop ring.3.0 = 1 ~760ms
+    image dockicon.3.1 = from win.dock.3.1.icon, 96, 96
+    prop buoy.3.1 = 0 ~pop
+    follow buoy.3.1 = if(dk.on.3, pow(max(0, 1 - abs(1 - dk.t.3) / 1.8), 2), 0)
+    prop here.3.1 = 0 ~pop
+    follow here.3.1 = if(1 < dk.n.3, 1, 0)
+    prop ring.3.1 = 1 ~760ms
+    image dockicon.3.2 = from win.dock.3.2.icon, 96, 96
+    prop buoy.3.2 = 0 ~pop
+    follow buoy.3.2 = if(dk.on.3, pow(max(0, 1 - abs(2 - dk.t.3) / 1.8), 2), 0)
+    prop here.3.2 = 0 ~pop
+    follow here.3.2 = if(2 < dk.n.3, 1, 0)
+    prop ring.3.2 = 1 ~760ms
+    image dockicon.3.3 = from win.dock.3.3.icon, 96, 96
+    prop buoy.3.3 = 0 ~pop
+    follow buoy.3.3 = if(dk.on.3, pow(max(0, 1 - abs(3 - dk.t.3) / 1.8), 2), 0)
+    prop here.3.3 = 0 ~pop
+    follow here.3.3 = if(3 < dk.n.3, 1, 0)
+    prop ring.3.3 = 1 ~760ms
+    image dockicon.3.4 = from win.dock.3.4.icon, 96, 96
+    prop buoy.3.4 = 0 ~pop
+    follow buoy.3.4 = if(dk.on.3, pow(max(0, 1 - abs(4 - dk.t.3) / 1.8), 2), 0)
+    prop here.3.4 = 0 ~pop
+    follow here.3.4 = if(4 < dk.n.3, 1, 0)
+    prop ring.3.4 = 1 ~760ms
+    image dockicon.3.5 = from win.dock.3.5.icon, 96, 96
+    prop buoy.3.5 = 0 ~pop
+    follow buoy.3.5 = if(dk.on.3, pow(max(0, 1 - abs(5 - dk.t.3) / 1.8), 2), 0)
+    prop here.3.5 = 0 ~pop
+    follow here.3.5 = if(5 < dk.n.3, 1, 0)
+    prop ring.3.5 = 1 ~760ms
+    image dockicon.3.6 = from win.dock.3.6.icon, 96, 96
+    prop buoy.3.6 = 0 ~pop
+    follow buoy.3.6 = if(dk.on.3, pow(max(0, 1 - abs(6 - dk.t.3) / 1.8), 2), 0)
+    prop here.3.6 = 0 ~pop
+    follow here.3.6 = if(6 < dk.n.3, 1, 0)
+    prop ring.3.6 = 1 ~760ms
+    image dockicon.3.7 = from win.dock.3.7.icon, 96, 96
+    prop buoy.3.7 = 0 ~pop
+    follow buoy.3.7 = if(dk.on.3, pow(max(0, 1 - abs(7 - dk.t.3) / 1.8), 2), 0)
+    prop here.3.7 = 0 ~pop
+    follow here.3.7 = if(7 < dk.n.3, 1, 0)
+    prop ring.3.7 = 1 ~760ms
+    image dockicon.3.8 = from win.dock.3.8.icon, 96, 96
+    prop buoy.3.8 = 0 ~pop
+    follow buoy.3.8 = if(dk.on.3, pow(max(0, 1 - abs(8 - dk.t.3) / 1.8), 2), 0)
+    prop here.3.8 = 0 ~pop
+    follow here.3.8 = if(8 < dk.n.3, 1, 0)
+    prop ring.3.8 = 1 ~760ms
+    image dockicon.3.9 = from win.dock.3.9.icon, 96, 96
+    prop buoy.3.9 = 0 ~pop
+    follow buoy.3.9 = if(dk.on.3, pow(max(0, 1 - abs(9 - dk.t.3) / 1.8), 2), 0)
+    prop here.3.9 = 0 ~pop
+    follow here.3.9 = if(9 < dk.n.3, 1, 0)
+    prop ring.3.9 = 1 ~760ms
+    image dockicon.3.10 = from win.dock.3.10.icon, 96, 96
+    prop buoy.3.10 = 0 ~pop
+    follow buoy.3.10 = if(dk.on.3, pow(max(0, 1 - abs(10 - dk.t.3) / 1.8), 2), 0)
+    prop here.3.10 = 0 ~pop
+    follow here.3.10 = if(10 < dk.n.3, 1, 0)
+    prop ring.3.10 = 1 ~760ms
+    image dockicon.3.11 = from win.dock.3.11.icon, 96, 96
+    prop buoy.3.11 = 0 ~pop
+    follow buoy.3.11 = if(dk.on.3, pow(max(0, 1 - abs(11 - dk.t.3) / 1.8), 2), 0)
+    prop here.3.11 = 0 ~pop
+    follow here.3.11 = if(11 < dk.n.3, 1, 0)
+    prop ring.3.11 = 1 ~760ms
+    group {
+        z: 99982
+        show: shore.3 > 0.01 and screen.index == 3
+        body {
+            gradient: 0, dk.cy.3 - 32 to 0, dk.cy.3 + 32, #15181b, #0c0e10 45%, #0a0b0d
+            rim: 12%
+            shadow: 0, 12, 34, 42%
+            box { from: -80, H; size: W + 160, 140 }
+            box { at: dk.x0.3 + dkw.3 / 2, dk.cy.3; size: dkw.3 * (0.55 + 0.45 * shore.3), 64; corner: 22; blend: 22 + 36 * 4 * shore.3 * (1 - shore.3) }
+        }
+        group {
+            show: here.3.0 > 0.01
+            opacity: here.3.0
+            ellipse { at: (dk.x0.3 + 14 + 0 * 60 + 30), dk.cy.3 + 22; radius: 18 + 30 * ring.3.0; scale: 1, 0.32; stroke: 1.4 * (1 - ring.3.0) + 0.3; color: ink; opacity: 45% * (1 - ring.3.0); show: ring.3.0 < 0.99 }
+            image dockicon.3.0 { at: (dk.x0.3 + 14 + 0 * 60 + 30) - 22 * (1 + 0.14 * buoy.3.0) * here.3.0, (dk.cy.3 - 3 - 12 * buoy.3.0) - 22 * (1 + 0.14 * buoy.3.0) * here.3.0; size: 44 * (1 + 0.14 * buoy.3.0) * here.3.0, 44 * (1 + 0.14 * buoy.3.0) * here.3.0 }
+            ellipse { at: (dk.x0.3 + 14 + 0 * 60 + 30), dk.cy.3 + 25; radius: if(win.dock.3.0.focused, 2.4, 2); color: if(win.dock.3.0.focused, mint, ink); opacity: if(win.dock.3.0.focused, 95%, 55%); show: win.dock.3.0.windows == 1 or win.dock.3.0.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 0 * 60 + 30) - 3.5, dk.cy.3 + 25; radius: if(win.dock.3.0.focused, 2.4, 2); color: if(win.dock.3.0.focused, mint, ink); opacity: if(win.dock.3.0.focused, 95%, 55%); show: win.dock.3.0.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 0 * 60 + 30) + 3.5, dk.cy.3 + 25; radius: if(win.dock.3.0.focused, 2.4, 2); color: if(win.dock.3.0.focused, mint, ink); opacity: if(win.dock.3.0.focused, 95%, 55%); show: win.dock.3.0.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 0 * 60 + 30) - 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.0.focused, mint, ink); opacity: if(win.dock.3.0.focused, 95%, 55%); show: win.dock.3.0.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 0 * 60 + 30) + 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.0.focused, mint, ink); opacity: if(win.dock.3.0.focused, 95%, 55%); show: win.dock.3.0.windows >= 3 }
+            zone box dockz.0.3 { at: (dk.x0.3 + 14 + 0 * 60 + 30), dk.cy.3; size: 60, 64; cursor: pointer; active: shore.3 > 0.6 and 0 < dk.n.3 and not overview }
+        }
+        group {
+            show: here.3.1 > 0.01
+            opacity: here.3.1
+            ellipse { at: (dk.x0.3 + 14 + 1 * 60 + 30), dk.cy.3 + 22; radius: 18 + 30 * ring.3.1; scale: 1, 0.32; stroke: 1.4 * (1 - ring.3.1) + 0.3; color: ink; opacity: 45% * (1 - ring.3.1); show: ring.3.1 < 0.99 }
+            image dockicon.3.1 { at: (dk.x0.3 + 14 + 1 * 60 + 30) - 22 * (1 + 0.14 * buoy.3.1) * here.3.1, (dk.cy.3 - 3 - 12 * buoy.3.1) - 22 * (1 + 0.14 * buoy.3.1) * here.3.1; size: 44 * (1 + 0.14 * buoy.3.1) * here.3.1, 44 * (1 + 0.14 * buoy.3.1) * here.3.1 }
+            ellipse { at: (dk.x0.3 + 14 + 1 * 60 + 30), dk.cy.3 + 25; radius: if(win.dock.3.1.focused, 2.4, 2); color: if(win.dock.3.1.focused, mint, ink); opacity: if(win.dock.3.1.focused, 95%, 55%); show: win.dock.3.1.windows == 1 or win.dock.3.1.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 1 * 60 + 30) - 3.5, dk.cy.3 + 25; radius: if(win.dock.3.1.focused, 2.4, 2); color: if(win.dock.3.1.focused, mint, ink); opacity: if(win.dock.3.1.focused, 95%, 55%); show: win.dock.3.1.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 1 * 60 + 30) + 3.5, dk.cy.3 + 25; radius: if(win.dock.3.1.focused, 2.4, 2); color: if(win.dock.3.1.focused, mint, ink); opacity: if(win.dock.3.1.focused, 95%, 55%); show: win.dock.3.1.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 1 * 60 + 30) - 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.1.focused, mint, ink); opacity: if(win.dock.3.1.focused, 95%, 55%); show: win.dock.3.1.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 1 * 60 + 30) + 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.1.focused, mint, ink); opacity: if(win.dock.3.1.focused, 95%, 55%); show: win.dock.3.1.windows >= 3 }
+            zone box dockz.1.3 { at: (dk.x0.3 + 14 + 1 * 60 + 30), dk.cy.3; size: 60, 64; cursor: pointer; active: shore.3 > 0.6 and 1 < dk.n.3 and not overview }
+        }
+        group {
+            show: here.3.2 > 0.01
+            opacity: here.3.2
+            ellipse { at: (dk.x0.3 + 14 + 2 * 60 + 30), dk.cy.3 + 22; radius: 18 + 30 * ring.3.2; scale: 1, 0.32; stroke: 1.4 * (1 - ring.3.2) + 0.3; color: ink; opacity: 45% * (1 - ring.3.2); show: ring.3.2 < 0.99 }
+            image dockicon.3.2 { at: (dk.x0.3 + 14 + 2 * 60 + 30) - 22 * (1 + 0.14 * buoy.3.2) * here.3.2, (dk.cy.3 - 3 - 12 * buoy.3.2) - 22 * (1 + 0.14 * buoy.3.2) * here.3.2; size: 44 * (1 + 0.14 * buoy.3.2) * here.3.2, 44 * (1 + 0.14 * buoy.3.2) * here.3.2 }
+            ellipse { at: (dk.x0.3 + 14 + 2 * 60 + 30), dk.cy.3 + 25; radius: if(win.dock.3.2.focused, 2.4, 2); color: if(win.dock.3.2.focused, mint, ink); opacity: if(win.dock.3.2.focused, 95%, 55%); show: win.dock.3.2.windows == 1 or win.dock.3.2.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 2 * 60 + 30) - 3.5, dk.cy.3 + 25; radius: if(win.dock.3.2.focused, 2.4, 2); color: if(win.dock.3.2.focused, mint, ink); opacity: if(win.dock.3.2.focused, 95%, 55%); show: win.dock.3.2.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 2 * 60 + 30) + 3.5, dk.cy.3 + 25; radius: if(win.dock.3.2.focused, 2.4, 2); color: if(win.dock.3.2.focused, mint, ink); opacity: if(win.dock.3.2.focused, 95%, 55%); show: win.dock.3.2.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 2 * 60 + 30) - 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.2.focused, mint, ink); opacity: if(win.dock.3.2.focused, 95%, 55%); show: win.dock.3.2.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 2 * 60 + 30) + 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.2.focused, mint, ink); opacity: if(win.dock.3.2.focused, 95%, 55%); show: win.dock.3.2.windows >= 3 }
+            zone box dockz.2.3 { at: (dk.x0.3 + 14 + 2 * 60 + 30), dk.cy.3; size: 60, 64; cursor: pointer; active: shore.3 > 0.6 and 2 < dk.n.3 and not overview }
+        }
+        group {
+            show: here.3.3 > 0.01
+            opacity: here.3.3
+            ellipse { at: (dk.x0.3 + 14 + 3 * 60 + 30), dk.cy.3 + 22; radius: 18 + 30 * ring.3.3; scale: 1, 0.32; stroke: 1.4 * (1 - ring.3.3) + 0.3; color: ink; opacity: 45% * (1 - ring.3.3); show: ring.3.3 < 0.99 }
+            image dockicon.3.3 { at: (dk.x0.3 + 14 + 3 * 60 + 30) - 22 * (1 + 0.14 * buoy.3.3) * here.3.3, (dk.cy.3 - 3 - 12 * buoy.3.3) - 22 * (1 + 0.14 * buoy.3.3) * here.3.3; size: 44 * (1 + 0.14 * buoy.3.3) * here.3.3, 44 * (1 + 0.14 * buoy.3.3) * here.3.3 }
+            ellipse { at: (dk.x0.3 + 14 + 3 * 60 + 30), dk.cy.3 + 25; radius: if(win.dock.3.3.focused, 2.4, 2); color: if(win.dock.3.3.focused, mint, ink); opacity: if(win.dock.3.3.focused, 95%, 55%); show: win.dock.3.3.windows == 1 or win.dock.3.3.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 3 * 60 + 30) - 3.5, dk.cy.3 + 25; radius: if(win.dock.3.3.focused, 2.4, 2); color: if(win.dock.3.3.focused, mint, ink); opacity: if(win.dock.3.3.focused, 95%, 55%); show: win.dock.3.3.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 3 * 60 + 30) + 3.5, dk.cy.3 + 25; radius: if(win.dock.3.3.focused, 2.4, 2); color: if(win.dock.3.3.focused, mint, ink); opacity: if(win.dock.3.3.focused, 95%, 55%); show: win.dock.3.3.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 3 * 60 + 30) - 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.3.focused, mint, ink); opacity: if(win.dock.3.3.focused, 95%, 55%); show: win.dock.3.3.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 3 * 60 + 30) + 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.3.focused, mint, ink); opacity: if(win.dock.3.3.focused, 95%, 55%); show: win.dock.3.3.windows >= 3 }
+            zone box dockz.3.3 { at: (dk.x0.3 + 14 + 3 * 60 + 30), dk.cy.3; size: 60, 64; cursor: pointer; active: shore.3 > 0.6 and 3 < dk.n.3 and not overview }
+        }
+        group {
+            show: here.3.4 > 0.01
+            opacity: here.3.4
+            ellipse { at: (dk.x0.3 + 14 + 4 * 60 + 30), dk.cy.3 + 22; radius: 18 + 30 * ring.3.4; scale: 1, 0.32; stroke: 1.4 * (1 - ring.3.4) + 0.3; color: ink; opacity: 45% * (1 - ring.3.4); show: ring.3.4 < 0.99 }
+            image dockicon.3.4 { at: (dk.x0.3 + 14 + 4 * 60 + 30) - 22 * (1 + 0.14 * buoy.3.4) * here.3.4, (dk.cy.3 - 3 - 12 * buoy.3.4) - 22 * (1 + 0.14 * buoy.3.4) * here.3.4; size: 44 * (1 + 0.14 * buoy.3.4) * here.3.4, 44 * (1 + 0.14 * buoy.3.4) * here.3.4 }
+            ellipse { at: (dk.x0.3 + 14 + 4 * 60 + 30), dk.cy.3 + 25; radius: if(win.dock.3.4.focused, 2.4, 2); color: if(win.dock.3.4.focused, mint, ink); opacity: if(win.dock.3.4.focused, 95%, 55%); show: win.dock.3.4.windows == 1 or win.dock.3.4.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 4 * 60 + 30) - 3.5, dk.cy.3 + 25; radius: if(win.dock.3.4.focused, 2.4, 2); color: if(win.dock.3.4.focused, mint, ink); opacity: if(win.dock.3.4.focused, 95%, 55%); show: win.dock.3.4.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 4 * 60 + 30) + 3.5, dk.cy.3 + 25; radius: if(win.dock.3.4.focused, 2.4, 2); color: if(win.dock.3.4.focused, mint, ink); opacity: if(win.dock.3.4.focused, 95%, 55%); show: win.dock.3.4.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 4 * 60 + 30) - 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.4.focused, mint, ink); opacity: if(win.dock.3.4.focused, 95%, 55%); show: win.dock.3.4.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 4 * 60 + 30) + 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.4.focused, mint, ink); opacity: if(win.dock.3.4.focused, 95%, 55%); show: win.dock.3.4.windows >= 3 }
+            zone box dockz.4.3 { at: (dk.x0.3 + 14 + 4 * 60 + 30), dk.cy.3; size: 60, 64; cursor: pointer; active: shore.3 > 0.6 and 4 < dk.n.3 and not overview }
+        }
+        group {
+            show: here.3.5 > 0.01
+            opacity: here.3.5
+            ellipse { at: (dk.x0.3 + 14 + 5 * 60 + 30), dk.cy.3 + 22; radius: 18 + 30 * ring.3.5; scale: 1, 0.32; stroke: 1.4 * (1 - ring.3.5) + 0.3; color: ink; opacity: 45% * (1 - ring.3.5); show: ring.3.5 < 0.99 }
+            image dockicon.3.5 { at: (dk.x0.3 + 14 + 5 * 60 + 30) - 22 * (1 + 0.14 * buoy.3.5) * here.3.5, (dk.cy.3 - 3 - 12 * buoy.3.5) - 22 * (1 + 0.14 * buoy.3.5) * here.3.5; size: 44 * (1 + 0.14 * buoy.3.5) * here.3.5, 44 * (1 + 0.14 * buoy.3.5) * here.3.5 }
+            ellipse { at: (dk.x0.3 + 14 + 5 * 60 + 30), dk.cy.3 + 25; radius: if(win.dock.3.5.focused, 2.4, 2); color: if(win.dock.3.5.focused, mint, ink); opacity: if(win.dock.3.5.focused, 95%, 55%); show: win.dock.3.5.windows == 1 or win.dock.3.5.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 5 * 60 + 30) - 3.5, dk.cy.3 + 25; radius: if(win.dock.3.5.focused, 2.4, 2); color: if(win.dock.3.5.focused, mint, ink); opacity: if(win.dock.3.5.focused, 95%, 55%); show: win.dock.3.5.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 5 * 60 + 30) + 3.5, dk.cy.3 + 25; radius: if(win.dock.3.5.focused, 2.4, 2); color: if(win.dock.3.5.focused, mint, ink); opacity: if(win.dock.3.5.focused, 95%, 55%); show: win.dock.3.5.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 5 * 60 + 30) - 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.5.focused, mint, ink); opacity: if(win.dock.3.5.focused, 95%, 55%); show: win.dock.3.5.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 5 * 60 + 30) + 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.5.focused, mint, ink); opacity: if(win.dock.3.5.focused, 95%, 55%); show: win.dock.3.5.windows >= 3 }
+            zone box dockz.5.3 { at: (dk.x0.3 + 14 + 5 * 60 + 30), dk.cy.3; size: 60, 64; cursor: pointer; active: shore.3 > 0.6 and 5 < dk.n.3 and not overview }
+        }
+        group {
+            show: here.3.6 > 0.01
+            opacity: here.3.6
+            ellipse { at: (dk.x0.3 + 14 + 6 * 60 + 30), dk.cy.3 + 22; radius: 18 + 30 * ring.3.6; scale: 1, 0.32; stroke: 1.4 * (1 - ring.3.6) + 0.3; color: ink; opacity: 45% * (1 - ring.3.6); show: ring.3.6 < 0.99 }
+            image dockicon.3.6 { at: (dk.x0.3 + 14 + 6 * 60 + 30) - 22 * (1 + 0.14 * buoy.3.6) * here.3.6, (dk.cy.3 - 3 - 12 * buoy.3.6) - 22 * (1 + 0.14 * buoy.3.6) * here.3.6; size: 44 * (1 + 0.14 * buoy.3.6) * here.3.6, 44 * (1 + 0.14 * buoy.3.6) * here.3.6 }
+            ellipse { at: (dk.x0.3 + 14 + 6 * 60 + 30), dk.cy.3 + 25; radius: if(win.dock.3.6.focused, 2.4, 2); color: if(win.dock.3.6.focused, mint, ink); opacity: if(win.dock.3.6.focused, 95%, 55%); show: win.dock.3.6.windows == 1 or win.dock.3.6.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 6 * 60 + 30) - 3.5, dk.cy.3 + 25; radius: if(win.dock.3.6.focused, 2.4, 2); color: if(win.dock.3.6.focused, mint, ink); opacity: if(win.dock.3.6.focused, 95%, 55%); show: win.dock.3.6.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 6 * 60 + 30) + 3.5, dk.cy.3 + 25; radius: if(win.dock.3.6.focused, 2.4, 2); color: if(win.dock.3.6.focused, mint, ink); opacity: if(win.dock.3.6.focused, 95%, 55%); show: win.dock.3.6.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 6 * 60 + 30) - 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.6.focused, mint, ink); opacity: if(win.dock.3.6.focused, 95%, 55%); show: win.dock.3.6.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 6 * 60 + 30) + 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.6.focused, mint, ink); opacity: if(win.dock.3.6.focused, 95%, 55%); show: win.dock.3.6.windows >= 3 }
+            zone box dockz.6.3 { at: (dk.x0.3 + 14 + 6 * 60 + 30), dk.cy.3; size: 60, 64; cursor: pointer; active: shore.3 > 0.6 and 6 < dk.n.3 and not overview }
+        }
+        group {
+            show: here.3.7 > 0.01
+            opacity: here.3.7
+            ellipse { at: (dk.x0.3 + 14 + 7 * 60 + 30), dk.cy.3 + 22; radius: 18 + 30 * ring.3.7; scale: 1, 0.32; stroke: 1.4 * (1 - ring.3.7) + 0.3; color: ink; opacity: 45% * (1 - ring.3.7); show: ring.3.7 < 0.99 }
+            image dockicon.3.7 { at: (dk.x0.3 + 14 + 7 * 60 + 30) - 22 * (1 + 0.14 * buoy.3.7) * here.3.7, (dk.cy.3 - 3 - 12 * buoy.3.7) - 22 * (1 + 0.14 * buoy.3.7) * here.3.7; size: 44 * (1 + 0.14 * buoy.3.7) * here.3.7, 44 * (1 + 0.14 * buoy.3.7) * here.3.7 }
+            ellipse { at: (dk.x0.3 + 14 + 7 * 60 + 30), dk.cy.3 + 25; radius: if(win.dock.3.7.focused, 2.4, 2); color: if(win.dock.3.7.focused, mint, ink); opacity: if(win.dock.3.7.focused, 95%, 55%); show: win.dock.3.7.windows == 1 or win.dock.3.7.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 7 * 60 + 30) - 3.5, dk.cy.3 + 25; radius: if(win.dock.3.7.focused, 2.4, 2); color: if(win.dock.3.7.focused, mint, ink); opacity: if(win.dock.3.7.focused, 95%, 55%); show: win.dock.3.7.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 7 * 60 + 30) + 3.5, dk.cy.3 + 25; radius: if(win.dock.3.7.focused, 2.4, 2); color: if(win.dock.3.7.focused, mint, ink); opacity: if(win.dock.3.7.focused, 95%, 55%); show: win.dock.3.7.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 7 * 60 + 30) - 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.7.focused, mint, ink); opacity: if(win.dock.3.7.focused, 95%, 55%); show: win.dock.3.7.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 7 * 60 + 30) + 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.7.focused, mint, ink); opacity: if(win.dock.3.7.focused, 95%, 55%); show: win.dock.3.7.windows >= 3 }
+            zone box dockz.7.3 { at: (dk.x0.3 + 14 + 7 * 60 + 30), dk.cy.3; size: 60, 64; cursor: pointer; active: shore.3 > 0.6 and 7 < dk.n.3 and not overview }
+        }
+        group {
+            show: here.3.8 > 0.01
+            opacity: here.3.8
+            ellipse { at: (dk.x0.3 + 14 + 8 * 60 + 30), dk.cy.3 + 22; radius: 18 + 30 * ring.3.8; scale: 1, 0.32; stroke: 1.4 * (1 - ring.3.8) + 0.3; color: ink; opacity: 45% * (1 - ring.3.8); show: ring.3.8 < 0.99 }
+            image dockicon.3.8 { at: (dk.x0.3 + 14 + 8 * 60 + 30) - 22 * (1 + 0.14 * buoy.3.8) * here.3.8, (dk.cy.3 - 3 - 12 * buoy.3.8) - 22 * (1 + 0.14 * buoy.3.8) * here.3.8; size: 44 * (1 + 0.14 * buoy.3.8) * here.3.8, 44 * (1 + 0.14 * buoy.3.8) * here.3.8 }
+            ellipse { at: (dk.x0.3 + 14 + 8 * 60 + 30), dk.cy.3 + 25; radius: if(win.dock.3.8.focused, 2.4, 2); color: if(win.dock.3.8.focused, mint, ink); opacity: if(win.dock.3.8.focused, 95%, 55%); show: win.dock.3.8.windows == 1 or win.dock.3.8.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 8 * 60 + 30) - 3.5, dk.cy.3 + 25; radius: if(win.dock.3.8.focused, 2.4, 2); color: if(win.dock.3.8.focused, mint, ink); opacity: if(win.dock.3.8.focused, 95%, 55%); show: win.dock.3.8.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 8 * 60 + 30) + 3.5, dk.cy.3 + 25; radius: if(win.dock.3.8.focused, 2.4, 2); color: if(win.dock.3.8.focused, mint, ink); opacity: if(win.dock.3.8.focused, 95%, 55%); show: win.dock.3.8.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 8 * 60 + 30) - 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.8.focused, mint, ink); opacity: if(win.dock.3.8.focused, 95%, 55%); show: win.dock.3.8.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 8 * 60 + 30) + 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.8.focused, mint, ink); opacity: if(win.dock.3.8.focused, 95%, 55%); show: win.dock.3.8.windows >= 3 }
+            zone box dockz.8.3 { at: (dk.x0.3 + 14 + 8 * 60 + 30), dk.cy.3; size: 60, 64; cursor: pointer; active: shore.3 > 0.6 and 8 < dk.n.3 and not overview }
+        }
+        group {
+            show: here.3.9 > 0.01
+            opacity: here.3.9
+            ellipse { at: (dk.x0.3 + 14 + 9 * 60 + 30), dk.cy.3 + 22; radius: 18 + 30 * ring.3.9; scale: 1, 0.32; stroke: 1.4 * (1 - ring.3.9) + 0.3; color: ink; opacity: 45% * (1 - ring.3.9); show: ring.3.9 < 0.99 }
+            image dockicon.3.9 { at: (dk.x0.3 + 14 + 9 * 60 + 30) - 22 * (1 + 0.14 * buoy.3.9) * here.3.9, (dk.cy.3 - 3 - 12 * buoy.3.9) - 22 * (1 + 0.14 * buoy.3.9) * here.3.9; size: 44 * (1 + 0.14 * buoy.3.9) * here.3.9, 44 * (1 + 0.14 * buoy.3.9) * here.3.9 }
+            ellipse { at: (dk.x0.3 + 14 + 9 * 60 + 30), dk.cy.3 + 25; radius: if(win.dock.3.9.focused, 2.4, 2); color: if(win.dock.3.9.focused, mint, ink); opacity: if(win.dock.3.9.focused, 95%, 55%); show: win.dock.3.9.windows == 1 or win.dock.3.9.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 9 * 60 + 30) - 3.5, dk.cy.3 + 25; radius: if(win.dock.3.9.focused, 2.4, 2); color: if(win.dock.3.9.focused, mint, ink); opacity: if(win.dock.3.9.focused, 95%, 55%); show: win.dock.3.9.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 9 * 60 + 30) + 3.5, dk.cy.3 + 25; radius: if(win.dock.3.9.focused, 2.4, 2); color: if(win.dock.3.9.focused, mint, ink); opacity: if(win.dock.3.9.focused, 95%, 55%); show: win.dock.3.9.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 9 * 60 + 30) - 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.9.focused, mint, ink); opacity: if(win.dock.3.9.focused, 95%, 55%); show: win.dock.3.9.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 9 * 60 + 30) + 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.9.focused, mint, ink); opacity: if(win.dock.3.9.focused, 95%, 55%); show: win.dock.3.9.windows >= 3 }
+            zone box dockz.9.3 { at: (dk.x0.3 + 14 + 9 * 60 + 30), dk.cy.3; size: 60, 64; cursor: pointer; active: shore.3 > 0.6 and 9 < dk.n.3 and not overview }
+        }
+        group {
+            show: here.3.10 > 0.01
+            opacity: here.3.10
+            ellipse { at: (dk.x0.3 + 14 + 10 * 60 + 30), dk.cy.3 + 22; radius: 18 + 30 * ring.3.10; scale: 1, 0.32; stroke: 1.4 * (1 - ring.3.10) + 0.3; color: ink; opacity: 45% * (1 - ring.3.10); show: ring.3.10 < 0.99 }
+            image dockicon.3.10 { at: (dk.x0.3 + 14 + 10 * 60 + 30) - 22 * (1 + 0.14 * buoy.3.10) * here.3.10, (dk.cy.3 - 3 - 12 * buoy.3.10) - 22 * (1 + 0.14 * buoy.3.10) * here.3.10; size: 44 * (1 + 0.14 * buoy.3.10) * here.3.10, 44 * (1 + 0.14 * buoy.3.10) * here.3.10 }
+            ellipse { at: (dk.x0.3 + 14 + 10 * 60 + 30), dk.cy.3 + 25; radius: if(win.dock.3.10.focused, 2.4, 2); color: if(win.dock.3.10.focused, mint, ink); opacity: if(win.dock.3.10.focused, 95%, 55%); show: win.dock.3.10.windows == 1 or win.dock.3.10.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 10 * 60 + 30) - 3.5, dk.cy.3 + 25; radius: if(win.dock.3.10.focused, 2.4, 2); color: if(win.dock.3.10.focused, mint, ink); opacity: if(win.dock.3.10.focused, 95%, 55%); show: win.dock.3.10.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 10 * 60 + 30) + 3.5, dk.cy.3 + 25; radius: if(win.dock.3.10.focused, 2.4, 2); color: if(win.dock.3.10.focused, mint, ink); opacity: if(win.dock.3.10.focused, 95%, 55%); show: win.dock.3.10.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 10 * 60 + 30) - 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.10.focused, mint, ink); opacity: if(win.dock.3.10.focused, 95%, 55%); show: win.dock.3.10.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 10 * 60 + 30) + 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.10.focused, mint, ink); opacity: if(win.dock.3.10.focused, 95%, 55%); show: win.dock.3.10.windows >= 3 }
+            zone box dockz.10.3 { at: (dk.x0.3 + 14 + 10 * 60 + 30), dk.cy.3; size: 60, 64; cursor: pointer; active: shore.3 > 0.6 and 10 < dk.n.3 and not overview }
+        }
+        group {
+            show: here.3.11 > 0.01
+            opacity: here.3.11
+            ellipse { at: (dk.x0.3 + 14 + 11 * 60 + 30), dk.cy.3 + 22; radius: 18 + 30 * ring.3.11; scale: 1, 0.32; stroke: 1.4 * (1 - ring.3.11) + 0.3; color: ink; opacity: 45% * (1 - ring.3.11); show: ring.3.11 < 0.99 }
+            image dockicon.3.11 { at: (dk.x0.3 + 14 + 11 * 60 + 30) - 22 * (1 + 0.14 * buoy.3.11) * here.3.11, (dk.cy.3 - 3 - 12 * buoy.3.11) - 22 * (1 + 0.14 * buoy.3.11) * here.3.11; size: 44 * (1 + 0.14 * buoy.3.11) * here.3.11, 44 * (1 + 0.14 * buoy.3.11) * here.3.11 }
+            ellipse { at: (dk.x0.3 + 14 + 11 * 60 + 30), dk.cy.3 + 25; radius: if(win.dock.3.11.focused, 2.4, 2); color: if(win.dock.3.11.focused, mint, ink); opacity: if(win.dock.3.11.focused, 95%, 55%); show: win.dock.3.11.windows == 1 or win.dock.3.11.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 11 * 60 + 30) - 3.5, dk.cy.3 + 25; radius: if(win.dock.3.11.focused, 2.4, 2); color: if(win.dock.3.11.focused, mint, ink); opacity: if(win.dock.3.11.focused, 95%, 55%); show: win.dock.3.11.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 11 * 60 + 30) + 3.5, dk.cy.3 + 25; radius: if(win.dock.3.11.focused, 2.4, 2); color: if(win.dock.3.11.focused, mint, ink); opacity: if(win.dock.3.11.focused, 95%, 55%); show: win.dock.3.11.windows == 2 }
+            ellipse { at: (dk.x0.3 + 14 + 11 * 60 + 30) - 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.11.focused, mint, ink); opacity: if(win.dock.3.11.focused, 95%, 55%); show: win.dock.3.11.windows >= 3 }
+            ellipse { at: (dk.x0.3 + 14 + 11 * 60 + 30) + 6, dk.cy.3 + 25; radius: 2; color: if(win.dock.3.11.focused, mint, ink); opacity: if(win.dock.3.11.focused, 95%, 55%); show: win.dock.3.11.windows >= 3 }
+            zone box dockz.11.3 { at: (dk.x0.3 + 14 + 11 * 60 + 30), dk.cy.3; size: 60, 64; cursor: pointer; active: shore.3 > 0.6 and 11 < dk.n.3 and not overview }
+        }
+        // Between the programs and what is put away, and before the pools: a line of water.
+        box { at: dk.x0.3 + 14 + dk.n.3 * 60 + 10, dk.cy.3; size: 1, 30; color: ink; opacity: 18%; show: dk.m.3 > 0 }
+        box { at: dk.px.3 - 10, dk.cy.3; size: 1, 30; color: ink; opacity: 18% }
+        ellipse { at: (dk.px.3 + 0 * 26 + 13), dk.cy.3; radius: 8; stroke: 1.3; color: ink; opacity: if(1 == dk.p.3 and win.used.3 < 1, 22%, 45%); show: 0 < dk.p.3 and win.shown.3 != 1 }
+        ellipse { at: (dk.px.3 + 0 * 26 + 13), dk.cy.3; radius: 8; color: mint; opacity: 90%; show: 0 < dk.p.3 and win.shown.3 == 1 }
+        text "1" { at: (dk.px.3 + 0 * 26 + 13), dk.cy.3; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 0 < dk.p.3 and win.shown.3 == 1 }
+        zone ellipse dkpool.0.3 { at: (dk.px.3 + 0 * 26 + 13), dk.cy.3; radius: 12; cursor: pointer; active: shore.3 > 0.6 and 0 < dk.p.3 and not overview }
+        ellipse { at: (dk.px.3 + 1 * 26 + 13), dk.cy.3; radius: 8; stroke: 1.3; color: ink; opacity: if(2 == dk.p.3 and win.used.3 < 2, 22%, 45%); show: 1 < dk.p.3 and win.shown.3 != 2 }
+        ellipse { at: (dk.px.3 + 1 * 26 + 13), dk.cy.3; radius: 8; color: mint; opacity: 90%; show: 1 < dk.p.3 and win.shown.3 == 2 }
+        text "2" { at: (dk.px.3 + 1 * 26 + 13), dk.cy.3; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 1 < dk.p.3 and win.shown.3 == 2 }
+        zone ellipse dkpool.1.3 { at: (dk.px.3 + 1 * 26 + 13), dk.cy.3; radius: 12; cursor: pointer; active: shore.3 > 0.6 and 1 < dk.p.3 and not overview }
+        ellipse { at: (dk.px.3 + 2 * 26 + 13), dk.cy.3; radius: 8; stroke: 1.3; color: ink; opacity: if(3 == dk.p.3 and win.used.3 < 3, 22%, 45%); show: 2 < dk.p.3 and win.shown.3 != 3 }
+        ellipse { at: (dk.px.3 + 2 * 26 + 13), dk.cy.3; radius: 8; color: mint; opacity: 90%; show: 2 < dk.p.3 and win.shown.3 == 3 }
+        text "3" { at: (dk.px.3 + 2 * 26 + 13), dk.cy.3; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 2 < dk.p.3 and win.shown.3 == 3 }
+        zone ellipse dkpool.2.3 { at: (dk.px.3 + 2 * 26 + 13), dk.cy.3; radius: 12; cursor: pointer; active: shore.3 > 0.6 and 2 < dk.p.3 and not overview }
+        ellipse { at: (dk.px.3 + 3 * 26 + 13), dk.cy.3; radius: 8; stroke: 1.3; color: ink; opacity: if(4 == dk.p.3 and win.used.3 < 4, 22%, 45%); show: 3 < dk.p.3 and win.shown.3 != 4 }
+        ellipse { at: (dk.px.3 + 3 * 26 + 13), dk.cy.3; radius: 8; color: mint; opacity: 90%; show: 3 < dk.p.3 and win.shown.3 == 4 }
+        text "4" { at: (dk.px.3 + 3 * 26 + 13), dk.cy.3; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 3 < dk.p.3 and win.shown.3 == 4 }
+        zone ellipse dkpool.3.3 { at: (dk.px.3 + 3 * 26 + 13), dk.cy.3; radius: 12; cursor: pointer; active: shore.3 > 0.6 and 3 < dk.p.3 and not overview }
+        ellipse { at: (dk.px.3 + 4 * 26 + 13), dk.cy.3; radius: 8; stroke: 1.3; color: ink; opacity: if(5 == dk.p.3 and win.used.3 < 5, 22%, 45%); show: 4 < dk.p.3 and win.shown.3 != 5 }
+        ellipse { at: (dk.px.3 + 4 * 26 + 13), dk.cy.3; radius: 8; color: mint; opacity: 90%; show: 4 < dk.p.3 and win.shown.3 == 5 }
+        text "5" { at: (dk.px.3 + 4 * 26 + 13), dk.cy.3; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 4 < dk.p.3 and win.shown.3 == 5 }
+        zone ellipse dkpool.4.3 { at: (dk.px.3 + 4 * 26 + 13), dk.cy.3; radius: 12; cursor: pointer; active: shore.3 > 0.6 and 4 < dk.p.3 and not overview }
+        ellipse { at: (dk.px.3 + 5 * 26 + 13), dk.cy.3; radius: 8; stroke: 1.3; color: ink; opacity: if(6 == dk.p.3 and win.used.3 < 6, 22%, 45%); show: 5 < dk.p.3 and win.shown.3 != 6 }
+        ellipse { at: (dk.px.3 + 5 * 26 + 13), dk.cy.3; radius: 8; color: mint; opacity: 90%; show: 5 < dk.p.3 and win.shown.3 == 6 }
+        text "6" { at: (dk.px.3 + 5 * 26 + 13), dk.cy.3; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 5 < dk.p.3 and win.shown.3 == 6 }
+        zone ellipse dkpool.5.3 { at: (dk.px.3 + 5 * 26 + 13), dk.cy.3; radius: 12; cursor: pointer; active: shore.3 > 0.6 and 5 < dk.p.3 and not overview }
+        ellipse { at: (dk.px.3 + 6 * 26 + 13), dk.cy.3; radius: 8; stroke: 1.3; color: ink; opacity: if(7 == dk.p.3 and win.used.3 < 7, 22%, 45%); show: 6 < dk.p.3 and win.shown.3 != 7 }
+        ellipse { at: (dk.px.3 + 6 * 26 + 13), dk.cy.3; radius: 8; color: mint; opacity: 90%; show: 6 < dk.p.3 and win.shown.3 == 7 }
+        text "7" { at: (dk.px.3 + 6 * 26 + 13), dk.cy.3; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 6 < dk.p.3 and win.shown.3 == 7 }
+        zone ellipse dkpool.6.3 { at: (dk.px.3 + 6 * 26 + 13), dk.cy.3; radius: 12; cursor: pointer; active: shore.3 > 0.6 and 6 < dk.p.3 and not overview }
+        ellipse { at: (dk.px.3 + 7 * 26 + 13), dk.cy.3; radius: 8; stroke: 1.3; color: ink; opacity: if(8 == dk.p.3 and win.used.3 < 8, 22%, 45%); show: 7 < dk.p.3 and win.shown.3 != 8 }
+        ellipse { at: (dk.px.3 + 7 * 26 + 13), dk.cy.3; radius: 8; color: mint; opacity: 90%; show: 7 < dk.p.3 and win.shown.3 == 8 }
+        text "8" { at: (dk.px.3 + 7 * 26 + 13), dk.cy.3; anchor: center; size: 9; weight: 700; color: #0c0e10; show: 7 < dk.p.3 and win.shown.3 == 8 }
+        zone ellipse dkpool.7.3 { at: (dk.px.3 + 7 * 26 + 13), dk.cy.3; radius: 12; cursor: pointer; active: shore.3 > 0.6 and 7 < dk.p.3 and not overview }
+    }
+    on press dockz.0.3 {
+        dock 0 on 3
+        impulse buoy.3.0 -9
+        ring.3.0: 0 ~0ms
+        ring.3.0: 1 ~760ms after 16ms
+    }
+    on press dockz.1.3 {
+        dock 1 on 3
+        impulse buoy.3.1 -9
+        ring.3.1: 0 ~0ms
+        ring.3.1: 1 ~760ms after 16ms
+    }
+    on press dockz.2.3 {
+        dock 2 on 3
+        impulse buoy.3.2 -9
+        ring.3.2: 0 ~0ms
+        ring.3.2: 1 ~760ms after 16ms
+    }
+    on press dockz.3.3 {
+        dock 3 on 3
+        impulse buoy.3.3 -9
+        ring.3.3: 0 ~0ms
+        ring.3.3: 1 ~760ms after 16ms
+    }
+    on press dockz.4.3 {
+        dock 4 on 3
+        impulse buoy.3.4 -9
+        ring.3.4: 0 ~0ms
+        ring.3.4: 1 ~760ms after 16ms
+    }
+    on press dockz.5.3 {
+        dock 5 on 3
+        impulse buoy.3.5 -9
+        ring.3.5: 0 ~0ms
+        ring.3.5: 1 ~760ms after 16ms
+    }
+    on press dockz.6.3 {
+        dock 6 on 3
+        impulse buoy.3.6 -9
+        ring.3.6: 0 ~0ms
+        ring.3.6: 1 ~760ms after 16ms
+    }
+    on press dockz.7.3 {
+        dock 7 on 3
+        impulse buoy.3.7 -9
+        ring.3.7: 0 ~0ms
+        ring.3.7: 1 ~760ms after 16ms
+    }
+    on press dockz.8.3 {
+        dock 8 on 3
+        impulse buoy.3.8 -9
+        ring.3.8: 0 ~0ms
+        ring.3.8: 1 ~760ms after 16ms
+    }
+    on press dockz.9.3 {
+        dock 9 on 3
+        impulse buoy.3.9 -9
+        ring.3.9: 0 ~0ms
+        ring.3.9: 1 ~760ms after 16ms
+    }
+    on press dockz.10.3 {
+        dock 10 on 3
+        impulse buoy.3.10 -9
+        ring.3.10: 0 ~0ms
+        ring.3.10: 1 ~760ms after 16ms
+    }
+    on press dockz.11.3 {
+        dock 11 on 3
+        impulse buoy.3.11 -9
+        ring.3.11: 0 ~0ms
+        ring.3.11: 1 ~760ms after 16ms
+    }
+    on press dkpool.0.3 { workspace 1 on 3 }
+    on press dkpool.1.3 { workspace 2 on 3 }
+    on press dkpool.2.3 { workspace 3 on 3 }
+    on press dkpool.3.3 { workspace 4 on 3 }
+    on press dkpool.4.3 { workspace 5 on 3 }
+    on press dkpool.5.3 { workspace 6 on 3 }
+    on press dkpool.6.3 { workspace 7 on 3 }
+    on press dkpool.7.3 { workspace 8 on 3 }
+
     // ── the pools at a glance (Super+Tab): beside the windows of the pool
     // shown, a column of cards at the right of each monitor, one per pool,
     // each with its windows as they are laid out and their programs' icons
@@ -355,22 +1786,22 @@ scene Session {
     fact ovdrag = -1
     fact pdrag.s = -1
     fact pdrag.k = 0
-    image appicon.0 = from win.0.app, 64, 64
-    image appicon.1 = from win.1.app, 64, 64
-    image appicon.2 = from win.2.app, 64, 64
-    image appicon.3 = from win.3.app, 64, 64
-    image appicon.4 = from win.4.app, 64, 64
-    image appicon.5 = from win.5.app, 64, 64
-    image appicon.6 = from win.6.app, 64, 64
-    image appicon.7 = from win.7.app, 64, 64
-    image appicon.8 = from win.8.app, 64, 64
-    image appicon.9 = from win.9.app, 64, 64
-    image appicon.10 = from win.10.app, 64, 64
-    image appicon.11 = from win.11.app, 64, 64
-    image appicon.12 = from win.12.app, 64, 64
-    image appicon.13 = from win.13.app, 64, 64
-    image appicon.14 = from win.14.app, 64, 64
-    image appicon.15 = from win.15.app, 64, 64
+    image appicon.0 = from win.0.icon, 64, 64
+    image appicon.1 = from win.1.icon, 64, 64
+    image appicon.2 = from win.2.icon, 64, 64
+    image appicon.3 = from win.3.icon, 64, 64
+    image appicon.4 = from win.4.icon, 64, 64
+    image appicon.5 = from win.5.icon, 64, 64
+    image appicon.6 = from win.6.icon, 64, 64
+    image appicon.7 = from win.7.icon, 64, 64
+    image appicon.8 = from win.8.icon, 64, 64
+    image appicon.9 = from win.9.icon, 64, 64
+    image appicon.10 = from win.10.icon, 64, 64
+    image appicon.11 = from win.11.icon, 64, 64
+    image appicon.12 = from win.12.icon, 64, 64
+    image appicon.13 = from win.13.icon, 64, 64
+    image appicon.14 = from win.14.icon, 64, 64
+    image appicon.15 = from win.15.icon, 64, 64
     let pc.n.0 = max(win.pools.0, win.used.0 + 1)
     let pc.w.0 = min(screen.0.width * 0.12, (screen.0.height - 160 - (pc.n.0 - 1) * 20) / pc.n.0 * screen.0.width / max(screen.0.height, 1))
     let pc.h.0 = pc.w.0 * screen.0.height / max(screen.0.width, 1)
@@ -1591,10 +3022,12 @@ scene Session {
         let fr = F > 0.5 and fw.$i > 0.5 and fsc.$i == sc and not win.$i.fullscreen and not win.$i.dialog
         // Never lost: no bigger than its monitor, and always with a good
         // piece of it —and all of its title bar— inside, to take it by.
+        // (Free, the shore at the bottom is kept clear.)
+        let ahf = ah - 92 * pick(sc, shore.0, shore.1, shore.2, shore.3)
         let fgw = if(maxed.$i, Ws - 2 * gap, min(fw.$i, Ws - 2 * gap))
-        let fgh = if(maxed.$i, ah, min(fh.$i, ah))
+        let fgh = if(maxed.$i, ahf, min(fh.$i, ahf))
         let fgx = if(maxed.$i, x0 + gap, clamp(fx.$i, x0 + 160 - fgw, x0 + Ws - 160))
-        let fgy = if(maxed.$i, y0, clamp(fy.$i, pick(sc, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top), y0 + ah - tb - 40))
+        let fgy = if(maxed.$i, y0, clamp(fy.$i, pick(sc, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top), y0 + ahf - tb - 40))
         // Put away, it stays where it was (the others close up without it),
         // and flies from there into Marea's island.
         fact mx.$i = 0
@@ -1611,6 +3044,8 @@ scene Session {
         // Back to tiled, what was put away comes out of the island to its
         // place: tiled, every window has one.
         on change F while F < 0.5 and win.$i.minimized { restore win.$i }
+        // Tiled there is no putting away: whoever asks (a program, a dock), it comes back.
+        on change win.$i.minimized while win.$i.minimized and F < 0.5 { restore win.$i }
         let goal.x = if(win.$i.minimized, mx.$i, if(fr, fgx, txv))
         let goal.y = if(win.$i.minimized, my.$i, if(fr, fgy, tyv))
         let goal.w = if(win.$i.minimized, mw.$i, if(fr, fgw, twv))
@@ -2024,7 +3459,7 @@ scene Session {
             move: 70 * (1 - ma), 0
             box { from: mx0 + 1, my0 + 1; size: max(mw0 - 2, 2), max(mh0 - 2, 2); corner: 3; color: #1d2226 }
             box { from: mx0 + 1, my0 + 1; size: max(mw0 - 2, 2), max(mh0 - 2, 2); corner: 3; stroke: 1; color: if(win.$i.focused, mint, ink); opacity: if(win.$i.focused, 80%, 18%) }
-            image appicon.$i { at: mx0 + mw0 / 2, my0 + mh0 / 2; size: min(28, min(mw0, mh0) * 0.55), min(28, min(mw0, mh0) * 0.55) }
+            image appicon.$i { at: mx0 + mw0 / 2 - min(28, min(mw0, mh0) * 0.55) / 2, my0 + mh0 / 2 - min(28, min(mw0, mh0) * 0.55) / 2; size: min(28, min(mw0, mh0) * 0.55), min(28, min(mw0, mh0) * 0.55) }
         }
         // Taken by an edge or the corner: where it was and how big.
         on press left_edge.$i {
@@ -2341,7 +3776,7 @@ scene Session {
     event wider
     on close { close win(win.focus) }
     // Put away into Marea, and the last one back.
-    on minimize { minimize win(win.focus) }
+    on minimize while pick(fscreen, free.0, free.1, free.2, free.3) > 0.5 { minimize win(win.focus) }
     on restore_last { restore win(last_min) }
     on fullscreen { fullscreen win(win.focus) }
     on overview { toggle overview }
@@ -2420,7 +3855,8 @@ scene Session {
     fact island.screen = -1
     repeat i in 0..16 {
         let sc = win.$i.screen
-        let isl = if(island.screen >= 0, island.screen, sc)
+        // (Into its own monitor's shore, now; no longer Marea's island.)
+        let isl = sc
         // (Eased in: the spring is quick at first, and the melting is to be seen.)
         let m = pow(mini.$i, 1.8)
         let off = pick(sc, mx.0, mx.1, mx.2, mx.3) - pick(screen.index, mx.0, mx.1, mx.2, mx.3)
@@ -2428,10 +3864,10 @@ scene Session {
         let y = y.$i
         let w = w.$i
         let h = h.$i
-        // Where it goes, from this monitor's corner: at Marea's left, at her height.
-        let tx = pick(isl, mx.0, mx.1, mx.2, mx.3) - pick(screen.index, mx.0, mx.1, mx.2, mx.3) + pick(isl, screen.0.width, screen.1.width, screen.2.width, screen.3.width) / 2 - 97
-        // (Her height tucked in, as she usually is while a window is being used.)
-        let ty = 30
+        // Where it goes, from this monitor's corner: its place among the ones
+        // put away on the shore.
+        let tx = off + pick(sc, dk.x0.0, dk.x0.1, dk.x0.2, dk.x0.3) + 14 + pick(sc, win.docks.0, win.docks.1, win.docks.2, win.docks.3) * 60 + 20 + max(win.$i.minat, 0) * 76 + 38
+        let ty = pick(sc, dk.cy.0, dk.cy.1, dk.cy.2, dk.cy.3)
         // On its way it melts into water: its corners round off, it turns
         // Marea's colour and draws out along its path like a falling
         // drop; halfway a real drop takes over, with two droplets behind it,
@@ -2489,6 +3925,29 @@ scene Session {
             }
             ellipse { at: cx - 3.5, cy - 4.5; radius: 2.4; scale: 1.3, 0.8; color: ink; opacity: 35% }
         }
+        // Put away, it floats on its shore as it is, small, with its
+        // program's icon; pressed, it comes back.
+        let dm.x = tx
+        let dm.h = 40
+        let dm.w = clamp(40 * win.$i.width / max(win.$i.height, 1), 30, 68)
+        group {
+            z: 99983
+            show: win.$i.minimized and win.$i.open and win.$i.minat >= 0 and mini.$i > 0.7 and sc == screen.index and pick(sc, shore.0, shore.1, shore.2, shore.3) > 0.3
+            opacity: smooth(0.7, 0.95, mini.$i)
+            body {
+                color: #0c0e10
+                rim: 14%
+                shadow: 0, 3, 10, 40%
+                box { at: dm.x, ty - 2 * dockmin.$i.hover; size: dm.w + 4, dm.h + 4; corner: 6 }
+            }
+            group {
+                clip box { at: dm.x, ty - 2 * dockmin.$i.hover; size: dm.w, dm.h; corner: 4 }
+                window win.$i { at: dm.x - dm.w / 2, ty - 2 * dockmin.$i.hover - dm.h / 2; size: dm.w, dm.h; ask: win.$i.width, win.$i.height }
+            }
+            image appicon.$i { at: dm.x + dm.w / 2 - 12, ty + dm.h / 2 - 12; size: 18, 18 }
+            zone box dockmin.$i { at: dm.x, ty; size: dm.w + 10, dm.h + 10; corner: 8; cursor: pointer; active: not overview }
+        }
+        on press dockmin.$i { restore win.$i }
         // The ripple where it lands (or leaves from).
         prop splash.$i = 1 ~900ms
         on change win.$i.minimized while win.$i.minimized {

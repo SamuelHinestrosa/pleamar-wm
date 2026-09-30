@@ -42,6 +42,15 @@ the open windows without closing anything.
   right, columns, rows, grid), or free windows as on KDE/Windows — edges,
   corner, maximize, the one clicked on top. `Super+W` switches with an animation.
   Only free windows have a title bar: tiled, the program has all of its tile.
+- **The shore, the dock of a free monitor**: it rises out of the water at the
+  bottom edge when a monitor goes free, joined to it by a neck —Marea hangs
+  from the top edge, the shore from the bottom—. The programs you pin (`dock
+  kitty zen-browser` in `session.conf`) and the others with windows there, a
+  drop under each per window; the windows put away floating on it as they are
+  (free, minimize puts them there; tiled, nothing is put away); and the pools of
+  the monitor. The icons rise like buoys as the mouse passes; one pressed dips
+  and rings the water, and goes to its window (the next one, pressed again) or
+  starts the program.
 - **Windows are born from the water**: a window that opens comes out of the
   nearest edge of the monitor as a black drop, hanging by a neck, and spreads
   into its place —the same water [Marea] comes out of—.
@@ -183,6 +192,7 @@ keyboard layout es repeat 25 delay 400
 pointer accel flat
 touchpad tap on natural on
 idle off-after 600                          # the monitors go dark
+dock kitty zen-browser org.telegram.desktop   # pinned to the shore of free monitors
 window app=pavucontrol float size 820x560   # what some windows do when they open
 window app=discord workspace 3 monitor 1
 window title="Picture in Picture" float     # `*` for anything: app=org.gnome.*
