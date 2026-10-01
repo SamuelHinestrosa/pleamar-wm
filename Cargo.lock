@@ -1928,7 +1928,7 @@ checksum = "f6b464fbc74e149a392436b17d523f769e057cb6877f6a5c4618bc6f11800548"
 
 [[package]]
 name = "pleamar"
-version = "0.2.6"
+version = "0.2.7"
 dependencies = [
  "arboard",
  "ash",
@@ -1945,6 +1945,7 @@ dependencies = [
  "resvg",
  "serde_json",
  "smithay-client-toolkit",
+ "typed-arena",
  "wayland-client",
  "wayland-protocols",
  "wayland-protocols-wlr",
@@ -2897,6 +2898,12 @@ checksum = "d2df906b07856748fa3f6e0ad0cbaa047052d4a7dd609e231c4f72cee8c36f31"
 dependencies = [
  "core_maths",
 ]
+
+[[package]]
+name = "typed-arena"
+version = "2.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6af6ae20167a9ece4bcb41af5b80f8a1f1df981f6391189ce00fd257af04126a"
 
 [[package]]
 name = "typenum"
