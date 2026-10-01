@@ -184,17 +184,24 @@ async fn monitor_picture(n: usize) -> Option<(Vec<u8>, (u32, u32))> {
     Some((pixels, m.size))
 }
 
+/// Who watches a window, for the render (several may watch the same one): a
+/// share of it, a single picture of it. Thumbnails (`nest::capture`) take
+/// their numbers from `THUMBS` up.
+const SHARE: u64 = 1;
+const ONCE: u64 = 2;
+pub const THUMBS: u64 = 1000;
+
 /// A window's picture now (BGRA premultiplied): asked once, and let go.
 async fn window_picture(slot: usize) -> Option<(Vec<u8>, (u32, u32))> {
     let (tx, rx) = std::sync::mpsc::channel::<WindowPicture>();
-    render(ToRender::WatchWindow(slot, Some(tx)));
+    render(ToRender::WatchWindow(slot, ONCE, Some(tx)));
     let (done, wait) = async_channel::bounded(1);
     std::thread::spawn(move || {
         let _ = done.try_send(rx.recv_timeout(std::time::Duration::from_secs(3)).ok());
     });
     let picture = wait.recv().await.ok().flatten();
-    render(ToRender::WatchWindow(slot, None));
-    picture.map(|p| (p.pixels, p.size))
+    render(ToRender::WatchWindow(slot, ONCE, None));
+    picture.map(|p| (std::sync::Arc::unwrap_or_clone(p.pixels), p.size))
 }
 
 /// The whole desktop: every monitor where it is, at the finest scale.
@@ -776,7 +783,7 @@ fn pipewire_thread(rx: pw::channel::Receiver<Msg>) -> Result<(), pw::Error> {
         Msg::Start { session, source: Source::Window(slot), cursor, reply } => {
             // Its pictures, each time it draws, from the render to here.
             let (tx, pictures) = std::sync::mpsc::channel::<WindowPicture>();
-            render(ToRender::WatchWindow(slot, Some(tx)));
+            render(ToRender::WatchWindow(slot, SHARE, Some(tx)));
             let to_pw = TO_PW.lock().unwrap().clone();
             let name = session.clone();
             let _ = std::thread::Builder::new().name("portal-window".into()).spawn(move || {
@@ -794,7 +801,7 @@ fn pipewire_thread(rx: pw::channel::Receiver<Msg>) -> Result<(), pw::Error> {
             if let Some((slot, cursor, reply)) = first {
                 match open(&core, &session, Source::Window(slot), cursor, picture.size, 60, reply.clone()) {
                     Ok(cast) => {
-                        cast.feed.borrow_mut().take(picture.pixels, picture.size);
+                        cast.feed.borrow_mut().take(std::sync::Arc::unwrap_or_clone(picture.pixels), picture.size);
                         c.borrow_mut().insert(session, cast);
                         sharing(c.borrow().len());
                     sharing(c.borrow().len());
@@ -802,7 +809,7 @@ fn pipewire_thread(rx: pw::channel::Receiver<Msg>) -> Result<(), pw::Error> {
                     Err(e) => {
                         eprintln!("portal · a stream could not be made: {e}");
                         let _ = reply.try_send(None);
-                        render(ToRender::WatchWindow(slot, None));
+                        render(ToRender::WatchWindow(slot, SHARE, None));
                     }
                 }
                 return;
@@ -818,7 +825,7 @@ fn pipewire_thread(rx: pw::channel::Receiver<Msg>) -> Result<(), pw::Error> {
                     let _ = cast.stream.update_params(&mut [p]);
                 }
             }
-            feed.take(picture.pixels, picture.size);
+            feed.take(std::sync::Arc::unwrap_or_clone(picture.pixels), picture.size);
             let streaming = feed.streaming;
             drop(feed);
             if streaming {
@@ -837,7 +844,7 @@ fn pipewire_thread(rx: pw::channel::Receiver<Msg>) -> Result<(), pw::Error> {
         Msg::Stop { session } => {
             let first = waiting.borrow_mut().remove(&session);
             if let Some((slot, _, reply)) = first {
-                render(ToRender::WatchWindow(slot, None));
+                render(ToRender::WatchWindow(slot, SHARE, None));
                 let _ = reply.try_send(None);
             }
             let removed = c.borrow_mut().remove(&session);
@@ -847,7 +854,7 @@ fn pipewire_thread(rx: pw::channel::Receiver<Msg>) -> Result<(), pw::Error> {
                     layers::uncapture(id);
                 }
                 if let Source::Window(slot) = feed.source {
-                    render(ToRender::WatchWindow(slot, None));
+                    render(ToRender::WatchWindow(slot, SHARE, None));
                 }
                 if feed.cursor {
                     pointer_streams(false);

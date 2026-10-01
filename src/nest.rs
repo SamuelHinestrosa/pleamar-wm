@@ -20,11 +20,13 @@
 
 #[path = "x11.rs"]
 mod x11;
+#[path = "capture.rs"]
+mod capture;
 
 use crate::layers::{self, ClientLayer, ClientPiece, ToLayers};
 use smithay::wayland::xwayland_shell::XWaylandShellState;
 use smithay::xwayland::{X11Surface, X11Wm, XWaylandClientData};
-use pleamar::scene::{DmabufPiece, NestEvent, PieceContent, ToNest, ToRender, WindowPiece};
+use pleamar::scene::{DmabufPiece, NestEvent, PieceContent, ToNest, ToRender, WindowPicture, WindowPiece};
 use smithay::delegate_layer_shell;
 use smithay::input::pointer::RelativeMotionEvent;
 use smithay::reexports::wayland_protocols::wp::presentation_time::server::wp_presentation_feedback;
@@ -440,6 +442,9 @@ struct State {
     /// Pictures of a monitor a program asked for (wlr-screencopy: grim, a
     /// recorder, a lens), until their monitor has taken them.
     pictures: HashMap<u64, Picture>,
+    /// Pictures of single windows, for the programs that want them
+    /// (ext-image-copy-capture): see `capture.rs`.
+    thumbs: capture::Thumbs,
     /// The program's surface the pointer is on, or the one with the keyboard.
     panel_pointer: Option<u64>,
     panel_keyboard: Option<u64>,
@@ -640,6 +645,18 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         // And their power, for what turns them off when idle (hypridle, wlopm).
         dh.create_global::<State, ZwlrOutputPowerManagerV1, _>(1, ());
     }
+    // Pictures of one window (an overview's thumbnails, a recorder of one
+    // window): on any session, the windows are on the card in all of them.
+    capture::globals(&dh);
+    let (thumbs_tx, thumbs_rx) = channel::channel::<(String, WindowPicture)>();
+    event_loop
+        .handle()
+        .insert_source(thumbs_rx, |event, _, state: &mut State| {
+            if let ChannelEvent::Msg((window, picture)) = event {
+                state.thumb_arrived(window, picture);
+            }
+        })
+        .map_err(|e| e.to_string())?;
     // What the session and the monitors tell about the programs' surfaces.
     let (layers_tx, layers_rx) = channel::channel::<ToLayers>();
     layers::set_nest(layers_tx);
@@ -701,6 +718,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         drag: None,
         reserved: Vec::new(),
         pictures: HashMap::new(),
+        thumbs: capture::Thumbs::new(thumbs_tx),
         panel_pointer: None,
         panel_keyboard: None,
         exclusive_keyboard: false,
@@ -2036,6 +2054,7 @@ impl State {
             self.order.iter().copied().find(|s| *s != slot && self.slots[*s].as_ref().is_some_and(|w| w.fullscreen && Some(w.screen) == screen))
         }).or_else(|| self.order.iter().copied().find(|s| *s != slot && monitor.is_some() && layers::shown(*s).is_some_and(|(m, _)| Some(&m) == monitor.as_ref())));
         if let Some(w) = self.slots[slot].take() {
+            self.thumb_closed(&w.listed.identifier());
             self.toplevel_list.remove_toplevel(&w.listed);
             if w.fullscreen {
                 self.tell_fullscreen();

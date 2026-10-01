@@ -284,6 +284,11 @@ log goes to `~/.local/state/pleamar-wm/session.log`, and the end of it is shown
 when it leaves. `pleamar-wm probe` tries what the card needs for it —buffers
 for the screen, painted by wgpu and read back— without taking the screen.
 
+Programs can picture one window (an overview's thumbnails, a recorder of
+a single window) through the standard ext-image-copy-capture with
+ext-foreign-toplevel-image-capture-source, windows on hidden pools
+included: a picture is handed only when the window has changed.
+
 If it stutters, run `pleamar-wm report` from a terminal inside the session and
 use the desktop as usual for 30 seconds (`--seconds N` for more): it measures
 the window manager and everything running on pleamar (Marea…), and writes a
