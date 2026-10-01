@@ -17,6 +17,8 @@
 //   Super+1…9  that pool of this monitor    Super+Ctrl+Up/Down  the pool above / below
 //   Super+Ctrl+Shift+Left/Right  the whole pool to the monitor beside
 //   Super+F    fullscreen, and back
+//   Super+V    the window with the keyboard floats over the tiles, and back
+//              (only it: its monitor stays tiled, the others close up)
 //   Super+W    tiled or free windows on this monitor (also from Marea's menu):
 //              free, each window stays where it is left and as big as it is
 //              made —edges and corner—, the green button maximizes it, and
@@ -187,8 +189,11 @@ scene Session {
     let lay.here = pick(mon, lay.0, lay.1, lay.2, lay.3)
     let strip.x = pick(mon, screen.0.width, screen.1.width, screen.2.width, screen.3.width) / 2 - 5 * 60 / 2
     let strip.y = pick(mon, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top) + 6
+    // The one carried floats over the tiles (`float`): carried as a free one
+    // is —no layouts to pick, no changing places, it stays where let go—.
+    let dfl = dragging >= 0 and pick(max(dragging, 0), win.0.floating, win.1.floating, win.2.floating, win.3.floating, win.4.floating, win.5.floating, win.6.floating, win.7.floating, win.8.floating, win.9.floating, win.10.floating, win.11.floating, win.12.floating, win.13.floating, win.14.floating, win.15.floating) > 0.5
     // (Only over a tiled monitor: a free one has no layout to pick.)
-    let on.strip = dragging >= 0 and pick(mon, free.0, free.1, free.2, free.3) < 0.5 and mouse.y >= strip.y and mouse.y < strip.y + 44 and mouse.x >= strip.x and mouse.x < strip.x + 5 * 60
+    let on.strip = dragging >= 0 and not dfl and pick(mon, free.0, free.1, free.2, free.3) < 0.5 and mouse.y >= strip.y and mouse.y < strip.y + 44 and mouse.x >= strip.x and mouse.x < strip.x + 5 * 60
     let picked = if(on.strip, floor((mouse.x - strip.x) / 60), -1)
     let leads = picked == 0 or picked == 4
     // What it is over, kept: let go, `picked` is already gone (it needs the
@@ -206,7 +211,7 @@ scene Session {
     // Over the other monitor it would go there: there they make room for it,
     // and on its own the rest close up. Its turn there is its turn in the
     // order; first, if it is let go on a layout with a leader.
-    let crossing = dragging >= 0 and mon != dsc
+    let crossing = dragging >= 0 and mon != dsc and not dfl
     // Over a window of the other monitor: they change places —and
     // monitors—; there nothing makes room, and here nothing closes up.
     let xswap = crossing and over >= 0
@@ -6015,7 +6020,7 @@ scene Session {
         let th = pick(L, if(p < 0.5, ah, sh), ah, rh, gh, if(p < 0.5, ah, sh))
         // Under the mouse while another is carried —measured on where it is,
         // not where it is shown moving aside—: it would change places with it.
-        let under = dragging >= 0 and dragging != i and win.$i.open and sc == mon and not on.strip and pick(sc, free.0, free.1, free.2, free.3) < 0.5 and mouse.x >= tx and mouse.x < tx + tw and mouse.y >= ty and mouse.y < ty + th
+        let under = dragging >= 0 and not dfl and dragging != i and win.$i.open and sc == mon and not on.strip and pick(sc, free.0, free.1, free.2, free.3) < 0.5 and mouse.x >= tx and mouse.x < tx + tw and mouse.y >= ty and mouse.y < ty + th
         on change under {
             over = if(under, i, if(over == i, -1, over))
         }
@@ -6085,7 +6090,11 @@ scene Session {
         // Which monitor its free place was made on: monitors differ in size,
         // so a place from the other one is not a place here.
         fact fsc.$i = -1
-        let F = pick(sc, free.0, free.1, free.2, free.3)
+        //  Free: its monitor is (`Fm`), or this window floats on its own over
+        //  the tiles (`float`, Super+V). Floating, it is as a free one: a place
+        //  of its own, a title bar, carried and resized; the others close up.
+        let Fm = pick(sc, free.0, free.1, free.2, free.3)
+        let F = if(win.$i.floating, 1, Fm)
         // (Only once it has a place of its own on this monitor: the frame free
         // is taken, it has none yet, and it headed for the corner.)
         let fr = F > 0.5 and fw.$i > 0.5 and fsc.$i == sc and not win.$i.fullscreen and not win.$i.dialog
@@ -6112,9 +6121,9 @@ scene Session {
         }
         // Back to tiled, what was put away comes out of the island to its
         // place: tiled, every window has one.
-        on change F while F < 0.5 and win.$i.minimized { restore win.$i }
+        on change Fm while Fm < 0.5 and win.$i.minimized { restore win.$i }
         // Tiled there is no putting away: whoever asks (a program, a dock), it comes back.
-        on change win.$i.minimized while win.$i.minimized and F < 0.5 { restore win.$i }
+        on change win.$i.minimized while win.$i.minimized and Fm < 0.5 { restore win.$i }
         let goal.x = if(win.$i.minimized, mx.$i, if(fr, fgx, txv))
         let goal.y = if(win.$i.minimized, my.$i, if(fr, fgy, tyv))
         let goal.w = if(win.$i.minimized, mw.$i, if(fr, fgw, twv))
@@ -6130,7 +6139,7 @@ scene Session {
         // when it arrives free on a monitor its place was not made on
         // (unless it was let go there: then that is its place).
         let unplaced = F > 0.5 and win.$i.open and (fw.$i < 1 or fsc.$i != sc) and dragging != i and not (landing == i and sc != landing.to)
-        on change unplaced while unplaced {
+        on change unplaced while unplaced and Fm > 0.5 {
             fx.$i = tx + tw * 0.07
             fy.$i = ty + th * 0.06
             fw.$i = tw * 0.86
@@ -6258,6 +6267,18 @@ scene Session {
         prop y.$i = 12 ~glide
         prop w.$i = 60 ~glide
         prop h.$i = 34 ~glide
+        //  Floated off a tiled monitor: it lifts off its tile, smaller, in the
+        //  middle of where it was (its tile is the others' now).
+        let flw = min(w.$i * 0.86, Ws * 0.62)
+        let flh = min(h.$i * 0.88, ah * 0.72)
+        on change unplaced while unplaced and Fm < 0.5 {
+            fx.$i = x.$i + (w.$i - flw) / 2
+            fy.$i = y.$i + (h.$i - flh) / 2
+            fw.$i = flw
+            fh.$i = flh
+            fsc.$i = sc
+            maxed.$i = 0
+        }
         follow x.$i = if(win.$i.open, if(overview, ox, goal.x), home.x)
         follow y.$i = if(win.$i.open, if(overview, oy, goal.y), home.y)
         follow w.$i = if(win.$i.open, if(overview, tw * s, goal.w), 60)
@@ -6349,14 +6370,14 @@ scene Session {
         // windows overlap, the one on top takes the mouse, and on its own
         // window its edges and buttons go before what the program shows.)
         group {
-            z: stamp.$i + 0.5
+            z: stamp.$i + 0.5 + if(win.$i.floating, 50000, 0)
             // Free, it is carried by its title bar; tiled, by the gap just
             // above it, which takes nothing from the program.
             // With Super held, all of it.
             let whole = keys.super > 0.5 or dragging == i
             zone box title.$i { from: x.$i + if(whole or F > 0.5, 0, 12), y.$i - if(whole or F > 0.5, 0, gap - 1); size: if(whole, w, if(F > 0.5, w - 76, w - 24)), if(whole, h, if(F > 0.5, tb, gap - 2)); cursor: pointer; active: here and not overview and not win.$i.dialog }
             zone ellipse lead_zone.$i { at: x + w - 40, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog and F > 0.5 }
-            zone ellipse mini_zone.$i { at: x + w - 60, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog and F > 0.5 }
+            zone ellipse mini_zone.$i { at: x + w - 60, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog and Fm > 0.5 }
             zone ellipse close_zone.$i { at: x + w - 20, y + tb / 2; radius: 10; cursor: pointer; active: here and not overview and not win.$i.dialog and F > 0.5 }
             // At a glance, the whole window is a button: pressing it chooses it.
             zone box choose.$i { from: x, y; size: w, h; cursor: pointer; active: here and overview and not win.$i.dialog }
@@ -6374,7 +6395,7 @@ scene Session {
         }
         group {
             // Over the others as it was last touched (free, they overlap).
-            z: stamp.$i
+            z: stamp.$i + if(win.$i.floating, 50000, 0)
             // Carried, it is drawn over the others, further down; flying into
             // the island or out of it, too.
             show: seen.$i > 0.01 and sc == screen.index and ws.vis and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog and mini.$i <= 0.02
@@ -6437,10 +6458,12 @@ scene Session {
                 ellipse { at: x + w - 60, by; radius: 8 + 3 * mini_zone.$i.hover; stroke: 1.2; color: amber; opacity: 55% * mini_zone.$i.hover }
                 ellipse { at: x + w - 40, by; radius: 8 + 3 * lead_zone.$i.hover; stroke: 1.2; color: mint; opacity: 55% * lead_zone.$i.hover }
                 ellipse { at: x + w - 20, by; radius: 8 + 3 * close_zone.$i.hover; stroke: 1.2; color: coral; opacity: 55% * close_zone.$i.hover }
+                //  (Floating on a tiled monitor there is no putting away: no amber.)
                 body {
                     gradient: radial x + w - 62, by - 3 radius 10, #fff3d6, amber 45%, #a8781f
                     rim: 35%
                     shadow: 0, 1, 3, 40%
+                    opacity: if(Fm > 0.5, 1, 0)
                     ellipse { at: x + w - 60, by; radius: 6 + 1.5 * mini_zone.$i.hover }
                 }
                 body {
@@ -6455,7 +6478,7 @@ scene Session {
                     shadow: 0, 1, 3, 40%
                     ellipse { at: x + w - 20, by; radius: 6 + 1.5 * close_zone.$i.hover }
                 }
-                ellipse { at: x + w - 62, by - 3; radius: 2; scale: 1.3, 0.75; color: #fff; opacity: 75% }
+                ellipse { at: x + w - 62, by - 3; radius: 2; scale: 1.3, 0.75; color: #fff; opacity: 75% * if(Fm > 0.5, 1, 0) }
                 ellipse { at: x + w - 42, by - 3; radius: 2; scale: 1.3, 0.75; color: #fff; opacity: 75% }
                 ellipse { at: x + w - 22, by - 3; radius: 2; scale: 1.3, 0.75; color: #fff; opacity: 75% }
                 // What each does, over the one the mouse is on.
@@ -6492,7 +6515,7 @@ scene Session {
         }
         // Born from the water: its drawing (its shape is worked out above, with `nb.`).
         group {
-            z: stamp.$i + 0.4
+            z: stamp.$i + 0.4 + if(win.$i.floating, 50000, 0)
             show: nb.s < 0.995 and fresh.$i < 0.5 and win.$i.open and sc == screen.index and ws.here and not win.$i.dialog
             opacity: 1 - smooth(0.3, 0.75, nb.s)
             body {
@@ -6604,7 +6627,7 @@ scene Session {
         }
         // Free: it stays where it was let go (on the monitor it was let go on).
         // (Right there, at once: nothing to glide to.)
-        on release title.$i while pick(mon, free.0, free.1, free.2, free.3) > 0.5 and picked < 0 {
+        on release title.$i while (pick(mon, free.0, free.1, free.2, free.3) > 0.5 or win.$i.floating) and picked < 0 {
             fx.$i = mouse.x - grab.x
             fy.$i = max(mouse.y - grab.y, pick(mon, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top))
             fsc.$i = mon
@@ -6664,19 +6687,6 @@ scene Session {
         on release title.$i {
             over = -1
         }
-        // The keyboard goes to the window the mouse is over, as it enters it:
-        // no click needed first (Super+Q closes the one under the mouse).
-        // (Only one that is seen: on the workspace its monitor shows, and not
-        // under a dialog. One on another workspace in the same place took
-        // the keys, unseen.)
-        let pointed = win.$i.open and sc == mon and ws.here and not win.$i.dialog and not win.$i.minimized and not on.dialog and mouse.x >= x.$i and mouse.x < x.$i + w.$i and mouse.y >= y.$i and mouse.y < y.$i + h.$i
-        // (Free, they overlap: the keyboard goes with a click, as on Windows.)
-        // (Only the one entered gives it. The one left said «nobody» too, and
-        // when both changed in the same round and the leaving one spoke last,
-        // nobody had it: a click was needed.)
-        on change pointed while pointed and dragging < 0 and not overview and fs.on < 0.5 and pick(mon, free.0, free.1, free.2, free.3) < 0.5 {
-            focus win.$i
-        }
         on press lead_zone.$i while not fr { promote win.$i }
         on press close_zone.$i {
             close win.$i
@@ -6715,6 +6725,28 @@ scene Session {
         }
     }
 
+
+    // (After the windows: each one's box is known by now.)
+    repeat i in 0..16 {
+        let sc = win.$i.screen
+        let ws.here = win.$i.pool == pick(sc, win.pool.0, win.pool.1, win.pool.2, win.pool.3)
+        // The mouse over a window floating over the tiles: the tiles under it
+        // do not take the keyboard from it.
+        let on.float = (win.0.floating and win.0.open and not win.0.minimized and win.0.screen == mon and win.0.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.0 and mouse.x < x.0 + w.0 and mouse.y >= y.0 and mouse.y < y.0 + h.0) + (win.1.floating and win.1.open and not win.1.minimized and win.1.screen == mon and win.1.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.1 and mouse.x < x.1 + w.1 and mouse.y >= y.1 and mouse.y < y.1 + h.1) + (win.2.floating and win.2.open and not win.2.minimized and win.2.screen == mon and win.2.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.2 and mouse.x < x.2 + w.2 and mouse.y >= y.2 and mouse.y < y.2 + h.2) + (win.3.floating and win.3.open and not win.3.minimized and win.3.screen == mon and win.3.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.3 and mouse.x < x.3 + w.3 and mouse.y >= y.3 and mouse.y < y.3 + h.3) + (win.4.floating and win.4.open and not win.4.minimized and win.4.screen == mon and win.4.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.4 and mouse.x < x.4 + w.4 and mouse.y >= y.4 and mouse.y < y.4 + h.4) + (win.5.floating and win.5.open and not win.5.minimized and win.5.screen == mon and win.5.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.5 and mouse.x < x.5 + w.5 and mouse.y >= y.5 and mouse.y < y.5 + h.5) + (win.6.floating and win.6.open and not win.6.minimized and win.6.screen == mon and win.6.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.6 and mouse.x < x.6 + w.6 and mouse.y >= y.6 and mouse.y < y.6 + h.6) + (win.7.floating and win.7.open and not win.7.minimized and win.7.screen == mon and win.7.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.7 and mouse.x < x.7 + w.7 and mouse.y >= y.7 and mouse.y < y.7 + h.7) + (win.8.floating and win.8.open and not win.8.minimized and win.8.screen == mon and win.8.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.8 and mouse.x < x.8 + w.8 and mouse.y >= y.8 and mouse.y < y.8 + h.8) + (win.9.floating and win.9.open and not win.9.minimized and win.9.screen == mon and win.9.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.9 and mouse.x < x.9 + w.9 and mouse.y >= y.9 and mouse.y < y.9 + h.9) + (win.10.floating and win.10.open and not win.10.minimized and win.10.screen == mon and win.10.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.10 and mouse.x < x.10 + w.10 and mouse.y >= y.10 and mouse.y < y.10 + h.10) + (win.11.floating and win.11.open and not win.11.minimized and win.11.screen == mon and win.11.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.11 and mouse.x < x.11 + w.11 and mouse.y >= y.11 and mouse.y < y.11 + h.11) + (win.12.floating and win.12.open and not win.12.minimized and win.12.screen == mon and win.12.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.12 and mouse.x < x.12 + w.12 and mouse.y >= y.12 and mouse.y < y.12 + h.12) + (win.13.floating and win.13.open and not win.13.minimized and win.13.screen == mon and win.13.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.13 and mouse.x < x.13 + w.13 and mouse.y >= y.13 and mouse.y < y.13 + h.13) + (win.14.floating and win.14.open and not win.14.minimized and win.14.screen == mon and win.14.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.14 and mouse.x < x.14 + w.14 and mouse.y >= y.14 and mouse.y < y.14 + h.14) + (win.15.floating and win.15.open and not win.15.minimized and win.15.screen == mon and win.15.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and mouse.x >= x.15 and mouse.x < x.15 + w.15 and mouse.y >= y.15 and mouse.y < y.15 + h.15) > 0.5
+        // The keyboard goes to the window the mouse is over, as it enters it:
+        // no click needed first (Super+Q closes the one under the mouse).
+        // (Only one that is seen: on the workspace its monitor shows, and not
+        // under a dialog. One on another workspace in the same place took
+        // the keys, unseen.)
+        let pointed = win.$i.open and sc == mon and ws.here and not win.$i.dialog and not win.$i.minimized and not on.dialog and (win.$i.floating or not on.float) and mouse.x >= x.$i and mouse.x < x.$i + w.$i and mouse.y >= y.$i and mouse.y < y.$i + h.$i
+        // (Free, they overlap: the keyboard goes with a click, as on Windows.)
+        // (Only the one entered gives it. The one left said «nobody» too, and
+        // when both changed in the same round and the leaving one spoke last,
+        // nobody had it: a click was needed.)
+        on change pointed while pointed and dragging < 0 and not overview and fs.on < 0.5 and pick(mon, free.0, free.1, free.2, free.3) < 0.5 {
+            focus win.$i
+        }
+    }
 
     // The window being carried, over all the others: lifted, a little smaller
     // and see-through, so that where it will land shows below it. It goes with
@@ -6770,7 +6802,7 @@ scene Session {
     // monitor under the mouse, if that one is tiled. Over one, everything
     // shows how it would be ──
     prop strip = 0 ~160ms
-    follow strip = if(dragging >= 0 and pick(mon, free.0, free.1, free.2, free.3) < 0.5, 1, 0)
+    follow strip = if(dragging >= 0 and not dfl and pick(mon, free.0, free.1, free.2, free.3) < 0.5, 1, 0)
     let ico = #f5f7f5
     group {
         show: strip > 0.01 and screen.index == mon
@@ -6832,6 +6864,11 @@ scene Session {
     let previous = pick(mod(focus_at + all - 1, all), win.order.0, win.order.1, win.order.2, win.order.3, win.order.4, win.order.5)
     event close
     event minimize
+    // One window over the tiles, and back (Super+V): its monitor stays tiled.
+    event toggle_float
+    let focus.floating = pick(win.focus, win.0.floating, win.1.floating, win.2.floating, win.3.floating, win.4.floating, win.5.floating, win.6.floating, win.7.floating, win.8.floating, win.9.floating, win.10.floating, win.11.floating, win.12.floating, win.13.floating, win.14.floating, win.15.floating)
+    on toggle_float while win.focus >= 0 and not focus.floating { float win(win.focus) }
+    on toggle_float while win.focus >= 0 and focus.floating { tile win(win.focus) }
     event restore_last
     event fullscreen
     event overview

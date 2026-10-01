@@ -274,6 +274,10 @@ struct Window {
     /// to go back there.
     minimized: bool,
     was_at: usize,
+    /// The scene floats it over the layout (`float`): unlike `floating`, it
+    /// keeps its turn in the order (the keyboard, `promote`); only the
+    /// layout leaves it out. Kept here, it outlives a reload of the scene.
+    floated: bool,
     /// The monitor it had to leave because it went away (unplugged): when it
     /// comes back, the window goes back to it, with its workspace.
     home: Option<String>,
@@ -956,6 +960,7 @@ impl State {
             // Its workspace is no longer shown: nobody has the keyboard.
             ToNest::Blur => self.set_focus(None),
             ToNest::Minimize(slot, yes) => self.set_minimized(slot, yes),
+            ToNest::Float(slot, yes) => self.set_floated(slot, yes),
             ToNest::Fullscreen(slot) => {
                 let now = self.slots.get(slot).and_then(Option::as_ref).is_some_and(|w| w.fullscreen);
                 self.set_fullscreen(slot, !now);
@@ -1141,6 +1146,17 @@ impl State {
                 h.done();
             }
         }
+    }
+
+    /// One window over the layout, or back into it: the scene is told, and
+    /// lays the others out without it.
+    fn set_floated(&mut self, slot: usize, yes: bool) {
+        let Some(Some(w)) = self.slots.get_mut(slot) else { return };
+        if w.floated == yes {
+            return;
+        }
+        w.floated = yes;
+        self.tell(NestEvent::Floating(slot, yes));
     }
 
     /// A dialog is left out of the layout's order (the scene floats it);
@@ -1985,7 +2001,7 @@ impl State {
         }
         self.outputs[screen.min(self.outputs.len() - 1)].enter(&surface);
         let listed = self.toplevel_list.new_toplevel::<State>(title.clone(), app.clone());
-        self.slots[slot] = Some(Window { toplevel, surface, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen, shown: None, listed, fullscreen: false, dialog: false, floating: false, ruled: None, minimized: false, was_at: 0, home: None });
+        self.slots[slot] = Some(Window { toplevel, surface, title: title.clone(), app: app.clone(), geometry: [0, 0, 0, 0], sent: Vec::new(), screen, shown: None, listed, fullscreen: false, dialog: false, floating: false, ruled: None, minimized: false, was_at: 0, floated: false, home: None });
         self.order.push(slot);
         layers::set_private(slot, false);
         let program = (!app.is_empty()).then(|| crate::desktop::program(&app));
