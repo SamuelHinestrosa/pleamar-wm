@@ -6543,7 +6543,7 @@ scene Session {
         group {
             z: stamp.$i + 0.45 + if(win.$i.floating, 50000, 0)
             show: agent.on > 0.01 and agent.win == i and win.$i.open and sc == screen.index and ws.vis
-            opacity: agent.on * (0.6 + 0.4 * ag.breath)
+            opacity: agent.on * (0.75 + 0.15 * ag.breath)
             group {
                 blur: 10
                 box { from: x - 3, y - 3; size: w + 6, h + 6; corner: 14; stroke: 5; color: mint; opacity: 70% }
@@ -7412,23 +7412,26 @@ scene Session {
     // cursor that moves on its own, a ring where it clicks, and its name. It
     // fades a few seconds after it last did something.
     // The monitor it works on says so, apart from its cursors: its edges
-    // breathe in mint, a light runs round them, and a pill at the top says
-    // an agent is using it. The window it works on gets an outline (in the
-    // windows' loop). All of it fades a few seconds after it stops.
+    // glow in mint, breathing slowly, a soft light goes round them, and a
+    // pill says an agent is using it. The window it works on gets an outline
+    // (in the windows' loop). It stays while the agent is at work —thinking
+    // between one action and the next is working too: the compositor says
+    // when it is (`agent.active`)— and fades slowly after.
     fact agent.seen = 0
     fact agent.screen = -1
     fact agent.win = -1
-    prop agent.on = 0 ~420ms
+    fact agent.active = 0
+    prop agent.on = 0 ~1600ms
+    follow agent.on = agent.active
     prop agent.t = 0
     spin agent.t by if(agent.on > 0.01, 1, 0)
-    on change agent.seen { agent.on: 1 }
-    on still agent.seen for 5s { agent.on: 0 ~1400ms }
     let ag.here = agent.on > 0.01 and agent.screen == screen.index
-    // Where the light that runs round the edges is: one lap every 4 s.
-    let ag.lap = fract(agent.t / 4) * 2 * (W + H)
+    // Where the light that goes round the edges is: one lap every 30 s, calm.
+    let ag.lap = fract(agent.t / 30) * 2 * (W + H)
     let ag.lx = if(ag.lap < W, ag.lap, if(ag.lap < W + H, W, if(ag.lap < 2 * W + H, 2 * W + H - ag.lap, 0)))
     let ag.ly = if(ag.lap < W, 0, if(ag.lap < W + H, ag.lap - W, if(ag.lap < 2 * W + H, H, 2 * (W + H) - ag.lap)))
-    let ag.breath = 0.5 + 0.5 * sin(agent.t * 120)
+    // A breath every 8 s.
+    let ag.breath = 0.5 + 0.5 * sin(agent.t * 45)
     group {
         z: 99995
         show: ag.here
@@ -7436,16 +7439,15 @@ scene Session {
         // The edges: a wide soft glow, and a thin bright line on them.
         group {
             blur: 22
-            opacity: 55% + 25% * ag.breath
+            opacity: 40% + 12% * ag.breath
             box { from: 4, 4; size: W - 8, H - 8; corner: 18; stroke: 10; color: mint }
         }
-        box { from: 2, 2; size: W - 4, H - 4; corner: 16; stroke: 2; color: mint; opacity: 70% }
-        // And the light running round them.
+        box { from: 2, 2; size: W - 4, H - 4; corner: 16; stroke: 1.5; color: mint; opacity: 55% }
+        // And the light going round them, soft.
         group {
-            blur: 12
-            ellipse { at: ag.lx, ag.ly; radius: 30; color: mint; opacity: 60% }
+            blur: 16
+            ellipse { at: ag.lx, ag.ly; radius: 34; color: mint; opacity: 35% }
         }
-        ellipse { at: ag.lx, ag.ly; radius: 4; color: #e8fff6; opacity: 90% }
         // The pill, in the bottom right corner (the top middle is Marea's): a
         // dot that beats, and what is going on. Only drawn: clicks go through.
         let ag.px = W - 160

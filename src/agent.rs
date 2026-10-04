@@ -49,6 +49,8 @@ use smithay::reexports::wayland_server::Resource;
 use smithay::utils::{Logical, Point, SERIAL_COUNTER};
 use std::io::{Read, Write};
 use std::os::fd::AsFd;
+use std::time::{Duration, Instant};
+use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use std::os::unix::net::{UnixListener, UnixStream};
 
 const HELLO: &str = "cua-inject v1";
@@ -65,6 +67,11 @@ pub struct Agent {
     seen: [u32; CURSORS],
     /// And all of them, keys too: the scene knows the agent is at work.
     busy: u32,
+    /// The process that last spoke to the socket, when it last did
+    /// something, and whether the scene was told the agent is at work.
+    peer: u32,
+    last: Option<Instant>,
+    active: bool,
     /// And where it last was, in its window's root surface.
     at: [Point<f64, Logical>; CURSORS],
     pub path: String,
@@ -110,8 +117,9 @@ pub fn start(state: &mut State) {
     let inserted = state.handle.insert_source(source, |_, listener, state: &mut State| {
         while let Ok((stream, _)) = listener.accept() {
             // Only the same user (the socket is 0600; this says it again).
-            if !same_user(&stream) {
-                continue;
+            let Some(pid) = same_user(&stream) else { continue };
+            if let Some(a) = state.agent.as_mut() {
+                a.peer = pid;
             }
             let _ = stream.set_nonblocking(true);
             state.agent_connection(stream);
@@ -123,7 +131,14 @@ pub fn start(state: &mut State) {
         return;
     }
     println!("agent · computer use: cua-inject v1 at {path}");
-    state.agent = Some(Agent { seats, raw_entered: [None, None], seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path });
+    state.agent = Some(Agent { seats, raw_entered: [None, None], seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false });
+    // Whether it is at work, looked at every second: between one action and
+    // the next an agent thinks, and that is still working.
+    let timer = Timer::from_duration(Duration::from_secs(1));
+    let _ = state.handle.insert_source(timer, |_, _, state: &mut State| {
+        state.agent_still_working();
+        TimeoutAction::ToDuration(Duration::from_secs(1))
+    });
 }
 
 impl State {
@@ -329,11 +344,28 @@ impl State {
     /// it lights that monitor's edges and that window's outline while it is.
     fn agent_busy(&mut self, slot: usize) {
         let Some(agent) = self.agent.as_mut() else { return };
+        agent.last = Some(Instant::now());
         agent.busy = agent.busy.wrapping_add(1);
         let busy = agent.busy;
         let monitor = self.agent_place(slot).map_or(-1.0, |p| p.3 as f64);
         for (name, v) in [("agent.win", slot as f64), ("agent.screen", monitor), ("agent.seen", busy as f64)] {
             let _ = self.to_render.send(ToRender::Fact(pleamar::scene::intern(name), v as f32));
+        }
+        self.agent_still_working();
+    }
+
+    /// At work, as long as it may be thinking what to do next: a minute and a
+    /// half after its last action, or ten minutes while the process that
+    /// acted (a daemon such as `cua-driver serve`) is still there. The scene
+    /// keeps the monitor's light on meanwhile, and lets it go after.
+    fn agent_still_working(&mut self) {
+        let Some(agent) = self.agent.as_mut() else { return };
+        let idle = agent.last.map_or(Duration::MAX, |t| t.elapsed());
+        let alive = agent.peer != 0 && std::path::Path::new(&format!("/proc/{}", agent.peer)).exists();
+        let working = idle < Duration::from_secs(90) || (alive && idle < Duration::from_secs(600));
+        if working != agent.active {
+            agent.active = working;
+            let _ = self.to_render.send(ToRender::Fact(pleamar::scene::intern("agent.active"), if working { 1.0 } else { 0.0 }));
         }
     }
 
@@ -619,13 +651,13 @@ impl State {
     }
 }
 
-/// Whether the one at the other end of the socket is this user.
-fn same_user(stream: &UnixStream) -> bool {
+/// The process at the other end of the socket, if it is this user's.
+fn same_user(stream: &UnixStream) -> Option<u32> {
     use std::os::fd::AsRawFd;
     let mut cred = libc::ucred { pid: 0, uid: u32::MAX, gid: 0 };
     let mut len = std::mem::size_of::<libc::ucred>() as libc::socklen_t;
     let got = unsafe { libc::getsockopt(stream.as_raw_fd(), libc::SOL_SOCKET, libc::SO_PEERCRED, &mut cred as *mut _ as *mut libc::c_void, &mut len) };
-    got == 0 && cred.uid == unsafe { libc::getuid() }
+    (got == 0 && cred.uid == unsafe { libc::getuid() }).then_some(cred.pid as u32)
 }
 
 fn frame(p: &wl_pointer::WlPointer) {
