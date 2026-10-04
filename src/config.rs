@@ -92,6 +92,9 @@ pub struct Config {
     /// What some windows do when they open: `window app=… [float] [size WxH]
     /// [monitor N|NAME] [workspace N] [private]`.
     pub windows: Vec<WindowRule>,
+    /// `agent on`: a computer-use agent (Cua Driver) may use the desktop
+    /// with a pointer and a keyboard of its own (see `agent.rs`).
+    pub agent: bool,
 }
 
 /// A rule for the windows that match it: by their program (`app=`, the
@@ -365,11 +368,15 @@ pub fn parse(text: &str, c: &mut Config) {
                     eprintln!("config · line {}: a window rule is `window app=NAME|title=TEXT [float] [size WxH] [monitor N|NAME] [workspace N] [private]`", n + 1);
                 }
             }
+            "agent" => c.agent = on(rest.first()).unwrap_or_else(|| {
+                eprintln!("config · line {}: `agent on` or `agent off`", n + 1);
+                false
+            }),
             "idle" => pairs(&mut |k, v| match k {
                 "off-after" => c.off_after = v.and_then(|v| v.parse().ok()).filter(|s| *s > 0),
                 _ => eprintln!("config · line {}: idle has no '{k}'", n + 1),
             }),
-            other => eprintln!("config · line {}: '{other}' is not something it knows (monitor, keyboard, pointer, touchpad, idle)", n + 1),
+            other => eprintln!("config · line {}: '{other}' is not something it knows (monitor, keyboard, pointer, touchpad, idle, agent)", n + 1),
         }
     }
 }

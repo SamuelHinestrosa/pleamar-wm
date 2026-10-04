@@ -415,6 +415,10 @@ impl ClientData for ClientState {
     fn disconnected(&self, _: ClientId, _: DisconnectReason) {}
 }
 
+/// A computer-use agent's hands (`agent on`): see `agent.rs`.
+#[path = "agent.rs"]
+mod agent;
+
 struct State {
     dh: DisplayHandle,
     compositor: CompositorState,
@@ -548,6 +552,8 @@ struct State {
     unmanaged: Vec<X11Surface>,
     start: Instant,
     quit: bool,
+    /// A computer-use agent's seats and socket, if session.conf lets one in.
+    agent: Option<agent::Agent>,
 }
 
 /// Starts the compositor on its own thread. What it is told goes through the
@@ -755,6 +761,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         unmanaged: Vec::new(),
         start: Instant::now(),
         quit: false,
+        agent: None,
         dh,
     };
     if let Some(keymap) = pleamar::host_keymap() {
@@ -764,6 +771,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         }
     }
     state.write_desktop();
+    agent::start(&mut state);
     state.start_xwayland();
     state.export_environment();
     println!("windows · programs connect at WAYLAND_DISPLAY={socket}");
@@ -1130,6 +1138,10 @@ impl State {
         if let Some(d) = &self.x_display {
             vars.push(format!("DISPLAY={d}"));
         }
+        if let Some(a) = &self.agent {
+            vars.push(format!("CUA_INJECT_SOCKET={}", a.path));
+            vars.push("CUA_DRIVER_RS_ENABLE_WAYLAND=1".to_owned());
+        }
         match std::process::Command::new("dbus-update-activation-environment").arg("--systemd").args(&vars).status() {
             Ok(s) if s.success() => println!("windows · dbus and systemd know where the desktop is: {}", vars.join(" ")),
             _ => eprintln!("windows · dbus-update-activation-environment failed: portals may not find the desktop"),
@@ -1369,6 +1381,10 @@ impl State {
         if let Some(dir) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.to_path_buf())) {
             let path = std::env::var("PATH").unwrap_or_default();
             c.env("PATH", format!("{}:{path}", dir.display()));
+        }
+        // A computer-use agent (Cua Driver) started from here finds its hands.
+        if let Some(a) = &self.agent {
+            c.env("CUA_INJECT_SOCKET", &a.path).env("CUA_DRIVER_RS_ENABLE_WAYLAND", "1");
         }
         c.env("GDK_BACKEND", "wayland").env("QT_QPA_PLATFORM", "wayland").env("MOZ_ENABLE_WAYLAND", "1").env("SDL_VIDEODRIVER", "wayland");
         // Programs that draw with the GPU hand over their frames on the card
@@ -2987,6 +3003,10 @@ impl SeatHandler for State {
     }
 
     fn focus_changed(&mut self, seat: &Seat<Self>, focused: Option<&WlSurface>) {
+        // What the agent's keyboard is on is not where your clipboard goes.
+        if agent::is_agent_seat(seat) {
+            return;
+        }
         // What is copied goes with the keyboard: the focused program is offered it.
         let client = focused.and_then(|s| self.dh.get_client(s.id()).ok());
         smithay::wayland::selection::data_device::set_data_device_focus(&self.dh, seat, client.clone());
@@ -2995,7 +3015,11 @@ impl SeatHandler for State {
 
     /// The cursor the program asks for, by its name: pleamar draws its own of
     /// the same kind. One drawn by the program itself is taken as the arrow.
-    fn cursor_image(&mut self, _: &Seat<Self>, image: CursorImageStatus) {
+    fn cursor_image(&mut self, seat: &Seat<Self>, image: CursorImageStatus) {
+        // The agent's cursor is the scene's to draw, not yours to change.
+        if agent::is_agent_seat(seat) {
+            return;
+        }
         use smithay::input::pointer::CursorIcon as I;
         let kind = match image {
             CursorImageStatus::Named(I::Text | I::VerticalText) => pleamar::scene::Cursor::Text,

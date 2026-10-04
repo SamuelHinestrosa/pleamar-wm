@@ -391,6 +391,20 @@ Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
 - **Buffers of several planes** and **video**: NV12 frames straight from a
   hardware decoder (Firefox with VA-API) and RGBA tiles are read on the card.
 
+- **A computer-use agent's hands** (`agent on` in session.conf): the session
+  speaks `cua-inject v1`, what [Cua Driver](https://github.com/trycua/cua)
+  speaks to a compositor of its own, on a socket only you can open, and the
+  programs it starts find it (`CUA_INJECT_SOCKET`). The agent has a seat of
+  its own —a pointer and a US keyboard—, so it types into a window that does
+  not have the keyboard and clicks one under another while your mouse and
+  your focus stay where they are; a program that hears only one seat
+  (Chromium, kitty) gets its events straight, without anybody's focus
+  moving. Its two cursors are the scene's to draw: mint and lilac, with a
+  ring where they click. `tools/agent/demo.py` moves them over a window.
+  With Cua Driver, typing, keys and accessibility actions work today;
+  clicking by coordinates waits for it to trust the window geometry
+  pleamar-wm gives (it does for Sway and GNOME).
+
 Not yet: touch screens and tablets, dragging out of the window manager's
 own scene (its `carries:` zones).
 

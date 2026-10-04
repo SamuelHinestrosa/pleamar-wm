@@ -7392,4 +7392,64 @@ scene Session {
         }
         on press rider_zone.$i { emit unride }
     }
+
+    // ── a computer-use agent's cursors (`agent on` in session.conf) ──
+    // An agent (Cua Driver) drives the windows with a pointer of its own: the
+    // compositor says where each of its cursors is, on which monitor, and
+    // when it presses. It is drawn here, in mint, over everything: a second
+    // cursor that moves on its own, a ring where it clicks, and its name. It
+    // fades a few seconds after it last did something.
+    repeat k in 0..2 {
+        fact agent.$k.x = 0
+        fact agent.$k.y = 0
+        fact agent.$k.screen = 0
+        fact agent.$k.down = 0
+        fact agent.$k.seen = 0
+        prop ag.$k.x = 0 ~110ms
+        prop ag.$k.y = 0 ~110ms
+        prop ag.$k.on = 0 ~220ms
+        prop ag.$k.press = 0 ~90ms
+        prop ag.$k.ring = 1 ~560ms
+        follow ag.$k.x = agent.$k.x
+        follow ag.$k.y = agent.$k.y
+        follow ag.$k.press = agent.$k.down
+        // Seen again after a while: where it is, at once, not flying in from where it was.
+        on change agent.$k.seen while ag.$k.on < 0.05 {
+            ag.$k.x: agent.$k.x ~0ms
+            ag.$k.y: agent.$k.y ~0ms
+        }
+        on change agent.$k.seen { ag.$k.on: 1 }
+        on still agent.$k.seen for 4s { ag.$k.on: 0 ~900ms }
+        on change agent.$k.down while agent.$k.down > 0.5 {
+            ag.$k.ring: 0 ~0ms
+            ag.$k.ring: 1 after 16ms
+        }
+        let ax = ag.$k.x
+        let ay = ag.$k.y
+        group {
+            z: 99999
+            show: ag.$k.on > 0.01 and agent.$k.screen == screen.index
+            opacity: ag.$k.on
+            // Where it clicks: a ring that spreads.
+            ellipse { at: ax, ay; radius: 4 + 22 * ag.$k.ring; stroke: 2.2 * (1 - ag.$k.ring) + 0.4; color: if(k == 0, mint, #c9b3f2); opacity: 80% * (1 - ag.$k.ring) }
+            group {
+                pivot: ax, ay
+                scale: 1 - 0.12 * ag.$k.press, 1 - 0.12 * ag.$k.press
+                // A soft light under it, so it is found on any window.
+                ellipse { at: ax + 5, ay + 8; radius: 15; color: if(k == 0, mint, #c9b3f2); opacity: 16% }
+                // The arrow: dark edge, mint body, its tip on the point.
+                path { at: ax - 1.2, ay - 1.6; color: #0c0f12
+                       move 0, 0; line 0, 21; line 5.6, 16; line 9.2, 24.2; line 13, 22.6; line 9.5, 14.6; line 16.4, 14.6; close }
+                path { at: ax, ay; color: if(k == 0, mint, #c9b3f2)
+                       move 0, 0; line 0, 17.5; line 4.6, 13.4; line 7.8, 20.6; line 10.2, 19.6; line 7.1, 12.6; line 12.6, 12.6; close }
+            }
+            // Its name, beside it.
+            body {
+                color: #0c0f12
+                rim: 14%
+                box { at: ax + 34, ay + 30; size: 44, 18; corner: 9 }
+            }
+            text "agent" { at: ax + 34, ay + 30.5; anchor: center; size: 10; weight: 600; color: if(k == 0, mint, #c9b3f2) }
+        }
+    }
 }

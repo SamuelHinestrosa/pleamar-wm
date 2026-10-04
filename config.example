@@ -34,3 +34,8 @@
 
 # idle  off-after SECONDS  (the monitors go dark; any input wakes them)
 #idle off-after 600
+
+# agent on|off  a computer-use agent (Cua Driver) may use the windows with a
+# pointer and a keyboard of its own: your mouse and your focus stay yours, and
+# its cursors are drawn moving. Off unless said: what has it can type anywhere.
+#agent on
