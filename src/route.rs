@@ -101,6 +101,14 @@ impl Route {
         if layers::dragging() && !down {
             self.grab = None;
             self.client_held.retain(|c| *c != code);
+            // Pressed on the scene (on a window of it): the scene is told it is
+            // let go too, or it went on holding it, and the pointer with it.
+            if self.scene_held.contains(&code) {
+                self.scene_held.retain(|c| *c != code);
+                if let 0x110..=0x116 = code {
+                    let _ = self.to_render.send(ToRender::Button((code - 0x110) as u8, false));
+                }
+            }
             layers::tell(ToLayers::Button { code, down });
             return true;
         }
