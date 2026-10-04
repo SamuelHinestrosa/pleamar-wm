@@ -24,6 +24,8 @@ const HELP: &str = "pleamar-wm agent — use the desktop with the agent's own po
   focus PID                       give that window your keyboard (and show its workspace)
   done                            finished: the light on the monitor goes out now (by itself it
                                   waits a minute and a half, in case the agent is thinking)
+  stop                            the user's: the agent stops, and what it tries next is refused
+                                  until it says `done` (or for a minute)
   raw LINE…                       protocol lines, as they are (cua-inject v1)
 
 Look before each click: a page moves under you.";
@@ -70,6 +72,7 @@ impl Hands {
     fn act(&mut self, line: &str) -> Result<(), String> {
         match self.say(line)? {
             r if r == "ok" => Ok(()),
+            r if r == "err stopped-by-user" => Err("the user stopped the agent: stop here and tell them where you left it (`pleamar-wm agent done` lets the hands be used again)".to_owned()),
             r => Err(format!("{line}: {r}")),
         }
     }
@@ -243,6 +246,7 @@ fn go(args: &[String]) -> Result<(), String> {
             }
         }
         "done" => Hands::open()?.act("x")?,
+        "stop" => Hands::open()?.act("s")?,
         "focus" => {
             let p = pid()?;
             Hands::open()?.act(&format!("f {p}"))?;

@@ -76,6 +76,10 @@ pub struct Agent {
     active: bool,
     /// And where it last was, in its window's root surface.
     at: [Point<f64, Logical>; CURSORS],
+    /// Stopped by the user (the «Stop» on the monitor's pill, or
+    /// `pleamar-wm agent stop`): until the agent says it is done, or for a
+    /// minute, everything it tries to do is refused, and it hears why.
+    stopped: Option<Instant>,
     pub path: String,
 }
 
@@ -132,7 +136,7 @@ pub fn start(state: &mut State) {
         return;
     }
     println!("agent · computer use: cua-inject v1 at {path}");
-    state.agent = Some(Agent { seats, raw_entered: [None, None], seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false });
+    state.agent = Some(Agent { seats, raw_entered: [None, None], seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None });
     // Whether it is at work, looked at every second: between one action and
     // the next an agent thinks, and that is still working.
     let timer = Timer::from_duration(Duration::from_secs(1));
@@ -198,8 +202,21 @@ impl State {
             ["l"] => Ok(self.agent_list()),
             ["x"] => {
                 self.agent_done();
+                if let Some(agent) = self.agent.as_mut() {
+                    agent.stopped = None;
+                }
                 Ok("ok".to_owned())
             }
+            ["s"] => {
+                self.agent_done();
+                if let Some(agent) = self.agent.as_mut() {
+                    agent.stopped = Some(Instant::now());
+                }
+                eprintln!("agent · stopped by the user");
+                Ok("ok".to_owned())
+            }
+            // Looking stays possible; doing anything does not.
+            [verb, ..] if matches!(*verb, "f" | "m" | "b" | "a" | "t" | "k" | "h" | "d") && self.agent_stopped() => Err("stopped-by-user"),
             ["f", pid] => self.agent_activate(pid.parse().unwrap_or(0)).map(|_| "ok".to_owned()),
             ["m", target, idx, x, y] => self.agent_target(target).and_then(|s| self.agent_motion(s, idx.parse().unwrap_or(99), num(x)?, num(y)?)).map(|_| "ok".into()),
             ["b", target, idx, button, pressed] => self.agent_target(target).and_then(|s| self.agent_button(s, idx.parse().unwrap_or(99), button.parse().map_err(|_| "bad-args")?, *pressed != "0")).map(|_| "ok".into()),
@@ -380,6 +397,18 @@ impl State {
     }
 
     /// Finished, as the agent says: nothing to wait for.
+    fn agent_stopped(&mut self) -> bool {
+        let Some(agent) = self.agent.as_mut() else { return false };
+        match agent.stopped {
+            Some(at) if at.elapsed() < Duration::from_secs(60) => true,
+            Some(_) => {
+                agent.stopped = None;
+                false
+            }
+            None => false,
+        }
+    }
+
     fn agent_done(&mut self) {
         let Some(agent) = self.agent.as_mut() else { return };
         agent.last = None;

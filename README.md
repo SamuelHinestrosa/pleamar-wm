@@ -410,9 +410,11 @@ Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
   moving. Its two cursors are the scene's to draw: mint and lilac, with a
   ring where they click; the monitor it works on breathes at its edges, with
   a light running round them and a pill that says so, and the window it
-  works on gets an outline. `tools/agent/demo.py` moves the cursors over a
+  works on gets an outline. The pill's «Stop» (or `pleamar-wm agent stop`)
+  ends it, whoever the agent is: what it tries next is refused, and it hears
+  that you stopped it, until it says it is done. `tools/agent/demo.py` moves the cursors over a
   window. `pleamar-wm agent windows | look | click | type | key | hotkey |
-  scroll | drag | focus` is the same from a shell, for an agent or a script:
+  scroll | drag | focus | done | stop` is the same from a shell, for an agent or a script:
   a window by its process, its coordinates those of `look`'s picture. Besides
   the protocol's commands, `l` lists the windows and `r PID` says the box the window
   is drawn in (what a picture of it is cut from): with it Cua Driver

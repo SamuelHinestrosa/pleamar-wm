@@ -7449,19 +7449,28 @@ scene Session {
             ellipse { at: ag.lx, ag.ly; radius: 34; color: mint; opacity: 35% }
         }
         // The pill, in the bottom right corner (the top middle is Marea's): a
-        // dot that beats, and what is going on. Only drawn: clicks go through.
-        let ag.px = W - 160
+        // dot that beats, what is going on, and «Stop»: the agent's hands are
+        // refused from then on (it hears that you stopped it), whoever it is.
+        let ag.px = W - 196
         let ag.py = H - 30
         body {
             color: #0c0f12
             rim: 16%
             shadow: 0, 6, 18, 40%
-            box { at: ag.px, ag.py; size: 268, 30; corner: 15 }
+            box { at: ag.px, ag.py; size: 340, 30; corner: 15 }
         }
-        ellipse { at: ag.px - 116, ag.py; radius: 4 + 2 * ag.breath; color: mint }
-        ellipse { at: ag.px - 116, ag.py; radius: 9 * ag.breath + 4; stroke: 1.2; color: mint; opacity: 60% * (1 - ag.breath) }
-        text "An agent is using this monitor" { at: ag.px + 8, ag.py + 0.5; anchor: center; size: 11.5; weight: 600; color: ink }
+        ellipse { at: ag.px - 152, ag.py; radius: 4 + 2 * ag.breath; color: mint }
+        ellipse { at: ag.px - 152, ag.py; radius: 9 * ag.breath + 4; stroke: 1.2; color: mint; opacity: 60% * (1 - ag.breath) }
+        text "An agent is using this monitor" { at: ag.px - 28, ag.py + 0.5; anchor: center; size: 11.5; weight: 600; color: ink }
+        box { at: ag.px + 130, ag.py; size: 64, 22; corner: 11; color: #ef7a66; opacity: 18% + 30% * ag.stop.hover }
+        box { at: ag.px + 109, ag.py; size: 7, 7; corner: 1.5; color: #ef7a66 }
+        text "Stop" { at: ag.px + 136, ag.py + 0.5; anchor: center; size: 11.5; weight: 700; color: #ffb3a6 }
     }
+    prop ag.stop.hover = 0 ~120ms
+    zone box ag_stop { at: W - 66, H - 30; size: 64, 22; cursor: pointer; active: ag.here and agent.on > 0.5 }
+    on enter ag_stop { ag.stop.hover: 1 }
+    on leave ag_stop { ag.stop.hover: 0 }
+    on press ag_stop { launch "pleamar-wm agent stop" }
     repeat k in 0..2 {
         fact agent.$k.x = 0
         fact agent.$k.y = 0
@@ -7499,12 +7508,33 @@ scene Session {
                 pivot: ax, ay
                 scale: 1 - 0.12 * ag.$k.press, 1 - 0.12 * ag.$k.press
                 // A soft light under it, so it is found on any window.
-                ellipse { at: ax + 5, ay + 8; radius: 15; color: if(k == 0, mint, #c9b3f2); opacity: 16% }
-                // The arrow: dark edge, mint body, its tip on the point.
-                path { at: ax - 1.2, ay - 1.6; color: #0c0f12
-                       move 0, 0; line 0, 21; line 5.6, 16; line 9.2, 24.2; line 13, 22.6; line 9.5, 14.6; line 16.4, 14.6; close }
-                path { at: ax, ay; color: if(k == 0, mint, #c9b3f2)
-                       move 0, 0; line 0, 17.5; line 4.6, 13.4; line 7.8, 20.6; line 10.2, 19.6; line 7.1, 12.6; line 12.6, 12.6; close }
+                ellipse { at: ax + 9, ay + 10; radius: 18; color: if(k == 0, mint, #c9b3f2); opacity: 10% }
+                // A drop of Marea's water, its tip on the point: a little
+                // body and a little tip melted into one, rimmed in the
+                // cursor's colour, stretching the way it goes.
+                group {
+                    pivot: ax, ay
+                    scale: 1 + clamp(abs(vel(ag.$k.x)) * 0.0004, 0, 0.12), 1 + clamp(abs(vel(ag.$k.y)) * 0.0004, 0, 0.12)
+                    // The rim: the same drop a little bigger, behind, in colour.
+                    body {
+                        color: if(k == 0, mint, #c9b3f2)
+                        ellipse { at: ax + 10, ay + 11; radius: 9.6; blend: 4 }
+                        ellipse { at: ax + 4.6, ay + 5.4; radius: 5.2; blend: 4 }
+                        ellipse { at: ax + 1.1, ay + 1.3; radius: 1.9; blend: 4 }
+                    }
+                    body {
+                        color: marea
+                        rim: 30%
+                        ellipse { at: ax + 10, ay + 11; radius: 8.2; blend: 4 }
+                        ellipse { at: ax + 5, ay + 5.8; radius: 4; blend: 4 }
+                        ellipse { at: ax + 2.2, ay + 2.5; radius: 0.9; blend: 4 }
+                    }
+                    // And her eyes, looking where it goes.
+                    let look.x = clamp(vel(ag.$k.x) * 0.004, -1.6, 1.6)
+                    let look.y = clamp(vel(ag.$k.y) * 0.004, -1.2, 1.2)
+                    box { at: ax + 7.6 + look.x, ay + 11.5 + look.y; size: 2.3, 5.2; corner: 1.15; color: #f5f7f5 }
+                    box { at: ax + 12.8 + look.x, ay + 11.5 + look.y; size: 2.3, 5.2; corner: 1.15; color: #f5f7f5 }
+                }
             }
             // Its name, up and to the right of the tip: a page's tooltip
             // opens below the pointer, and the name sat on it.
