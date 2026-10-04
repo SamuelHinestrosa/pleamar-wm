@@ -22,6 +22,8 @@ const HELP: &str = "pleamar-wm agent — use the desktop with the agent's own po
   key PID NAME                    enter tab escape backspace space up down left right delete home end pageup pagedown f1…f12
   hotkey PID MODS+KEY             ctrl+l, ctrl+shift+t, alt+f4 …
   focus PID                       give that window your keyboard (and show its workspace)
+  done                            finished: the light on the monitor goes out now (by itself it
+                                  waits a minute and a half, in case the agent is thinking)
   raw LINE…                       protocol lines, as they are (cua-inject v1)
 
 Look before each click: a page moves under you.";
@@ -240,6 +242,7 @@ fn go(args: &[String]) -> Result<(), String> {
                 Hands::open()?.act(&format!("h {} {} {key}", target(&p), parts.join(",")))?;
             }
         }
+        "done" => Hands::open()?.act("x")?,
         "focus" => {
             let p = pid()?;
             Hands::open()?.act(&format!("f {p}"))?;

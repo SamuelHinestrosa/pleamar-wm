@@ -22,6 +22,7 @@
 //! | --- | --- |
 //! | `q PID` | `state FOCUSED_PID foreground|background_visible|background_occluded|not_found` |
 //! | `g PID` | `geometry AX AY SX SY`: where the window (AX, AY) and its root surface (SX, SY) are on the desktop |
+//! | `x` | the agent has finished: the monitor's light goes out now, not when it would have stopped waiting for its next step |
 //! | `l` | `windows` and, per window, `PID X Y W H VISIBLE FOCUSED APP TITLE` (app and title hex encoded), windows separated by `|`: what `pleamar-wm agent windows` shows |
 //! | `r PID` | `rect X Y W H VISIBLE`: the root surface's box on the desktop, as the scene shows it, and whether it is seen (1) — what a screenshot of the window is cut from, and what `m`'s coordinates count in |
 //! | `f PID` | the keyboard to that process' only window (and its workspace shown) |
@@ -195,6 +196,10 @@ impl State {
             ["g", pid] => self.agent_geometry(pid.parse().unwrap_or(0)),
             ["r", pid] => self.agent_rect(pid.parse().unwrap_or(0)),
             ["l"] => Ok(self.agent_list()),
+            ["x"] => {
+                self.agent_done();
+                Ok("ok".to_owned())
+            }
             ["f", pid] => self.agent_activate(pid.parse().unwrap_or(0)).map(|_| "ok".to_owned()),
             ["m", target, idx, x, y] => self.agent_target(target).and_then(|s| self.agent_motion(s, idx.parse().unwrap_or(99), num(x)?, num(y)?)).map(|_| "ok".into()),
             ["b", target, idx, button, pressed] => self.agent_target(target).and_then(|s| self.agent_button(s, idx.parse().unwrap_or(99), button.parse().map_err(|_| "bad-args")?, *pressed != "0")).map(|_| "ok".into()),
@@ -371,6 +376,14 @@ impl State {
         for (name, v) in [("agent.win", slot as f64), ("agent.screen", monitor), ("agent.seen", busy as f64)] {
             let _ = self.to_render.send(ToRender::Fact(pleamar::scene::intern(name), v as f32));
         }
+        self.agent_still_working();
+    }
+
+    /// Finished, as the agent says: nothing to wait for.
+    fn agent_done(&mut self) {
+        let Some(agent) = self.agent.as_mut() else { return };
+        agent.last = None;
+        agent.peer = 0;
         self.agent_still_working();
     }
 
