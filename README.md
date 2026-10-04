@@ -400,10 +400,13 @@ Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
   your focus stay where they are; a program that hears only one seat
   (Chromium, kitty) gets its events straight, without anybody's focus
   moving. Its two cursors are the scene's to draw: mint and lilac, with a
-  ring where they click. `tools/agent/demo.py` moves them over a window.
-  With Cua Driver, typing, keys and accessibility actions work today;
-  clicking by coordinates waits for it to trust the window geometry
-  pleamar-wm gives (it does for Sway and GNOME).
+  ring where they click; the monitor it works on breathes at its edges, with
+  a light running round them and a pill that says so, and the window it
+  works on gets an outline. `tools/agent/demo.py` moves the cursors over a
+  window. Besides the protocol's commands, `r PID` says the box the window
+  is drawn in (what a picture of it is cut from): with it Cua Driver
+  captures windows and clicks and drags by coordinates (a change of its own,
+  proposed upstream); without it, typing, keys and accessibility actions.
 
 Not yet: touch screens and tablets, dragging out of the window manager's
 own scene (its `carries:` zones).

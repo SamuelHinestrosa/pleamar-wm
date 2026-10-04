@@ -22,6 +22,7 @@
 //! | --- | --- |
 //! | `q PID` | `state FOCUSED_PID foreground|background_visible|background_occluded|not_found` |
 //! | `g PID` | `geometry AX AY SX SY`: where the window (AX, AY) and its root surface (SX, SY) are on the desktop |
+//! | `r PID` | `rect X Y W H VISIBLE`: the root surface's box on the desktop, as the scene shows it, and whether it is seen (1) — what a screenshot of the window is cut from, and what `m`'s coordinates count in |
 //! | `f PID` | the keyboard to that process' only window (and its workspace shown) |
 //! | `m TARGET IDX X Y` | cursor IDX to X, Y of the window (its root surface's coordinates) |
 //! | `b TARGET IDX BUTTON PRESSED` | an evdev button (272 left), 1 down, 0 up |
@@ -62,6 +63,8 @@ pub struct Agent {
     raw_entered: [Option<WlSurface>; CURSORS],
     /// Per cursor: how many things it has done, for the scene to know it moved.
     seen: [u32; CURSORS],
+    /// And all of them, keys too: the scene knows the agent is at work.
+    busy: u32,
     /// And where it last was, in its window's root surface.
     at: [Point<f64, Logical>; CURSORS],
     pub path: String,
@@ -120,7 +123,7 @@ pub fn start(state: &mut State) {
         return;
     }
     println!("agent · computer use: cua-inject v1 at {path}");
-    state.agent = Some(Agent { seats, raw_entered: [None, None], seen: [0; CURSORS], at: [(0.0, 0.0).into(); CURSORS], path });
+    state.agent = Some(Agent { seats, raw_entered: [None, None], seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path });
 }
 
 impl State {
@@ -175,6 +178,7 @@ impl State {
         let result = match w.as_slice() {
             ["q", pid] => return self.agent_query(pid.parse().unwrap_or(0)),
             ["g", pid] => self.agent_geometry(pid.parse().unwrap_or(0)),
+            ["r", pid] => self.agent_rect(pid.parse().unwrap_or(0)),
             ["f", pid] => self.agent_activate(pid.parse().unwrap_or(0)).map(|_| "ok".to_owned()),
             ["m", target, idx, x, y] => self.agent_target(target).and_then(|s| self.agent_motion(s, idx.parse().unwrap_or(99), num(x)?, num(y)?)).map(|_| "ok".into()),
             ["b", target, idx, button, pressed] => self.agent_target(target).and_then(|s| self.agent_button(s, idx.parse().unwrap_or(99), button.parse().map_err(|_| "bad-args")?, *pressed != "0")).map(|_| "ok".into()),
@@ -285,6 +289,29 @@ impl State {
         Ok(format!("geometry {} {} {} {}", window[0].round(), window[1].round(), root[0].round(), root[1].round()))
     }
 
+    /// The box a picture of the window is cut from: its root surface (a
+    /// program's own shadow included) where the scene shows it, so that a
+    /// pixel of that picture is a point `m` understands. Said by the
+    /// compositor, which is what draws it: an agent can trust it.
+    fn agent_rect(&self, pid: u32) -> Result<String, &'static str> {
+        let found: Vec<usize> = self.slots_open().filter(|s| in_family(self.pid_of(*s), pid)).collect();
+        let slot = match found.as_slice() {
+            [one] => *one,
+            [] => return Err("target-not-found"),
+            _ => return Err("ambiguous-pid"),
+        };
+        let w = self.slots[slot].as_ref().ok_or("gone")?;
+        let Some((_, root, zoom, _)) = self.agent_place(slot) else {
+            return Ok("rect 0 0 0 0 0".to_owned());
+        };
+        // From the root surface's corner to the window's far edges: the scene
+        // draws the window only (not a program's own shadow), and starting at
+        // the root's corner keeps a pixel of the picture a point `m` takes.
+        let g = w.geometry;
+        let (width, height) = (((g[0] + g[2]) as f64 * zoom).round(), ((g[1] + g[3]) as f64 * zoom).round());
+        Ok(format!("rect {} {} {} {} 1", root[0].round(), root[1].round(), width, height))
+    }
+
     fn agent_activate(&mut self, pid: u32) -> Result<(), &'static str> {
         let found: Vec<usize> = self.slots_open().filter(|s| self.pid_of(*s) == pid).collect();
         let slot = match found.as_slice() {
@@ -298,9 +325,22 @@ impl State {
         Ok(())
     }
 
+    /// The scene is told the agent is at work, on which window and monitor:
+    /// it lights that monitor's edges and that window's outline while it is.
+    fn agent_busy(&mut self, slot: usize) {
+        let Some(agent) = self.agent.as_mut() else { return };
+        agent.busy = agent.busy.wrapping_add(1);
+        let busy = agent.busy;
+        let monitor = self.agent_place(slot).map_or(-1.0, |p| p.3 as f64);
+        for (name, v) in [("agent.win", slot as f64), ("agent.screen", monitor), ("agent.seen", busy as f64)] {
+            let _ = self.to_render.send(ToRender::Fact(pleamar::scene::intern(name), v as f32));
+        }
+    }
+
     /// The scene is told where cursor `idx` is, on which monitor, and that
     /// it did something (it draws it while it does).
     fn agent_show(&mut self, slot: usize, idx: usize, at: Point<f64, Logical>, down: Option<bool>) {
+        self.agent_busy(slot);
         let Some(agent) = self.agent.as_mut() else { return };
         agent.seen[idx] = agent.seen[idx].wrapping_add(1);
         let seen = agent.seen[idx];
@@ -405,10 +445,11 @@ impl State {
         Ok(())
     }
 
-    fn agent_axis(&mut self, _slot: usize, idx: usize, horizontal: bool, value: f64) -> Result<(), &'static str> {
+    fn agent_axis(&mut self, slot: usize, idx: usize, horizontal: bool, value: f64) -> Result<(), &'static str> {
         if idx >= CURSORS || !value.is_finite() {
             return Err("bad-args");
         }
+        self.agent_busy(slot);
         let time = self.time();
         let agent = self.agent.as_ref().ok_or("off")?;
         let (_, pointer, _) = agent.seats.get(idx).cloned().ok_or("bad-cursor")?;
@@ -484,6 +525,7 @@ impl State {
     }
 
     fn agent_press(&mut self, slot: usize, presses: &[(Vec<u32>, u32)]) -> Result<(), &'static str> {
+        self.agent_busy(slot);
         let w = self.slots[slot].as_ref().ok_or("gone")?;
         let root = w.surface.clone();
         let client = root.client().ok_or("gone")?;

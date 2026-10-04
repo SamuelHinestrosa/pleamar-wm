@@ -6538,6 +6538,18 @@ scene Session {
                 }
             }
         }
+        // An agent at work on it: a mint outline that breathes round it, over
+        // it (the agent's own monitor glow is further down).
+        group {
+            z: stamp.$i + 0.45 + if(win.$i.floating, 50000, 0)
+            show: agent.on > 0.01 and agent.win == i and win.$i.open and sc == screen.index and ws.vis
+            opacity: agent.on * (0.6 + 0.4 * ag.breath)
+            group {
+                blur: 10
+                box { from: x - 3, y - 3; size: w + 6, h + 6; corner: 14; stroke: 5; color: mint; opacity: 70% }
+            }
+            box { from: x - 1, y - 1; size: w + 2, h + 2; corner: 13; stroke: 1.6; color: mint }
+        }
         // Born from the water: its drawing (its shape is worked out above, with `nb.`).
         group {
             z: stamp.$i + 0.4 + if(win.$i.floating, 50000, 0)
@@ -7399,6 +7411,55 @@ scene Session {
     // when it presses. It is drawn here, in mint, over everything: a second
     // cursor that moves on its own, a ring where it clicks, and its name. It
     // fades a few seconds after it last did something.
+    // The monitor it works on says so, apart from its cursors: its edges
+    // breathe in mint, a light runs round them, and a pill at the top says
+    // an agent is using it. The window it works on gets an outline (in the
+    // windows' loop). All of it fades a few seconds after it stops.
+    fact agent.seen = 0
+    fact agent.screen = -1
+    fact agent.win = -1
+    prop agent.on = 0 ~420ms
+    prop agent.t = 0
+    spin agent.t by if(agent.on > 0.01, 1, 0)
+    on change agent.seen { agent.on: 1 }
+    on still agent.seen for 5s { agent.on: 0 ~1400ms }
+    let ag.here = agent.on > 0.01 and agent.screen == screen.index
+    // Where the light that runs round the edges is: one lap every 4 s.
+    let ag.lap = fract(agent.t / 4) * 2 * (W + H)
+    let ag.lx = if(ag.lap < W, ag.lap, if(ag.lap < W + H, W, if(ag.lap < 2 * W + H, 2 * W + H - ag.lap, 0)))
+    let ag.ly = if(ag.lap < W, 0, if(ag.lap < W + H, ag.lap - W, if(ag.lap < 2 * W + H, H, 2 * (W + H) - ag.lap)))
+    let ag.breath = 0.5 + 0.5 * sin(agent.t * 120)
+    group {
+        z: 99995
+        show: ag.here
+        opacity: agent.on
+        // The edges: a wide soft glow, and a thin bright line on them.
+        group {
+            blur: 22
+            opacity: 55% + 25% * ag.breath
+            box { from: 4, 4; size: W - 8, H - 8; corner: 18; stroke: 10; color: mint }
+        }
+        box { from: 2, 2; size: W - 4, H - 4; corner: 16; stroke: 2; color: mint; opacity: 70% }
+        // And the light running round them.
+        group {
+            blur: 12
+            ellipse { at: ag.lx, ag.ly; radius: 30; color: mint; opacity: 60% }
+        }
+        ellipse { at: ag.lx, ag.ly; radius: 4; color: #e8fff6; opacity: 90% }
+        // The pill, in the bottom right corner (the top middle is Marea's): a
+        // dot that beats, and what is going on. Only drawn: clicks go through.
+        let ag.px = W - 160
+        let ag.py = H - 30
+        body {
+            color: #0c0f12
+            rim: 16%
+            shadow: 0, 6, 18, 40%
+            box { at: ag.px, ag.py; size: 268, 30; corner: 15 }
+        }
+        ellipse { at: ag.px - 116, ag.py; radius: 4 + 2 * ag.breath; color: mint }
+        ellipse { at: ag.px - 116, ag.py; radius: 9 * ag.breath + 4; stroke: 1.2; color: mint; opacity: 60% * (1 - ag.breath) }
+        text "An agent is using this monitor" { at: ag.px + 8, ag.py + 0.5; anchor: center; size: 11.5; weight: 600; color: ink }
+    }
     repeat k in 0..2 {
         fact agent.$k.x = 0
         fact agent.$k.y = 0
@@ -7443,13 +7504,14 @@ scene Session {
                 path { at: ax, ay; color: if(k == 0, mint, #c9b3f2)
                        move 0, 0; line 0, 17.5; line 4.6, 13.4; line 7.8, 20.6; line 10.2, 19.6; line 7.1, 12.6; line 12.6, 12.6; close }
             }
-            // Its name, beside it.
+            // Its name, up and to the right of the tip: a page's tooltip
+            // opens below the pointer, and the name sat on it.
             body {
                 color: #0c0f12
                 rim: 14%
-                box { at: ax + 34, ay + 30; size: 44, 18; corner: 9 }
+                box { at: ax + 38, ay - 12; size: 44, 18; corner: 9 }
             }
-            text "agent" { at: ax + 34, ay + 30.5; anchor: center; size: 10; weight: 600; color: if(k == 0, mint, #c9b3f2) }
+            text "agent" { at: ax + 38, ay - 11.5; anchor: center; size: 10; weight: 600; color: if(k == 0, mint, #c9b3f2) }
         }
     }
 }
