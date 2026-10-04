@@ -586,7 +586,9 @@ impl State {
         let Some(Some(w)) = self.slots.get(slot) else { return false };
         let Some(client) = w.surface.client() else { return false };
         let own = self.agent.as_ref().and_then(|a| a.seats.first()).is_some_and(|s| s.2.client_keyboards(&client).next().is_some());
-        !own && self.focus == Some(slot) && self.host_focus
+        // Your keyboard only if it is on that window now: a program's surface
+        // of its own (Marea's chat) may have it, and the keys went there.
+        !own && self.keyboard.current_focus().as_ref() == Some(&w.surface)
     }
 
     fn agent_press(&mut self, slot: usize, presses: &[(Vec<u32>, u32)]) -> Result<(), &'static str> {
