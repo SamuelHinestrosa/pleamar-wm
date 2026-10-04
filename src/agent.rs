@@ -22,6 +22,7 @@
 //! | --- | --- |
 //! | `q PID` | `state FOCUSED_PID foreground|background_visible|background_occluded|not_found` |
 //! | `g PID` | `geometry AX AY SX SY`: where the window (AX, AY) and its root surface (SX, SY) are on the desktop |
+//! | `l` | `windows` and, per window, `PID X Y W H VISIBLE FOCUSED APP TITLE` (app and title hex encoded), windows separated by `|`: what `pleamar-wm agent windows` shows |
 //! | `r PID` | `rect X Y W H VISIBLE`: the root surface's box on the desktop, as the scene shows it, and whether it is seen (1) — what a screenshot of the window is cut from, and what `m`'s coordinates count in |
 //! | `f PID` | the keyboard to that process' only window (and its workspace shown) |
 //! | `m TARGET IDX X Y` | cursor IDX to X, Y of the window (its root surface's coordinates) |
@@ -79,8 +80,7 @@ pub struct Agent {
 
 /// Where the socket goes: beside the session's other ones.
 pub fn socket_path(display: &str) -> String {
-    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
-    format!("{dir}/pleamar-{display}/cua-inject.sock")
+    crate::agent_socket_path(display)
 }
 
 /// The agent's seats and its socket, if session.conf says `agent on`.
@@ -194,6 +194,7 @@ impl State {
             ["q", pid] => return self.agent_query(pid.parse().unwrap_or(0)),
             ["g", pid] => self.agent_geometry(pid.parse().unwrap_or(0)),
             ["r", pid] => self.agent_rect(pid.parse().unwrap_or(0)),
+            ["l"] => Ok(self.agent_list()),
             ["f", pid] => self.agent_activate(pid.parse().unwrap_or(0)).map(|_| "ok".to_owned()),
             ["m", target, idx, x, y] => self.agent_target(target).and_then(|s| self.agent_motion(s, idx.parse().unwrap_or(99), num(x)?, num(y)?)).map(|_| "ok".into()),
             ["b", target, idx, button, pressed] => self.agent_target(target).and_then(|s| self.agent_button(s, idx.parse().unwrap_or(99), button.parse().map_err(|_| "bad-args")?, *pressed != "0")).map(|_| "ok".into()),
@@ -315,16 +316,35 @@ impl State {
             [] => return Err("target-not-found"),
             _ => return Err("ambiguous-pid"),
         };
-        let w = self.slots[slot].as_ref().ok_or("gone")?;
-        let Some((_, root, zoom, _)) = self.agent_place(slot) else {
-            return Ok("rect 0 0 0 0 0".to_owned());
-        };
+        let r = self.agent_rect_of(slot);
+        Ok(format!("rect {} {} {} {} {}", r.0, r.1, r.2, r.3, u8::from(r.4)))
+    }
+
+    fn agent_rect_of(&self, slot: usize) -> (i64, i64, i64, i64, bool) {
+        let Some(Some(w)) = self.slots.get(slot) else { return (0, 0, 0, 0, false) };
+        let Some((_, root, zoom, _)) = self.agent_place(slot) else { return (0, 0, 0, 0, false) };
         // From the root surface's corner to the window's far edges: the scene
         // draws the window only (not a program's own shadow), and starting at
         // the root's corner keeps a pixel of the picture a point `m` takes.
         let g = w.geometry;
         let (width, height) = (((g[0] + g[2]) as f64 * zoom).round(), ((g[1] + g[3]) as f64 * zoom).round());
-        Ok(format!("rect {} {} {} {} 1", root[0].round(), root[1].round(), width, height))
+        (root[0].round() as i64, root[1].round() as i64, width as i64, height as i64, true)
+    }
+
+    /// Every window: its process, its box (as `r` says it), whether it is
+    /// seen and whether it has the keyboard, its program and its title.
+    fn agent_list(&self) -> String {
+        let hex = |s: &str| s.bytes().map(|b| format!("{b:02x}")).collect::<String>();
+        let mut out = String::from("windows");
+        for slot in self.slots_open() {
+            let Some(w) = self.slots[slot].as_ref() else { continue };
+            let pid = self.pid_of(slot);
+            let rect = self.agent_rect_of(slot);
+            let focused = self.focus == Some(slot);
+            let sep = if out.len() > "windows".len() { " |" } else { "" };
+            out.push_str(&format!("{sep} {pid} {} {} {} {} {} {} {} {}", rect.0, rect.1, rect.2, rect.3, u8::from(rect.4), u8::from(focused), hex(&w.app), hex(&w.title)));
+        }
+        out
     }
 
     fn agent_activate(&mut self, pid: u32) -> Result<(), &'static str> {

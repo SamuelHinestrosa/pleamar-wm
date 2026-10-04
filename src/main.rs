@@ -3,6 +3,7 @@
 //! scene's. Everything else —the command line, the scenes, the reloads— is
 //! pleamar's own.
 
+mod agent_cli;
 mod config;
 mod desktop;
 mod nest;
@@ -30,6 +31,10 @@ fn main() {
     // screenshots) and now runs here.
     if args.first().map(String::as_str) == Some("hyprctl") {
         std::process::exit(hyprctl(args.get(1).map(String::as_str).unwrap_or("")));
+    }
+    // `pleamar-wm agent …`: the agent's hands from a shell (see agent_cli.rs).
+    if args.first().map(String::as_str) == Some("agent") {
+        std::process::exit(agent_cli::run(&args[1..]));
     }
     // `pleamar-wm init`: ~/.config/pleamar with a starting point, never over
     // what is already there.
@@ -260,4 +265,10 @@ fn default_scene() -> String {
     let _ = std::fs::create_dir_all(&dir);
     write_scene(&dir, true);
     format!("{dir}/session.plm")
+}
+
+/// Where the session's agent socket is, for the display it serves.
+pub fn agent_socket_path(display: &str) -> String {
+    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+    format!("{dir}/pleamar-{display}/cua-inject.sock")
 }

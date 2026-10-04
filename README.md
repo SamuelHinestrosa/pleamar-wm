@@ -36,6 +36,13 @@ the open windows without closing anything.
 
 # Features
 
+- **Computer use, built in**: an AI agent gets a pointer and a keyboard of its
+  own (`agent on`). It clicks, types and scrolls in any window —under another,
+  without the keyboard— while your mouse and keyboard stay yours, and you see
+  it: its cursor, the monitor it works on glowing, the window it touches
+  outlined. `pleamar-wm agent click|type|look …` from a shell, the
+  `pleamar-desktop` skill for Claude Code, Codex and OpenCode, and
+  [Cua Driver](https://github.com/trycua/cua)'s `cua-inject` protocol.
 - **The window manager is a scene**: layouts, decorations, animations and drag
   behaviour are a `.plm` file — copy it (`pleamar-wm scene ~/.config/pleamar/wm`, with its shaders) and make it yours.
 - **Tiled or free, per monitor, in one key**: five tiled layouts (leader left or
@@ -124,6 +131,7 @@ With pleamar and Marea, in your home, from one line:
 ```sh
 curl -fsSL https://raw.githubusercontent.com/k4ditano/pleamar/main/install.sh | sh
 pleamar-update --session     # and «pleamar-wm» in your login screen
+pleamar-update --agent       # and AI agents may use your windows (computer use)
 ```
 
 Then log out and choose **pleamar-wm**, or from a TTY of its own (Ctrl+Alt+F3,
@@ -403,7 +411,10 @@ Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
   ring where they click; the monitor it works on breathes at its edges, with
   a light running round them and a pill that says so, and the window it
   works on gets an outline. `tools/agent/demo.py` moves the cursors over a
-  window. Besides the protocol's commands, `r PID` says the box the window
+  window. `pleamar-wm agent windows | look | click | type | key | hotkey |
+  scroll | drag | focus` is the same from a shell, for an agent or a script:
+  a window by its process, its coordinates those of `look`'s picture. Besides
+  the protocol's commands, `l` lists the windows and `r PID` says the box the window
   is drawn in (what a picture of it is cut from): with it Cua Driver
   captures windows and clicks and drags by coordinates (a change of its own,
   proposed upstream); without it, typing, keys and accessibility actions.
