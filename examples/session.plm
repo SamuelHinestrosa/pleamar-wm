@@ -17,6 +17,8 @@
 //   Super+1…9  that pool of this monitor    Super+Ctrl+Up/Down  the pool above / below
 //   Super+Ctrl+Shift+Left/Right  the whole pool to the monitor beside
 //   Super+F    fullscreen, and back
+//   maximize   (no key of its own: bind one) the one with the keyboard takes
+//              all of its monitor —bars and gaps kept— over the others, and back
 //   Super+V    the window with the keyboard floats over the tiles, and back
 //              (only it: its monitor stays tiled, the others close up)
 //   Super+W    tiled or free windows on this monitor (also from Marea's menu):
@@ -5984,6 +5986,12 @@ scene Session {
     let Hmon = pick(mon, screen.0.height, screen.1.height, screen.2.height, screen.3.height)
     let on.dialog = (win.0.dialog and win.0.open and win.0.screen == mon and win.0.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.0.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.0.height, 40) + tb) / 2) + (win.1.dialog and win.1.open and win.1.screen == mon and win.1.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.1.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.1.height, 40) + tb) / 2) + (win.2.dialog and win.2.open and win.2.screen == mon and win.2.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.2.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.2.height, 40) + tb) / 2) + (win.3.dialog and win.3.open and win.3.screen == mon and win.3.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.3.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.3.height, 40) + tb) / 2) + (win.4.dialog and win.4.open and win.4.screen == mon and win.4.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.4.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.4.height, 40) + tb) / 2) + (win.5.dialog and win.5.open and win.5.screen == mon and win.5.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.5.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.5.height, 40) + tb) / 2) + (win.6.dialog and win.6.open and win.6.screen == mon and win.6.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.6.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.6.height, 40) + tb) / 2) + (win.7.dialog and win.7.open and win.7.screen == mon and win.7.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.7.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.7.height, 40) + tb) / 2) + (win.8.dialog and win.8.open and win.8.screen == mon and win.8.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.8.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.8.height, 40) + tb) / 2) + (win.9.dialog and win.9.open and win.9.screen == mon and win.9.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.9.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.9.height, 40) + tb) / 2) + (win.10.dialog and win.10.open and win.10.screen == mon and win.10.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.10.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.10.height, 40) + tb) / 2) + (win.11.dialog and win.11.open and win.11.screen == mon and win.11.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.11.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.11.height, 40) + tb) / 2) + (win.12.dialog and win.12.open and win.12.screen == mon and win.12.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.12.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.12.height, 40) + tb) / 2) + (win.13.dialog and win.13.open and win.13.screen == mon and win.13.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.13.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.13.height, 40) + tb) / 2) + (win.14.dialog and win.14.open and win.14.screen == mon and win.14.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.14.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.14.height, 40) + tb) / 2) + (win.15.dialog and win.15.open and win.15.screen == mon and win.15.workspace == pick(mon, win.shown.0, win.shown.1, win.shown.2, win.shown.3) and abs(mouse.x - Wmon / 2) <= max(win.15.width, 120) / 2 and abs(mouse.y - Hmon / 2) <= (max(win.15.height, 40) + tb) / 2) > 0.5
 
+    // The workspace of the window with the keyboard, and whether it is a
+    // dialog or floats: another one taking the keyboard there puts a
+    // maximized one back.
+    let focus.pool = pick(win.focus, win.0.pool, win.1.pool, win.2.pool, win.3.pool, win.4.pool, win.5.pool, win.6.pool, win.7.pool, win.8.pool, win.9.pool, win.10.pool, win.11.pool, win.12.pool, win.13.pool, win.14.pool, win.15.pool)
+    let focus.dialog = pick(win.focus, win.0.dialog, win.1.dialog, win.2.dialog, win.3.dialog, win.4.dialog, win.5.dialog, win.6.dialog, win.7.dialog, win.8.dialog, win.9.dialog, win.10.dialog, win.11.dialog, win.12.dialog, win.13.dialog, win.14.dialog, win.15.dialog)
+    let focus.floats = pick(win.focus, win.0.floating, win.1.floating, win.2.floating, win.3.floating, win.4.floating, win.5.floating, win.6.floating, win.7.floating, win.8.floating, win.9.floating, win.10.floating, win.11.floating, win.12.floating, win.13.floating, win.14.floating, win.15.floating)
     repeat i in 0..16 {
         // A window is laid out on its own monitor: how big that one is and how
         // many windows share it. Each copy of the scene draws only its own.
@@ -6106,6 +6114,22 @@ scene Session {
         let fgh = if(maxed.$i, ahf, min(fh.$i, ahf))
         let fgx = if(maxed.$i, x0 + gap, clamp(fx.$i, x0 + 160 - fgw, x0 + Ws - 160))
         let fgy = if(maxed.$i, y0, clamp(fy.$i, pick(sc, win.reserved.0.top, win.reserved.1.top, win.reserved.2.top, win.reserved.3.top), y0 + ahf - tb - 40))
+        // ── tiled, maximized (`maximize`): all of its monitor's room —the
+        // bars and the gaps kept, as one window alone has it—, over the
+        // others, which keep their places beneath. Again, back to its tile;
+        // and so too when another one there takes the keyboard (it would be
+        // under it), or when it is carried. ──
+        fact tmax.$i = 0
+        let tm = tmax.$i > 0.5 and F < 0.5 and not win.$i.fullscreen and not win.$i.dialog and not win.$i.minimized
+        // (Free or floating, the same as its green button.)
+        on maximize while win.focus == i and not win.$i.dialog and (F < 0.5 or fr) {
+            tmax.$i = if(F < 0.5, 1 - tmax.$i, tmax.$i)
+            maxed.$i = if(fr, 1 - maxed.$i, maxed.$i)
+            wave.$i: 0 ~0ms
+            wave.$i: 1 after 16ms
+        }
+        on change win.focus while tmax.$i > 0.5 and win.focus >= 0 and win.focus != i and fscreen == sc and focus.pool == win.$i.pool and not focus.dialog and not focus.floats { tmax.$i = 0 }
+        on change dragging while dragging == i { tmax.$i = 0 }
         // Put away, it stays where it was (the others close up without it),
         // and flies from there into Marea's island.
         fact mx.$i = 0
@@ -6124,10 +6148,10 @@ scene Session {
         on change Fm while Fm < 0.5 and win.$i.minimized { restore win.$i }
         // Tiled there is no putting away: whoever asks (a program, a dock), it comes back.
         on change win.$i.minimized while win.$i.minimized and Fm < 0.5 { restore win.$i }
-        let goal.x = if(win.$i.minimized, mx.$i, if(fr, fgx, txv))
-        let goal.y = if(win.$i.minimized, my.$i, if(fr, fgy, tyv))
-        let goal.w = if(win.$i.minimized, mw.$i, if(fr, fgw, twv))
-        let goal.h = if(win.$i.minimized, mh.$i, if(fr, fgh, thv))
+        let goal.x = if(win.$i.minimized, mx.$i, if(fr, fgx, if(tm, x0 + gap, txv)))
+        let goal.y = if(win.$i.minimized, my.$i, if(fr, fgy, if(tm, y0, tyv)))
+        let goal.w = if(win.$i.minimized, mw.$i, if(fr, fgw, if(tm, Ws - 2 * gap, twv)))
+        let goal.h = if(win.$i.minimized, mh.$i, if(fr, fgh, if(tm, ah, thv)))
         // How far into the island: 0 here, 1 put away.
         prop mini.$i = 0 ~720ms
         follow mini.$i = if(win.$i.minimized, 1, 0)
@@ -6250,6 +6274,7 @@ scene Session {
         on change win.$i.open while not win.$i.open {
             fw.$i = 0
             maxed.$i = 0
+            tmax.$i = 0
         }
         // Carried or being resized when it goes —closed, put away—: nothing
         // is carried any more (the release would never come to it).
@@ -6871,6 +6896,9 @@ scene Session {
     on toggle_float while win.focus >= 0 and focus.floating { tile win(win.focus) }
     event restore_last
     event fullscreen
+    // All of its monitor and back: tiled, over the others (the bars and the
+    // gaps kept); free, its green button.
+    event maximize
     event overview
     event focus_next
     event focus_previous

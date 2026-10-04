@@ -170,7 +170,10 @@ never writes over what is there:
 
 `keys.conf` binds keys to the window manager's actions —the events its scene
 declares: `close`, `minimize`, `toggle_free`, `toggle_float` (Super+V: only the
-window with the keyboard floats over the tiles), `focus_next`…— or to programs.
+window with the keyboard floats over the tiles), `maximize` (tiled, it takes all
+of its monitor —bars and gaps kept— over the others, and goes back to its tile;
+no key of its own: `bind Super+m maximize` as Hyprland's `fullscreen 1`),
+`focus_next`…— or to programs.
 Start it with `defaults` to keep pleamar-wm's and change what you want;
 `pleamar-wm keys` shows them all:
 
