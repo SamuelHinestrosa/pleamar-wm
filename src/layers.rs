@@ -200,8 +200,8 @@ pub fn move_drag(pos: (f64, f64)) {
         let new = rect_on(m, pos, old[2], old[3]);
         if new != old {
             st.clients[i].rect = new;
-            st.changed.push((old, 0));
-            st.changed.push((new, 0));
+            st.note_change(old, 0);
+            st.note_change(new, 0);
             st.dirty = true;
             cv.notify_all();
         }
@@ -431,13 +431,13 @@ pub fn show(monitor: usize, layer: ClientLayer) {
         if same_place {
             if let Some(n) = &new {
                 for p in n.pieces.iter().filter(|p| p.content.is_some()) {
-                    st.changed.push(([n.rect[0] + p.at.0, n.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32], n.owner));
+                    st.note_change([n.rect[0] + p.at.0, n.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32], n.owner);
                 }
             }
         } else {
             for l in old.iter().chain(new.iter()) {
                 for p in &l.pieces {
-                    st.changed.push(([l.rect[0] + p.at.0, l.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32], l.owner));
+                    st.note_change([l.rect[0] + p.at.0, l.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32], l.owner);
                 }
             }
         }
@@ -474,7 +474,7 @@ pub fn hide(id: u64) {
         if let Some(i) = st.clients.iter().position(|c| c.id == id) {
             let old = st.clients.remove(i);
             for p in &old.pieces {
-                st.changed.push(([old.rect[0] + p.at.0, old.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32], old.owner));
+                st.note_change([old.rect[0] + p.at.0, old.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32], old.owner);
             }
             for p in old.pieces {
                 if let (Some(PieceContent::Dmabuf(_)), Some(b)) = (&p.content, p.buffer) {

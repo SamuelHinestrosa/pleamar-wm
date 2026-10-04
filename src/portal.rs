@@ -870,8 +870,10 @@ fn pipewire_thread(rx: pw::channel::Receiver<Msg>) -> Result<(), pw::Error> {
             let Some(cast) = casts.values().find(|k| k.feed.borrow().asked == Some(id)) else { return };
             let mut feed = cast.feed.borrow_mut();
             feed.asked = None;
-            if let Some(mut px) = pixels {
-                let size = feed.size;
+            let size = feed.size;
+            // Only a picture of the stream's size: the monitor it shared may
+            // have gone, and another one now has its number.
+            if let Some(mut px) = pixels.filter(|px| px.len() == size.0 as usize * size.1 as usize * 4) {
                 if let Source::Monitor(n) = feed.source {
                     hide_private(n, &mut px, size);
                 }
@@ -880,7 +882,13 @@ fn pipewire_thread(rx: pw::channel::Receiver<Msg>) -> Result<(), pw::Error> {
                 let _ = cast.stream.trigger_process();
                 feed = cast.feed.borrow_mut();
             }
-            if feed.streaming {
+            // A monitor that was unplugged answers at once that it has nothing:
+            // asked again and again, the two threads spun a core between them.
+            let there = match feed.source {
+                Source::Monitor(n) => n < layers::monitors().len(),
+                _ => true,
+            };
+            if feed.streaming && there {
                 ask(&mut feed, false);
             }
         }

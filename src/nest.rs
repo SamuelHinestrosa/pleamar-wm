@@ -797,11 +797,14 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
     // is not painting —a window that is not on the scene—, they are answered
     // anyway, slowly.
     let mut last_done = Instant::now();
+    let mut last_census = Instant::now();
+    let mut last_trim = Instant::now();
     while !state.quit {
         event_loop.dispatch(Some(Duration::from_millis(100)), &mut state).map_err(|e| e.to_string())?;
         state.tell_held();
         state.popups.cleanup();
         state.prune_menus();
+        state.prune_inhibitors();
         state.compose_dirty();
         let x_ready = !state.x_starting || state.start.elapsed() > Duration::from_secs(5);
         if !state.autostart.is_empty() && x_ready && (state.dmabuf_global.is_some() || state.start.elapsed() > Duration::from_secs(3)) {
@@ -809,6 +812,31 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
                 println!("windows · starting: {line}");
                 state.launch(&line);
             }
+        }
+        // Now and then, what the allocator keeps without using goes back to the
+        // system: a window's pixels are megabytes, freed in one thread and
+        // asked for again in another, and glibc kept the room for good —the
+        // session looked hundreds of MB bigger than what it held—.
+        #[cfg(target_env = "gnu")]
+        if last_trim.elapsed() > Duration::from_secs(30) {
+            last_trim = Instant::now();
+            // SAFETY: plain glibc call, no pointers.
+            unsafe { libc::malloc_trim(0) };
+        }
+        // `PLEAMAR_TIMING=1`: what the windows' side keeps, now and then.
+        if pleamar::gpu::timing_enabled() && last_census.elapsed() > Duration::from_secs(10) {
+            last_census = Instant::now();
+            println!(
+                "windows · kept: {} windows, {} waiting, {} programs' buffers ({} lent), {} window listers ({} handles), {} pictures asked, {} keeping awake",
+                state.slots.iter().flatten().count(),
+                state.waiting.len(),
+                state.buffers.len(),
+                state.lent.len(),
+                state.toplevel_managers.len(),
+                state.toplevel_handles.len(),
+                state.pictures.len(),
+                state.inhibitors.len()
+            );
         }
         if last_done.elapsed() > Duration::from_millis(250) && !state.callbacks.is_empty() {
             state.frame_done_all();
@@ -1458,11 +1486,19 @@ impl State {
                 text.push_str(&format!("window {} {} {} {} {}\t{}\n", r[0] + x, r[1] + y, r[2], r[3], w.app, w.title));
             }
         }
+        // Asked on every frame a window with the keyboard moves: written only
+        // when it says something new.
+        static WRITTEN: Mutex<String> = Mutex::new(String::new());
+        let mut written = WRITTEN.lock().unwrap();
+        if *written == text {
+            return;
+        }
         let file = desktop_file_of(&self.socket);
         if let Some(dir) = std::path::Path::new(&file).parent() {
             let _ = std::fs::create_dir_all(dir);
         }
-        let _ = std::fs::write(file, text);
+        let _ = std::fs::write(file, &text);
+        *written = text;
     }
 
     /// A monitor was plugged in or out: the outputs follow, by name. What was
@@ -2542,6 +2578,19 @@ impl CompositorHandler for State {
         &mut self.compositor
     }
 
+    /// Its program destroyed it: what was copied of it goes now. Whoever still
+    /// holds a handle to it keeps its data alive —XWayland's windows did, all
+    /// of them, a whole window of pixels each, for as long as the session ran—.
+    fn destroyed(&mut self, surface: &WlSurface) {
+        with_states(surface, |s| {
+            if let Some(c) = s.data_map.get::<Mutex<Content>>() {
+                let mut c = c.lock().unwrap();
+                c.data = Vec::new();
+                c.dmabuf = None;
+            }
+        });
+    }
+
     fn client_compositor_state<'a>(&self, client: &'a Client) -> &'a CompositorClientState {
         if let Some(x) = client.get_data::<XWaylandClientData>() {
             return &x.compositor_state;
@@ -3182,6 +3231,14 @@ impl Dispatch<ZwlrScreencopyFrameV1, u64> for State {
         p.damage = damage;
         layers::capture(p.monitor, *id, p.piece, damage, owner);
     }
+
+    /// Its program went away with a picture still asked for (a glass waiting
+    /// for what is behind it to change): the monitor stopped waiting for it.
+    fn destroyed(state: &mut Self, _: ClientId, _: &ZwlrScreencopyFrameV1, id: &u64) {
+        if state.pictures.remove(id).is_some() {
+            layers::uncapture(*id);
+        }
+    }
 }
 
 /// Where a surface asked for what is behind it to be blurred, from its corner.
@@ -3244,6 +3301,12 @@ impl Dispatch<ZwlrForeignToplevelManagerV1, ()> for State {
             manager.finished();
         }
     }
+
+    /// Its program went away without saying `stop` (it closed, it crashed):
+    /// kept, every window that opened was announced to nobody, for good.
+    fn destroyed(state: &mut Self, _: ClientId, manager: &ZwlrForeignToplevelManagerV1, _: &()) {
+        state.toplevel_managers.retain(|m| m != manager);
+    }
 }
 
 /// What one who lists the windows may ask of one: the keyboard, or to close it.
@@ -3270,6 +3333,11 @@ impl Dispatch<ZwlrForeignToplevelHandleV1, usize> for State {
             toplevel_handle::Request::Destroy => state.toplevel_handles.retain(|(_, h)| h != handle),
             _ => {}
         }
+    }
+
+    /// Its program went away: every change of that window was still told to it.
+    fn destroyed(state: &mut Self, _: ClientId, handle: &ZwlrForeignToplevelHandleV1, _: &usize) {
+        state.toplevel_handles.retain(|(_, h)| h != handle);
     }
 }
 
@@ -3342,6 +3410,20 @@ impl XdgActivationHandler for State {
 impl IdleNotifierHandler for State {
     fn idle_notifier_state(&mut self) -> &mut IdleNotifierState<Self> {
         &mut self.idle
+    }
+}
+
+impl State {
+    /// A program that kept the screen awake (a video) and died without saying
+    /// so: smithay only hears an inhibitor that is destroyed on purpose, and
+    /// the monitors never went dark again.
+    fn prune_inhibitors(&mut self) {
+        if self.inhibitors.iter().any(|s| !s.alive()) {
+            self.inhibitors.retain(|s| s.alive());
+            let any = !self.inhibitors.is_empty();
+            self.idle.set_is_inhibited(any);
+            layers::set_inhibited(any);
+        }
     }
 }
 

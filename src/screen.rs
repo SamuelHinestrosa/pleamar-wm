@@ -222,6 +222,23 @@ pub struct ScreenState {
     pub fullscreen: bool,
 }
 
+impl ScreenState {
+    /// Something changed there. Only putting the monitor together reads these,
+    /// and an off monitor (DPMS, another TTY) is not put together: past a few
+    /// hundred, «all of it» says the same, and the list stops growing all night.
+    pub fn note_change(&mut self, rect: [i32; 4], owner: u64) {
+        if self.changed_all {
+            return;
+        }
+        if self.changed.len() >= 512 {
+            self.changed.clear();
+            self.changed_all = true;
+            return;
+        }
+        self.changed.push((rect, owner));
+    }
+}
+
 pub type Screen = Arc<(Mutex<ScreenState>, Condvar)>;
 
 pub fn screen(name: String, size: (u32, u32), output: Box<dyn Output>) -> Screen {
@@ -408,11 +425,14 @@ impl Frames for LayerFrames {
             };
         }
         match piece {
-            Some(p) if p[2] > 0 && p[3] > 0 => st.changed.push((p, 0)),
+            Some(p) if p[2] > 0 && p[3] > 0 => st.note_change(p, 0),
             Some(_) => {}
             None => st.changed_all = true,
         }
-        st.fresh.push(self.sheet);
+        // Once: a monitor that is off does not take them, and the scene goes on painting.
+        if !st.fresh.contains(&self.sheet) {
+            st.fresh.push(self.sheet);
+        }
         st.dirty = true;
         // The first frame starts the one that puts the monitor together.
         if let Some(output) = st.output.take() {
@@ -698,9 +718,9 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
             (quads, blurs, st.size, st.modifiers.clone(), std::mem::take(&mut st.fresh), anew, arrived, std::mem::take(&mut st.forget), shows, drew_clients, surfaces, changed, due)
         };
         part(0, &mut parts);
-        for b in forget {
-            buffers.remove(&b);
-            frames.remove(&b);
+        for b in &forget {
+            buffers.remove(b);
+            frames.remove(b);
         }
         // What the programs brought since the last time: their buffers on the
         // card are read where they are; their pixels, copied.
@@ -759,6 +779,13 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
                 PieceContent::Kept => {}
             }
         }
+        // A buffer destroyed in the same round it arrived: forgotten before it
+        // was read, it was read after, and its texture was kept for good
+        // (buffer numbers are never used again).
+        for b in &forget {
+            buffers.remove(b);
+            frames.remove(b);
+        }
         part(1, &mut parts);
         let Some((which, target)) = output.buffer(&device, &modifiers) else {
             // Nothing to put it together in yet: again as soon as there is, with
@@ -767,7 +794,7 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
             st.dirty = true;
             st.fresh.extend(fresh);
             match changed {
-                Some(b) if b[2] > b[0] && b[3] > b[1] => st.changed.push(([b[0], b[1], b[2] - b[0], b[3] - b[1]], 0)),
+                Some(b) if b[2] > b[0] && b[3] > b[1] => st.note_change([b[0], b[1], b[2] - b[0], b[3] - b[1]], 0),
                 Some(_) => {}
                 None => st.changed_all = true,
             }
@@ -1027,6 +1054,8 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
                 println!("screen · {name}: put together {:.0} times a second, {:.2} ms waiting for the card each, {:.2} ms of CPU each", tally.1 as f64 / secs, tally.2 / tally.1 as f64, (tally.3 - CPU_AT.with(|c| c.get())) / tally.1 as f64);
                 let n = tally.1 as f64;
                 println!("screen · {name}: CPU each time: gathering {:.2} · reading programs' frames {:.2} · recording {:.2} · sending {:.2} · showing {:.2} · the rest {:.2} ms", parts[0] / n, parts[1] / n, parts[2] / n, parts[3] / n, parts[4] / n, parts[5] / n);
+                // What it keeps: over a long session, none of these should only grow.
+                println!("screen · {name}: kept: {} programs' buffers, {} video frames, {} copied surfaces", buffers.len(), frames.len(), pixels.len());
                 parts = [0.0; 6];
                 CPU_AT.with(|c| c.set(tally.3));
                 tally = (std::time::Instant::now(), 0, 0.0, tally.3);

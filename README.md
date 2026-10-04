@@ -295,6 +295,15 @@ the window manager and everything running on pleamar (Marea…), and writes a
 report to `~/pleamar-report-….md`, with the monitors and the machine, to attach
 to an issue.
 
+To see whether a change leaves anything behind over a long session,
+`tools/soak/soak.sh` runs a headless session that opens and closes windows
+(kitty, GTK on Wayland, GTK on X11) for a few minutes. Every 2 seconds it
+samples memory, threads, open files and children, then says whether any of
+them kept growing. With `PLEAMAR_TIMING=1` (which it sets, and the session
+log has), the `kept:` lines say what each part holds: windows, programs'
+buffers, window listers, pictures asked for, the windows' pixels in the scene.
+None of them should only grow.
+
 The language side —`windows`, `window`, `launch`, `focus`, `close`,
 `promote`— is pleamar's and is documented in its reference (§10.3). This repo
 is the compositor that fills it: the protocol side of
