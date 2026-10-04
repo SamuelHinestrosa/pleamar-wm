@@ -7471,79 +7471,86 @@ scene Session {
     on enter ag_stop { ag.stop.hover: 1 }
     on leave ag_stop { ag.stop.hover: 0 }
     on press ag_stop { launch "pleamar-wm agent stop" }
-    repeat k in 0..2 {
-        fact agent.$k.x = 0
-        fact agent.$k.y = 0
-        fact agent.$k.screen = 0
-        fact agent.$k.down = 0
-        fact agent.$k.seen = 0
-        prop ag.$k.x = 0 ~110ms
-        prop ag.$k.y = 0 ~110ms
-        prop ag.$k.on = 0 ~220ms
-        prop ag.$k.press = 0 ~90ms
-        prop ag.$k.ring = 1 ~560ms
-        follow ag.$k.x = agent.$k.x
-        follow ag.$k.y = agent.$k.y
-        follow ag.$k.press = agent.$k.down
-        // Seen again after a while: where it is, at once, not flying in from where it was.
-        on change agent.$k.seen while ag.$k.on < 0.05 {
-            ag.$k.x: agent.$k.x ~0ms
-            ag.$k.y: agent.$k.y ~0ms
-        }
-        on change agent.$k.seen { ag.$k.on: 1 }
-        on still agent.$k.seen for 4s { ag.$k.on: 0 ~900ms }
-        on change agent.$k.down while agent.$k.down > 0.5 {
-            ag.$k.ring: 0 ~0ms
-            ag.$k.ring: 1 after 16ms
-        }
-        let ax = ag.$k.x
-        let ay = ag.$k.y
-        group {
-            z: 99999
-            show: ag.$k.on > 0.01 and agent.$k.screen == screen.index
-            opacity: ag.$k.on
-            // Where it clicks: a ring that spreads.
-            ellipse { at: ax, ay; radius: 4 + 22 * ag.$k.ring; stroke: 2.2 * (1 - ag.$k.ring) + 0.4; color: if(k == 0, mint, #c9b3f2); opacity: 80% * (1 - ag.$k.ring) }
+    // Who it is (`PLEAMAR_AGENT_NAME`: Marea says hers), for its label.
+    text agent.name = "agent"
+    // Where each cursor is, as pleamar-wm says (on its monitor, in units).
+    fact agent.0.x = 0
+    fact agent.0.y = 0
+    fact agent.0.screen = 0
+    fact agent.0.down = 0
+    fact agent.0.seen = 0
+    fact agent.1.x = 0
+    fact agent.1.y = 0
+    fact agent.1.screen = 0
+    fact agent.1.down = 0
+    fact agent.1.seen = 0
+    // The cursors on a surface of their own, over everything on the monitor:
+    // over the programs' menus too (a browser's right-click menu hid it).
+    // Only drawn: clicks go through.
+    surface agent_hands {
+        size: full, full
+        anchor: top_left
+        level: overlay
+        screens: each max 4
+        open: agent.on > 0.001 or agent.active
+        repeat k in 0..2 {
+            // `pleamar-wm agent` takes it along the way, as a hand would;
+            // this only smooths the steps.
+            prop ag.$k.x = 0 ~140ms
+            prop ag.$k.y = 0 ~140ms
+            prop ag.$k.on = 0 ~220ms
+            prop ag.$k.press = 0 ~90ms
+            prop ag.$k.ring = 1 ~560ms
+            follow ag.$k.x = agent.$k.x
+            follow ag.$k.y = agent.$k.y
+            follow ag.$k.press = agent.$k.down
+            // Seen again after a while, or on another monitor: where it is, at
+            // once, not flying in from where it was.
+            on change agent.$k.seen while ag.$k.on < 0.05 {
+                ag.$k.x: agent.$k.x ~0ms
+                ag.$k.y: agent.$k.y ~0ms
+            }
+            on change agent.$k.screen {
+                ag.$k.x: agent.$k.x ~0ms
+                ag.$k.y: agent.$k.y ~0ms
+            }
+            on change agent.$k.seen { ag.$k.on: 1 }
+            // It stays while the agent is at work —it thinks between two steps,
+            // and a cursor that went and came back did not seem to move—, and
+            // goes when it is done.
+            on change agent.active while not agent.active { ag.$k.on: 0 ~900ms }
+            on change agent.$k.down while agent.$k.down > 0.5 {
+                ag.$k.ring: 0 ~0ms
+                ag.$k.ring: 1 after 16ms
+            }
+            let ax = ag.$k.x
+            let ay = ag.$k.y
+            measure tag.$k
             group {
-                pivot: ax, ay
-                scale: 1 - 0.12 * ag.$k.press, 1 - 0.12 * ag.$k.press
-                // A soft light under it, so it is found on any window.
-                ellipse { at: ax + 9, ay + 10; radius: 18; color: if(k == 0, mint, #c9b3f2); opacity: 10% }
-                // A drop of Marea's water, its tip on the point: a little
-                // body and a little tip melted into one, rimmed in the
-                // cursor's colour, stretching the way it goes.
+                show: ag.$k.on > 0.01 and agent.$k.screen == screen.index
+                opacity: ag.$k.on
+                // Where it clicks: a ring that spreads.
+                ellipse { at: ax, ay; radius: 4 + 22 * ag.$k.ring; stroke: 2.2 * (1 - ag.$k.ring) + 0.4; color: if(k == 0, mint, #c9b3f2); opacity: 80% * (1 - ag.$k.ring) }
                 group {
                     pivot: ax, ay
-                    scale: 1 + clamp(abs(vel(ag.$k.x)) * 0.0004, 0, 0.12), 1 + clamp(abs(vel(ag.$k.y)) * 0.0004, 0, 0.12)
-                    // The rim: the same drop a little bigger, behind, in colour.
-                    body {
-                        color: if(k == 0, mint, #c9b3f2)
-                        ellipse { at: ax + 10, ay + 11; radius: 9.6; blend: 4 }
-                        ellipse { at: ax + 4.6, ay + 5.4; radius: 5.2; blend: 4 }
-                        ellipse { at: ax + 1.1, ay + 1.3; radius: 1.9; blend: 4 }
-                    }
-                    body {
-                        color: marea
-                        rim: 30%
-                        ellipse { at: ax + 10, ay + 11; radius: 8.2; blend: 4 }
-                        ellipse { at: ax + 5, ay + 5.8; radius: 4; blend: 4 }
-                        ellipse { at: ax + 2.2, ay + 2.5; radius: 0.9; blend: 4 }
-                    }
-                    // And her eyes, looking where it goes.
-                    let look.x = clamp(vel(ag.$k.x) * 0.004, -1.6, 1.6)
-                    let look.y = clamp(vel(ag.$k.y) * 0.004, -1.2, 1.2)
-                    box { at: ax + 7.6 + look.x, ay + 11.5 + look.y; size: 2.3, 5.2; corner: 1.15; color: #f5f7f5 }
-                    box { at: ax + 12.8 + look.x, ay + 11.5 + look.y; size: 2.3, 5.2; corner: 1.15; color: #f5f7f5 }
+                    scale: 1 - 0.12 * ag.$k.press, 1 - 0.12 * ag.$k.press
+                    // A soft light under it, so it is found on any window.
+                    ellipse { at: ax + 5, ay + 8; radius: 15; color: if(k == 0, mint, #c9b3f2); opacity: 16% }
+                    // The arrow: dark edge, mint body, its tip on the point.
+                    path { at: ax - 1.2, ay - 1.6; color: #0c0f12
+                           move 0, 0; line 0, 21; line 5.6, 16; line 9.2, 24.2; line 13, 22.6; line 9.5, 14.6; line 16.4, 14.6; close }
+                    path { at: ax, ay; color: if(k == 0, mint, #c9b3f2)
+                           move 0, 0; line 0, 17.5; line 4.6, 13.4; line 7.8, 20.6; line 10.2, 19.6; line 7.1, 12.6; line 12.6, 12.6; close }
                 }
+                // Its name, up and to the right of the tip: a page's tooltip
+                // opens below the pointer, and the name sat on it.
+                body {
+                    color: #0c0f12
+                    rim: 14%
+                    box { from: ax + 16, ay - 21; size: tag.$k.width + 16, 18; corner: 9 }
+                }
+                text agent.name { at: ax + 24, ay - 11.5; anchor: left center; size: 10; weight: 600; color: if(k == 0, mint, #c9b3f2); measure: tag.$k }
             }
-            // Its name, up and to the right of the tip: a page's tooltip
-            // opens below the pointer, and the name sat on it.
-            body {
-                color: #0c0f12
-                rim: 14%
-                box { at: ax + 38, ay - 12; size: 44, 18; corner: 9 }
-            }
-            text "agent" { at: ax + 38, ay - 11.5; anchor: center; size: 10; weight: 600; color: if(k == 0, mint, #c9b3f2) }
         }
     }
 }

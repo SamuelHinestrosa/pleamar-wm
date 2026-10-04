@@ -39,7 +39,7 @@
 
 use super::{State, Toplevel};
 use crate::layers;
-use pleamar::scene::{NestEvent, ToRender};
+use pleamar::scene::{NestEvent, ToNest, ToRender};
 use smithay::backend::input::{Axis, AxisSource, ButtonState, KeyState};
 use smithay::input::keyboard::{xkb, FilterResult, KeyboardHandle, XkbConfig};
 use smithay::input::pointer::{AxisFrame, ButtonEvent, MotionEvent, PointerHandle};
@@ -76,6 +76,11 @@ pub struct Agent {
     active: bool,
     /// And where it last was, in its window's root surface.
     at: [Point<f64, Logical>; CURSORS],
+    /// And on the desktop, in units (for `p`: the next move glides from there).
+    global: [Option<(f64, f64)>; CURSORS],
+    /// The program it works with now (the process its target names) and the
+    /// monitor that window is on.
+    working: Option<(u32, usize)>,
     /// Stopped by the user (the «Stop» on the monitor's pill, or
     /// `pleamar-wm agent stop`): until the agent says it is done, or for a
     /// minute, everything it tries to do is refused, and it hears why.
@@ -136,7 +141,7 @@ pub fn start(state: &mut State) {
         return;
     }
     println!("agent · computer use: cua-inject v1 at {path}");
-    state.agent = Some(Agent { seats, raw_entered: [None, None], seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None });
+    state.agent = Some(Agent { seats, raw_entered: [None, None], seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None });
     // Whether it is at work, looked at every second: between one action and
     // the next an agent thinks, and that is still working.
     let timer = Timer::from_duration(Duration::from_secs(1));
@@ -197,11 +202,22 @@ impl State {
         let w: Vec<&str> = line.split_whitespace().collect();
         let result = match w.as_slice() {
             ["q", pid] => return self.agent_query(pid.parse().unwrap_or(0)),
-            ["g", pid] => self.agent_geometry(pid.parse().unwrap_or(0)),
-            ["r", pid] => self.agent_rect(pid.parse().unwrap_or(0)),
+            ["g", pid] => self.agent_geometry(pid),
+            ["r", pid] => self.agent_rect(pid),
             ["l"] => Ok(self.agent_list()),
+            ["o"] => Ok(self.agent_monitors()),
+            // Who the agent is, for its cursor's label (`PLEAMAR_AGENT_NAME`).
+            ["n", hex] => {
+                let name: String = String::from_utf8_lossy(&unhex(hex).unwrap_or_default()).chars().filter(|c| !c.is_control()).take(16).collect();
+                let name = if name.trim().is_empty() { "agent".to_owned() } else { name };
+                let _ = self.to_render.send(ToRender::Text(pleamar::scene::intern("agent.name"), name));
+                Ok("ok".to_owned())
+            }
+            ["p", idx] => Ok(self.agent_where(idx.parse().unwrap_or(0))),
+            ["v", pid, monitor] => self.agent_send(pid, monitor.parse().unwrap_or(usize::MAX)).map(|_| "ok".to_owned()),
             ["x"] => {
                 self.agent_done();
+                let _ = self.to_render.send(ToRender::Text(pleamar::scene::intern("agent.name"), "agent".to_owned()));
                 if let Some(agent) = self.agent.as_mut() {
                     agent.stopped = None;
                 }
@@ -216,8 +232,8 @@ impl State {
                 Ok("ok".to_owned())
             }
             // Looking stays possible; doing anything does not.
-            [verb, ..] if matches!(*verb, "f" | "m" | "b" | "a" | "t" | "k" | "h" | "d") && self.agent_stopped() => Err("stopped-by-user"),
-            ["f", pid] => self.agent_activate(pid.parse().unwrap_or(0)).map(|_| "ok".to_owned()),
+            [verb, ..] if matches!(*verb, "f" | "m" | "b" | "a" | "t" | "k" | "h" | "d" | "v") && self.agent_stopped() => Err("stopped-by-user"),
+            ["f", pid] => self.agent_activate(pid).map(|_| "ok".to_owned()),
             ["m", target, idx, x, y] => self.agent_target(target).and_then(|s| self.agent_motion(s, idx.parse().unwrap_or(99), num(x)?, num(y)?)).map(|_| "ok".into()),
             ["b", target, idx, button, pressed] => self.agent_target(target).and_then(|s| self.agent_button(s, idx.parse().unwrap_or(99), button.parse().map_err(|_| "bad-args")?, *pressed != "0")).map(|_| "ok".into()),
             ["a", target, idx, axis, value] => self.agent_target(target).and_then(|s| self.agent_axis(s, idx.parse().unwrap_or(99), *axis == "1", num(value)?)).map(|_| "ok".into()),
@@ -267,8 +283,7 @@ impl State {
     /// The window a target names: refused if it names none, or more than one.
     fn agent_target(&self, target: &str) -> Result<usize, &'static str> {
         let found: Vec<usize> = if let Some(pid) = target.strip_prefix("root:") {
-            let pid: u32 = pid.parse().map_err(|_| "bad-root-pid")?;
-            self.slots_open().filter(|s| in_family(self.pid_of(*s), pid)).collect()
+            return self.agent_pick(pid);
         } else if let Some(pid) = target.strip_prefix("pid:") {
             let pid: u32 = pid.parse().map_err(|_| "bad-pid")?;
             self.slots_open().filter(|s| self.pid_of(*s) == pid).collect()
@@ -280,6 +295,57 @@ impl State {
             [] => Err(if target.starts_with("root:") { "unknown-root-pid" } else if target.starts_with("pid:") { "unknown-pid" } else { "unknown-app-id" }),
             _ => Err(if target.starts_with("root:") { "ambiguous-root-pid" } else if target.starts_with("pid:") { "ambiguous-pid" } else { "ambiguous-app-id" }),
         }
+    }
+
+    /// The window of a program the agent means: a dialog open for one of its
+    /// windows first (its own «Save as», or a portal's file chooser that
+    /// belongs to it) —that is where its input goes, and what a picture of
+    /// it should show—; else its only window; else the one with the
+    /// keyboard; else one that is seen.
+    ///
+    /// `PID.N` names one window of a program that has several (`windows`
+    /// shows them so): that one, or the dialog it has open.
+    fn agent_pick(&self, spec: &str) -> Result<usize, &'static str> {
+        let (pid, one) = match spec.split_once('.') {
+            Some((p, n)) => (p.parse::<u32>().map_err(|_| "bad-root-pid")?, Some(n.parse::<usize>().map_err(|_| "bad-window")?)),
+            None => (spec.parse::<u32>().map_err(|_| "bad-root-pid")?, None),
+        };
+        let family: Vec<usize> = match one {
+            Some(slot) => self.slots_open().filter(|s| *s == slot && in_family(self.pid_of(*s), pid)).collect(),
+            None => self.slots_open().filter(|s| in_family(self.pid_of(*s), pid)).collect(),
+        };
+        if family.is_empty() {
+            return Err("unknown-root-pid");
+        }
+        // Dialogs of dialogs too («Replace it?» over a «Save as»): the
+        // deepest is the one waiting for an answer.
+        let depth = |s: usize| -> Option<usize> {
+            let mut at = s;
+            for d in 1..8 {
+                at = self.parent_slot(at)?;
+                if family.contains(&at) {
+                    return Some(d);
+                }
+            }
+            None
+        };
+        let dialogs: Vec<(usize, usize)> = self.slots_open().filter(|s| !family.contains(s)).filter_map(|s| depth(s).map(|d| (s, d))).filter(|(s, _)| self.slots[*s].as_ref().is_some_and(|w| !w.minimized)).collect();
+        if let Some(d) = self.focus.filter(|f| dialogs.iter().any(|(s, _)| s == f)).or_else(|| dialogs.iter().max_by_key(|(_, d)| *d).map(|(s, _)| *s)) {
+            return Ok(d);
+        }
+        // Its own dialogs (a program's «Save as» of its own): the one with
+        // the keyboard, or the deepest.
+        let own: Vec<usize> = family.iter().copied().filter(|s| self.parent_slot(*s).is_some()).collect();
+        if let Some(d) = self.focus.filter(|f| own.contains(f)).or_else(|| own.last().copied()) {
+            return Ok(d);
+        }
+        if let [one] = family[..] {
+            return Ok(one);
+        }
+        if let Some(f) = self.focus.filter(|f| family.contains(f)) {
+            return Ok(f);
+        }
+        family.iter().copied().find(|s| self.agent_place(*s).is_some()).or(family.first().copied()).ok_or("unknown-root-pid")
     }
 
     /// Where a window is on the desktop, in units: the window itself, and its
@@ -316,13 +382,8 @@ impl State {
         format!("state {focused} {state}")
     }
 
-    fn agent_geometry(&self, pid: u32) -> Result<String, &'static str> {
-        let found: Vec<usize> = self.slots_open().filter(|s| in_family(self.pid_of(*s), pid)).collect();
-        let slot = match found.as_slice() {
-            [one] => *one,
-            [] => return Err("target-not-found"),
-            _ => return Err("ambiguous-pid"),
-        };
+    fn agent_geometry(&self, pid: &str) -> Result<String, &'static str> {
+        let slot = self.agent_pick(pid).map_err(|_| "target-not-found")?;
         let (window, root, _, _) = self.agent_place(slot).ok_or("unmapped-target")?;
         Ok(format!("geometry {} {} {} {}", window[0].round(), window[1].round(), root[0].round(), root[1].round()))
     }
@@ -331,13 +392,8 @@ impl State {
     /// program's own shadow included) where the scene shows it, so that a
     /// pixel of that picture is a point `m` understands. Said by the
     /// compositor, which is what draws it: an agent can trust it.
-    fn agent_rect(&self, pid: u32) -> Result<String, &'static str> {
-        let found: Vec<usize> = self.slots_open().filter(|s| in_family(self.pid_of(*s), pid)).collect();
-        let slot = match found.as_slice() {
-            [one] => *one,
-            [] => return Err("target-not-found"),
-            _ => return Err("ambiguous-pid"),
-        };
+    fn agent_rect(&self, pid: &str) -> Result<String, &'static str> {
+        let slot = self.agent_pick(pid).map_err(|_| "target-not-found")?;
         let r = self.agent_rect_of(slot);
         Ok(format!("rect {} {} {} {} {}", r.0, r.1, r.2, r.3, u8::from(r.4)))
     }
@@ -349,14 +405,23 @@ impl State {
         // draws the window only (not a program's own shadow), and starting at
         // the root's corner keeps a pixel of the picture a point `m` takes.
         let g = w.geometry;
-        let (width, height) = (((g[0] + g[2]) as f64 * zoom).round(), ((g[1] + g[3]) as f64 * zoom).round());
+        let (mut right, mut bottom) = (g[0] + g[2], g[1] + g[3]);
+        // And its menus that hang out of it (a right-click menu near its
+        // edge): a picture of the window shows them whole.
+        for (popup, offset) in smithay::desktop::PopupManager::popups_for_surface(&w.surface) {
+            let size = popup.geometry().size;
+            right = right.max(g[0] + offset.x + size.w);
+            bottom = bottom.max(g[1] + offset.y + size.h);
+        }
+        let (width, height) = ((right as f64 * zoom).round(), (bottom as f64 * zoom).round());
         (root[0].round() as i64, root[1].round() as i64, width as i64, height as i64, true)
     }
 
     /// Every window: its process, its box (as `r` says it), whether it is
     /// seen and whether it has the keyboard, its program and its title.
     fn agent_list(&self) -> String {
-        let hex = |s: &str| s.bytes().map(|b| format!("{b:02x}")).collect::<String>();
+        // An empty title or program is «-»: a field of its own all the same.
+        let hex = |s: &str| if s.is_empty() { "-".to_owned() } else { s.bytes().map(|b| format!("{b:02x}")).collect::<String>() };
         let mut out = String::from("windows");
         for slot in self.slots_open() {
             let Some(w) = self.slots[slot].as_ref() else { continue };
@@ -364,18 +429,57 @@ impl State {
             let rect = self.agent_rect_of(slot);
             let focused = self.focus == Some(slot);
             let sep = if out.len() > "windows".len() { " |" } else { "" };
-            out.push_str(&format!("{sep} {pid} {} {} {} {} {} {} {} {}", rect.0, rect.1, rect.2, rect.3, u8::from(rect.4), u8::from(focused), hex(&w.app), hex(&w.title)));
+            // And, after the old fields: the monitor it is seen on (-1: not
+            // seen) and, for a dialog, the process of the window it belongs to.
+            let monitor = self.agent_place(slot).map_or(-1, |p| p.3 as i64);
+            let parent = self.parent_slot(slot).map_or(0, |p| self.pid_of(p));
+            out.push_str(&format!("{sep} {pid} {} {} {} {} {} {} {} {} {monitor} {parent} {slot}", rect.0, rect.1, rect.2, rect.3, u8::from(rect.4), u8::from(focused), hex(&w.app), hex(&w.title)));
         }
         out
     }
 
-    fn agent_activate(&mut self, pid: u32) -> Result<(), &'static str> {
-        let found: Vec<usize> = self.slots_open().filter(|s| self.pid_of(*s) == pid).collect();
-        let slot = match found.as_slice() {
-            [one] => *one,
-            [] => return Err("unknown-pid"),
-            _ => return Err("ambiguous-pid"),
-        };
+    /// Where a new window of this process goes while the agent works with
+    /// its program: on the monitor it works on (a window the program opened
+    /// for it, a «New window»), not where your mouse happens to be.
+    pub(super) fn agent_screen_for(&self, pid: u32) -> Option<usize> {
+        let agent = self.agent.as_ref()?;
+        let (root, screen) = agent.working?;
+        let recent = agent.last.is_some_and(|t| t.elapsed() < Duration::from_secs(20));
+        (recent && pid != 0 && in_family(pid, root)).then_some(screen)
+    }
+
+    /// The monitors, in the order `windows` numbers them.
+    fn agent_monitors(&self) -> String {
+        let mut out = String::from("monitors");
+        for (k, m) in layers::monitors().iter().enumerate() {
+            let sep = if k > 0 { " |" } else { "" };
+            let (w, h) = ((m.size.0 as f64 / m.scale).round(), (m.size.1 as f64 / m.scale).round());
+            out.push_str(&format!("{sep} {k} {} {} {w} {h} {}", m.x, m.y, m.name));
+        }
+        out
+    }
+
+    /// Where a cursor is on the desktop, in units.
+    fn agent_where(&self, idx: usize) -> String {
+        match self.agent.as_ref().and_then(|a| a.global.get(idx).copied().flatten()) {
+            Some((x, y)) => format!("at {x:.1} {y:.1}"),
+            None => "at none".to_owned(),
+        }
+    }
+
+    /// A window to another monitor, as the user asked («open it on the other one»).
+    fn agent_send(&mut self, pid: &str, monitor: usize) -> Result<(), &'static str> {
+        let slot = self.agent_pick(pid)?;
+        if monitor >= self.outputs.len() {
+            return Err("unknown-monitor");
+        }
+        self.agent_busy(slot);
+        self.handle(ToNest::Send(slot, monitor));
+        Ok(())
+    }
+
+    fn agent_activate(&mut self, pid: &str) -> Result<(), &'static str> {
+        let slot = self.agent_pick(pid)?;
         self.set_focus(Some(slot));
         // On another workspace, the scene goes there.
         self.tell(NestEvent::Reveal(slot));
@@ -385,7 +489,12 @@ impl State {
     /// The scene is told the agent is at work, on which window and monitor:
     /// it lights that monitor's edges and that window's outline while it is.
     fn agent_busy(&mut self, slot: usize) {
+        let pid = self.pid_of(slot);
+        let screen = self.slots.get(slot).and_then(Option::as_ref).map(|w| w.screen);
         let Some(agent) = self.agent.as_mut() else { return };
+        if let Some(screen) = screen {
+            agent.working = Some((pid, screen));
+        }
         agent.last = Some(Instant::now());
         agent.busy = agent.busy.wrapping_add(1);
         let busy = agent.busy;
@@ -443,6 +552,9 @@ impl State {
         let fact = |name: String, v: f64| {
             let _ = self.to_render.send(ToRender::Fact(pleamar::scene::intern(&name), v as f32));
         };
+        if let Some(a) = self.agent.as_mut() {
+            a.global[idx] = Some((root[0] + at.x * zoom, root[1] + at.y * zoom));
+        }
         fact(format!("agent.{idx}.x"), root[0] + at.x * zoom - m.0);
         fact(format!("agent.{idx}.y"), root[1] + at.y * zoom - m.1);
         fact(format!("agent.{idx}.screen"), monitor as f64);
@@ -468,8 +580,17 @@ impl State {
             if let Some(a) = self.agent.as_mut() {
                 a.raw_entered[idx] = None;
             }
-            pointer.motion(self, Some((surface, origin)), &MotionEvent { location: at, serial, time });
+            let entering = pointer.current_focus().as_ref() != Some(&surface);
+            pointer.motion(self, Some((surface.clone(), origin)), &MotionEvent { location: at, serial, time });
             pointer.frame(self);
+            // Entering a surface is said with `enter` alone; a program's menu
+            // lights the item under the pointer (and takes its press) on
+            // `motion`, which a hand always makes after entering: so it is
+            // made here too.
+            if entering {
+                pointer.motion(self, Some((surface, origin)), &MotionEvent { location: at, serial: SERIAL_COUNTER.next_serial(), time: time + 1 });
+                pointer.frame(self);
+            }
         } else {
             let local = at - origin;
             let pointers: Vec<wl_pointer::WlPointer> = self.pointer.client_pointers(&client).collect();
@@ -587,6 +708,12 @@ impl State {
     /// ASCII text, each character as the keys that make it: on a US
     /// keyboard, or on yours if it goes through yours.
     fn agent_type(&mut self, slot: usize, text: &[u8]) -> Result<(), &'static str> {
+        // Anything but ASCII (an accent, a ñ, an emoji): with a keymap made
+        // for the text, as wtype does.
+        if !text.is_ascii() {
+            let text = std::str::from_utf8(text).map_err(|_| "bad-utf8")?;
+            return self.agent_type_any(slot, text);
+        }
         let yours = self.agent_through_yours(slot);
         let table = if yours { Some(self.your_keymap(|k| char_table(k))) } else { None };
         let mut presses = Vec::with_capacity(text.len());
@@ -598,6 +725,30 @@ impl State {
             presses.push((if shift { vec![42] } else { vec![] }, code));
         }
         self.agent_press(slot, &presses)
+    }
+
+    /// Any text: a keymap with a key of its own for each character in it
+    /// (alone on the key, no modifier needed), handed to the program for
+    /// the while, and the usual one back after. In pieces of up to 200
+    /// different characters, which is what fits in a keymap.
+    fn agent_type_any(&mut self, slot: usize, text: &str) -> Result<(), &'static str> {
+        let chars: Vec<char> = text.chars().collect();
+        let mut at = 0;
+        while at < chars.len() {
+            let mut keys: Vec<char> = Vec::new();
+            let mut end = at;
+            while end < chars.len() && (keys.contains(&chars[end]) || keys.len() < 200) {
+                if !keys.contains(&chars[end]) {
+                    keys.push(chars[end]);
+                }
+                end += 1;
+            }
+            let keymap = text_keymap(&keys).ok_or("no-keymap")?;
+            let presses: Vec<(Vec<u32>, u32)> = chars[at..end].iter().map(|c| (Vec::new(), keys.iter().position(|k| k == c).unwrap_or(0) as u32 + 1)).collect();
+            self.agent_press_with(slot, &presses, Some(&keymap))?;
+            at = end;
+        }
+        Ok(())
     }
 
     /// Something read from your keyboard's layout.
@@ -621,6 +772,11 @@ impl State {
     }
 
     fn agent_press(&mut self, slot: usize, presses: &[(Vec<u32>, u32)]) -> Result<(), &'static str> {
+        self.agent_press_with(slot, presses, None)
+    }
+
+    /// Keys, with the agent's keymap or (`special`) one made for them.
+    fn agent_press_with(&mut self, slot: usize, presses: &[(Vec<u32>, u32)], special: Option<&str>) -> Result<(), &'static str> {
         self.agent_busy(slot);
         let w = self.slots[slot].as_ref().ok_or("gone")?;
         let root = w.surface.clone();
@@ -633,6 +789,9 @@ impl State {
             if keyboard.current_focus().as_ref() != Some(&root) {
                 keyboard.set_focus(self, Some(root.clone()), SERIAL_COUNTER.next_serial());
             }
+            if let Some(map) = special {
+                keyboard.set_keymap_from_string(self, map.to_owned()).map_err(|_| "bad-keymap")?;
+            }
             for (held, code) in presses {
                 for (code, down) in held.iter().map(|c| (*c, true)).chain(std::iter::once((*code, true))).chain(std::iter::once((*code, false))).chain(held.iter().rev().map(|c| (*c, false))) {
                     let state = if down { KeyState::Pressed } else { KeyState::Released };
@@ -640,11 +799,14 @@ impl State {
                     keyboard.input::<(), _>(self, (code + 8).into(), state, SERIAL_COUNTER.next_serial(), time, |_, _, _| FilterResult::Forward);
                 }
             }
+            if special.is_some() {
+                let _ = keyboard.set_keymap_from_string(self, us_keymap_string());
+            }
             return Ok(());
         }
         // If it is the window you are typing in, as if you typed it (the
         // characters were already looked up in your layout).
-        if mine {
+        if mine && special.is_none() {
             let keyboard = self.keyboard.clone();
             for (held, code) in presses {
                 for (code, down) in held.iter().map(|c| (*c, true)).chain(std::iter::once((*code, true))).chain(std::iter::once((*code, false))).chain(held.iter().rev().map(|c| (*c, false))) {
@@ -662,13 +824,16 @@ impl State {
             return Err("no-keyboard-resource");
         }
         let keymap = self.your_keymap(|k| k.get_as_string(xkb::KEYMAP_FORMAT_TEXT_V1));
-        let us_keymap = us_keymap_string();
+        let us_keymap = special.map_or_else(us_keymap_string, str::to_owned);
         let us = keymap_fd(&us_keymap).ok_or("no-keymap")?;
         let yours = keymap_fd(&keymap);
         let time = self.time();
         for k in &keyboards {
             k.keymap(wl_keyboard::KeymapFormat::XkbV1, us.0.as_fd(), us.1);
-            k.enter(SERIAL_COUNTER.next_serial().into(), &root, Vec::new());
+            // The window you are typing in already has its keyboard entered.
+            if !mine {
+                k.enter(SERIAL_COUNTER.next_serial().into(), &root, Vec::new());
+            }
             k.modifiers(SERIAL_COUNTER.next_serial().into(), 0, 0, 0, 0);
         }
         for (held, code) in presses {
@@ -685,7 +850,9 @@ impl State {
             }
         }
         for k in &keyboards {
-            k.leave(SERIAL_COUNTER.next_serial().into(), &root);
+            if !mine {
+                k.leave(SERIAL_COUNTER.next_serial().into(), &root);
+            }
             if let Some(y) = &yours {
                 k.keymap(wl_keyboard::KeymapFormat::XkbV1, y.0.as_fd(), y.1);
             }
@@ -852,6 +1019,32 @@ fn us_keymap_string() -> String {
     xkb::Keymap::new_from_names(&context, "", "", "us", "", None, xkb::KEYMAP_COMPILE_NO_FLAGS)
         .map(|k| k.get_as_string(xkb::KEYMAP_FORMAT_TEXT_V1))
         .unwrap_or_default()
+}
+
+/// A keymap with a key for each of these characters, alone on it: key
+/// number k (evdev k + 1) types the k-th. Checked by compiling it.
+fn text_keymap(chars: &[char]) -> Option<String> {
+    let mut codes = String::new();
+    let mut symbols = String::new();
+    for (k, c) in chars.iter().enumerate() {
+        let name = match c {
+            '\n' => "Return".to_owned(),
+            '\t' => "Tab".to_owned(),
+            ' ' => "space".to_owned(),
+            c => xkb::keysym_get_name(xkb::utf32_to_keysym(*c as u32)),
+        };
+        if name.is_empty() || name == "NoSymbol" {
+            return None;
+        }
+        codes.push_str(&format!("        <K{k}> = {};\n", k + 9));
+        symbols.push_str(&format!("        key <K{k}> {{ [ {name} ] }};\n"));
+    }
+    let text = format!(
+        "xkb_keymap {{\n    xkb_keycodes \"agent\" {{\n        minimum = 8;\n        maximum = 255;\n{codes}    }};\n    xkb_types \"agent\" {{ include \"complete\" }};\n    xkb_compatibility \"agent\" {{ include \"complete\" }};\n    xkb_symbols \"agent\" {{\n{symbols}    }};\n}};\n"
+    );
+    let context = xkb::Context::new(xkb::CONTEXT_NO_FLAGS);
+    xkb::Keymap::new_from_string(&context, text.clone(), xkb::KEYMAP_FORMAT_TEXT_V1, xkb::KEYMAP_COMPILE_NO_FLAGS)?;
+    Some(text)
 }
 
 /// A keymap in shared memory, as wl_keyboard.keymap hands it over.

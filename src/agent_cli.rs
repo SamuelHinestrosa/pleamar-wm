@@ -12,16 +12,21 @@ use std::os::unix::net::UnixStream;
 const HELP: &str = "pleamar-wm agent — use the desktop with the agent's own pointer and keyboard
 (needs `agent on` in ~/.config/pleamar/session.conf; your mouse and keyboard stay yours)
 
-  windows                         every window: process, box, seen, keyboard, program, title
+  windows                         every window: its name (its process, or PID.N for one of a
+                                  program's several windows), box, monitor, keyboard, program,
+                                  title, and «dialog of PID» for a dialog (a «Save as» is its own)
+  monitors                        the monitors, numbered as `windows` and `send` count them
   look [PID] [FILE]               a picture of that window (or of the whole desktop); prints the file
+                                  (a program with a dialog open: the dialog, which is where it listens)
   move PID X Y                    the agent's cursor to X, Y of the window's picture
   click PID X Y [left|right|middle] [COUNT]
   drag PID X1 Y1 X2 Y2            press at one point, glide to the other, let go
   scroll PID X Y up|down|left|right [STEPS]
-  type PID TEXT                   ASCII text, typed into the window without taking the keyboard
+  type PID TEXT                   text (accents, ñ, emoji too), typed into the window without taking the keyboard
   key PID NAME                    enter tab escape backspace space up down left right delete home end pageup pagedown f1…f12
   hotkey PID MODS+KEY             ctrl+l, ctrl+shift+t, alt+f4 …
   focus PID                       give that window your keyboard (and show its workspace)
+  send PID MONITOR                that window to another monitor (`monitors` numbers them)
   done                            finished: the light on the monitor goes out now (by itself it
                                   waits a minute and a half, in case the agent is thinking)
   stop                            the user's: the agent stops, and what it tries next is refused
@@ -58,6 +63,11 @@ impl Hands {
         if hello != "cua-inject v1" {
             return Err(format!("the socket answered «{hello}»"));
         }
+        // Who it is, for the cursor's label: `PLEAMAR_AGENT_NAME` (Marea
+        // says hers), «agent» otherwise. An older session does not know
+        // it: nothing is lost.
+        let name = std::env::var("PLEAMAR_AGENT_NAME").ok().filter(|n| !n.trim().is_empty()).unwrap_or_else(|| "agent".to_owned());
+        let _ = hands.say(&format!("n {}", hex(&name)));
         Ok(hands)
     }
 
@@ -66,6 +76,51 @@ impl Hands {
         let mut reply = String::new();
         self.reader.read_line(&mut reply).map_err(|e| e.to_string())?;
         Ok(reply.trim_end().to_owned())
+    }
+
+    /// The cursor to a point of that window, the way a hand takes it there:
+    /// along the way, eased, with the motions a pointer makes. It is seen
+    /// travelling (not jumping), and programs that only light what is under
+    /// the pointer when it moves over it (a browser's menu: it took no press
+    /// on an item it had not seen the pointer move over) see it move.
+    fn arrive(&mut self, pid: &str, x: f64, y: f64) -> Result<(), String> {
+        let numbers = |r: &str, head: &str| -> Option<Vec<f64>> { r.strip_prefix(head).map(|v| v.split_whitespace().filter_map(|n| n.parse().ok()).collect()) };
+        let from = self.say("p 0")?;
+        let rect = self.say(&format!("r {pid}"))?;
+        let (f, r) = (numbers(&from, "at ").filter(|f| f.len() >= 2), numbers(&rect, "rect ").filter(|r| r.len() >= 4));
+        // From where it is, if that is on this window; else from a little
+        // before the point, so there is a way to go.
+        let start = match (&f, &r) {
+            (Some(f), Some(r)) => {
+                let (sx, sy) = (f[0] - r[0], f[1] - r[1]);
+                (sx >= 0.0 && sy >= 0.0 && sx < r[2] && sy < r[3]).then_some((sx, sy))
+            }
+            _ => None,
+        };
+        let (w, h) = r.as_ref().map_or((f64::MAX, f64::MAX), |r| (r[2].max(1.0), r[3].max(1.0)));
+        let (sx, sy) = start.unwrap_or(((x - 70.0).clamp(0.0, w - 1.0), (y - 45.0).clamp(0.0, h - 1.0)));
+        let far = ((x - sx).powi(2) + (y - sy).powi(2)).sqrt();
+        if far < 2.0 {
+            return self.act(&format!("m root:{pid} 0 {x} {y}"));
+        }
+        let total = (220.0 + far * 0.45).clamp(260.0, 620.0);
+        let steps = ((far / 22.0).round() as u32).clamp(8, 24);
+        for k in 0..=steps {
+            let t = k as f64 / steps as f64;
+            let e = t * t * (3.0 - 2.0 * t);
+            let (px, py) = (sx + (x - sx) * e, sy + (y - sy) * e);
+            if k < steps {
+                // On the way it may cross where nothing of the window is
+                // (its shadow): those steps are only skipped.
+                let _ = self.say(&format!("m root:{pid} 0 {px:.1} {py:.1}"));
+                std::thread::sleep(std::time::Duration::from_millis((total / steps as f64) as u64));
+            } else {
+                self.act(&format!("m root:{pid} 0 {x} {y}"))?;
+            }
+        }
+        // A moment on the spot, as a hand stops before it presses.
+        std::thread::sleep(std::time::Duration::from_millis(70));
+        Ok(())
     }
 
     /// A command that has to be answered `ok`.
@@ -83,6 +138,9 @@ fn hex(s: &str) -> String {
 }
 
 fn unhex(s: &str) -> String {
+    if s == "-" {
+        return String::new();
+    }
     let bytes: Vec<u8> = (0..s.len() / 2).filter_map(|k| u8::from_str_radix(&s[2 * k..2 * k + 2], 16).ok()).collect();
     String::from_utf8_lossy(&bytes).into_owned()
 }
@@ -115,22 +173,58 @@ fn go(args: &[String]) -> Result<(), String> {
         println!("{HELP}");
         return Ok(());
     };
-    let pid = || args.get(1).filter(|p| p.parse::<u32>().is_ok()).cloned().ok_or("which window: its process number (pleamar-wm agent windows)".to_owned());
+    // A window: its process (`4521`), or one of a program's several windows (`4521.3`), as `windows` names it.
+    let pid = || {
+        args.get(1)
+            .filter(|p| match p.split_once('.') {
+                Some((a, b)) => a.parse::<u32>().is_ok() && b.parse::<u32>().is_ok(),
+                None => p.parse::<u32>().is_ok(),
+            })
+            .cloned()
+            .ok_or("which window: its number, as `pleamar-wm agent windows` names it".to_owned())
+    };
     let target = |pid: &str| format!("root:{pid}");
     match what.as_str() {
         "help" | "--help" | "-h" => println!("{HELP}"),
         "windows" => {
             let reply = Hands::open()?.say("l")?;
             let list = reply.strip_prefix("windows").ok_or(reply.clone())?;
+            let entries: Vec<Vec<&str>> = list.split('|').map(|e| e.split_whitespace().collect::<Vec<&str>>()).filter(|f| f.len() >= 9).collect();
+            for f in &entries {
+                // A program with several windows: each by its own name.
+                let several = entries.iter().filter(|e| e[0] == f[0]).count() > 1;
+                let name = match f.get(11) {
+                    Some(slot) if several => format!("{}.{slot}", f[0]),
+                    _ => f[0].to_owned(),
+                };
+                let seen = match f.get(9) {
+                    Some(m) if f[5] == "1" && *m != "-1" => format!("seen on monitor {m}"),
+                    _ if f[5] == "1" => "seen".to_owned(),
+                    _ => "hidden".to_owned(),
+                };
+                let keys = if f[6] == "1" { " · has the keyboard" } else { "" };
+                let dialog = match f.get(10) {
+                    Some(p) if *p != "0" => format!(" · dialog of {p}"),
+                    _ => String::new(),
+                };
+                println!("{name:>8}  {}  «{}»  {}x{} at {},{}  {seen}{keys}{dialog}", unhex(f[7]), unhex(f[8]), f[3], f[4], f[1], f[2]);
+            }
+        }
+        "monitors" => {
+            let reply = Hands::open()?.say("o")?;
+            let list = reply.strip_prefix("monitors").ok_or(reply.clone())?;
             for entry in list.split('|').map(str::trim).filter(|e| !e.is_empty()) {
                 let f: Vec<&str> = entry.split_whitespace().collect();
-                if f.len() < 9 {
+                if f.len() < 6 {
                     continue;
                 }
-                let seen = if f[5] == "1" { "seen" } else { "hidden" };
-                let keys = if f[6] == "1" { " · has the keyboard" } else { "" };
-                println!("{:>8}  {}  «{}»  {}x{} at {},{}  {seen}{keys}", f[0], unhex(f[7]), unhex(f[8]), f[3], f[4], f[1], f[2]);
+                println!("{}  {}  {}x{} at {},{}", f[0], f[5], f[3], f[4], f[1], f[2]);
             }
+        }
+        "send" => {
+            let p = pid()?;
+            let monitor = args.get(2).filter(|m| m.parse::<usize>().is_ok()).ok_or("which monitor: its number (pleamar-wm agent monitors)")?;
+            Hands::open()?.act(&format!("v {p} {monitor}"))?;
         }
         "look" => {
             let out = args.get(2).cloned().unwrap_or_else(|| {
@@ -142,7 +236,7 @@ fn go(args: &[String]) -> Result<(), String> {
                 return Err(format!("grim: {}", String::from_utf8_lossy(&shot.stderr).trim()));
             }
             let desktop = image::load_from_memory(&shot.stdout).map_err(|e| e.to_string())?.to_rgba8();
-            let picture = match args.get(1).filter(|p| p.parse::<u32>().is_ok()) {
+            let picture = match pid().ok() {
                 None => desktop,
                 Some(p) => {
                     let reply = Hands::open()?.say(&format!("r {p}"))?;
@@ -170,7 +264,7 @@ fn go(args: &[String]) -> Result<(), String> {
         }
         "move" => {
             let p = pid()?;
-            Hands::open()?.act(&format!("m {} 0 {} {}", target(&p), number(args.get(2), "x")?, number(args.get(3), "y")?))?;
+            Hands::open()?.arrive(&p, number(args.get(2), "x")?, number(args.get(3), "y")?)?;
         }
         "click" => {
             let p = pid()?;
@@ -178,9 +272,7 @@ fn go(args: &[String]) -> Result<(), String> {
             let b = button(args.get(4))?;
             let count = args.get(5).and_then(|c| c.parse::<u32>().ok()).unwrap_or(1).clamp(1, 3);
             let mut h = Hands::open()?;
-            h.act(&format!("m {} 0 {x} {y}", target(&p)))?;
-            // A moment for the cursor to be seen arriving.
-            std::thread::sleep(std::time::Duration::from_millis(120));
+            h.arrive(&p, x, y)?;
             for _ in 0..count {
                 h.act(&format!("b {} 0 {b} 1", target(&p)))?;
                 h.act(&format!("b {} 0 {b} 0", target(&p)))?;
@@ -190,7 +282,7 @@ fn go(args: &[String]) -> Result<(), String> {
             let p = pid()?;
             let (x1, y1, x2, y2) = (number(args.get(2), "x1")?, number(args.get(3), "y1")?, number(args.get(4), "x2")?, number(args.get(5), "y2")?);
             let mut h = Hands::open()?;
-            h.act(&format!("m {} 0 {x1} {y1}", target(&p)))?;
+            h.arrive(&p, x1, y1)?;
             h.act(&format!("b {} 0 272 1", target(&p)))?;
             for k in 1..=24 {
                 let t = k as f64 / 24.0;
@@ -211,7 +303,7 @@ fn go(args: &[String]) -> Result<(), String> {
             };
             let steps = args.get(5).and_then(|s| s.parse::<u32>().ok()).unwrap_or(3).clamp(1, 50);
             let mut h = Hands::open()?;
-            h.act(&format!("m {} 0 {x} {y}", target(&p)))?;
+            h.arrive(&p, x, y)?;
             for _ in 0..steps {
                 h.act(&format!("a {} 0 {axis} {value}", target(&p)))?;
                 std::thread::sleep(std::time::Duration::from_millis(60));
@@ -220,13 +312,12 @@ fn go(args: &[String]) -> Result<(), String> {
         "type" => {
             let p = pid()?;
             let text = args[2..].join(" ");
-            if !text.is_ascii() {
-                return Err("only ASCII can be typed for now (no accents or ñ)".into());
-            }
             let mut h = Hands::open()?;
-            // In pieces: one line of the protocol has its limits.
-            for chunk in text.as_bytes().chunks(1000) {
-                h.act(&format!("t {} {}", target(&p), hex(&String::from_utf8_lossy(chunk))))?;
+            // In pieces (one line of the protocol has its limits), whole
+            // characters each: any text, accents and all.
+            let chars: Vec<char> = text.chars().collect();
+            for chunk in chars.chunks(500) {
+                h.act(&format!("t {} {}", target(&p), hex(&chunk.iter().collect::<String>())))?;
             }
         }
         "key" => {

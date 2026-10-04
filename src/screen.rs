@@ -298,7 +298,8 @@ pub enum Hit {
 
 /// What is put together on a monitor, bottom to top: by level; within a
 /// level the scene's own surface, then its named ones in the order they were
-/// declared, then the programs' in the order they came.
+/// declared, then the programs' in the order they came (at the overlay
+/// level the scene's named ones go last, over the programs' menus).
 enum Item {
     Scene(usize),
     Client(usize),
@@ -311,7 +312,10 @@ fn stacked(st: &ScreenState) -> Vec<Item> {
         return st.clients.iter().enumerate().filter(|(_, c)| c.level >= 4).map(|(k, _)| Item::Client(k)).collect();
     }
     for (k, l) in st.layers.iter().enumerate() {
-        all.push(((level_rank(l.level), if l.main { 0 } else { 1 }, l.surface), Item::Scene(k)));
+        // A named surface of the scene at the overlay level goes over the
+        // programs' of that level too (their menus): the agent's cursors.
+        let over = !l.main && level_rank(l.level) == 3;
+        all.push(((level_rank(l.level), if l.main { 0 } else if over { 3 } else { 1 }, l.surface), Item::Scene(k)));
     }
     for (k, c) in st.clients.iter().enumerate() {
         if st.fullscreen && c.level == 2 {

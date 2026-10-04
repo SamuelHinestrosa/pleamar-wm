@@ -412,9 +412,18 @@ Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
   a light running round them and a pill that says so, and the window it
   works on gets an outline. The pill's «Stop» (or `pleamar-wm agent stop`)
   ends it, whoever the agent is: what it tries next is refused, and it hears
-  that you stopped it, until it says it is done. `tools/agent/demo.py` moves the cursors over a
+  that you stopped it, until it says it is done. Its cursor glides along the
+  way, with the motions a hand makes (a browser's menu lights the item under
+  it), on a surface over everything, the programs' menus too, labelled with
+  who it is (`PLEAMAR_AGENT_NAME`: Marea says hers). A program's window is
+  named by its process, or `PID.N` for one of its several; while it has a
+  dialog open (a «Save as», the portal's file chooser), looking at it and
+  acting on it reach the dialog, which opens on the monitor of the window it
+  belongs to —as does any dialog—, and so does a window the program opens
+  while the agent works with it. Any text is typed, accents and emoji too
+  (a keymap made for it, as wtype does). `tools/agent/demo.py` moves the cursors over a
   window. `pleamar-wm agent windows | look | click | type | key | hotkey |
-  scroll | drag | focus | done | stop` is the same from a shell, for an agent or a script:
+  scroll | drag | focus | monitors | send | done | stop` is the same from a shell, for an agent or a script:
   a window by its process, its coordinates those of `look`'s picture. Besides
   the protocol's commands, `l` lists the windows and `r PID` says the box the window
   is drawn in (what a picture of it is cut from): with it Cua Driver

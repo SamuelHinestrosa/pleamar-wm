@@ -872,6 +872,31 @@ impl State {
         self.slots.iter().position(|w| w.as_ref().is_some_and(|w| &w.surface == surface))
     }
 
+    /// The window a window belongs to (a dialog's): the one it says it is
+    /// for, of its own program or of another (a portal's file chooser, for
+    /// the browser that asked, through xdg-foreign).
+    pub(crate) fn parent_slot(&self, slot: usize) -> Option<usize> {
+        match &self.slots.get(slot)?.as_ref()?.toplevel {
+            Toplevel::Xdg(t) => t.parent().and_then(|p| self.window_of(&p)),
+            Toplevel::X11(x) => {
+                let parent = x.is_transient_for()?;
+                self.slots.iter().position(|w| matches!(w.as_ref().map(|w| &w.toplevel), Some(Toplevel::X11(t)) if t.window_id() == parent))
+            }
+        }
+        .filter(|p| *p != slot)
+    }
+
+    /// A dialog opens where the window it belongs to is, not where the
+    /// mouse happens to be: a «Save as» asked on one monitor came up on the
+    /// other, and was not found.
+    fn beside_parent(&mut self, slot: usize) {
+        let Some(parent) = self.parent_slot(slot) else { return };
+        let Some(screen) = self.slots[parent].as_ref().map(|w| w.screen) else { return };
+        if self.slots[slot].as_ref().is_some_and(|w| w.screen != screen) {
+            self.handle(ToNest::Send(slot, screen));
+        }
+    }
+
     fn handle(&mut self, m: ToNest) {
         if std::env::var_os("PLEAMAR_DEBUG_WINDOWS").is_some() && !matches!(m, ToNest::FrameDone) {
             eprintln!("windows · {m:?}");
@@ -2050,7 +2075,13 @@ impl State {
             }),
             Toplevel::X11(x) => (x.title(), x.class()),
         };
-        let screen = self.on_screen;
+        // Where you are; or, if it is a program the agent is working with
+        // that opened it, where the agent is.
+        let pid = match &toplevel {
+            Toplevel::X11(x) => x.pid().unwrap_or(0),
+            Toplevel::Xdg(_) => surface.client().and_then(|c| c.get_credentials(&self.dh).ok()).map_or(0, |c| c.pid as u32),
+        };
+        let screen = self.agent_screen_for(pid).filter(|s| *s < self.outputs.len()).unwrap_or(self.on_screen);
         // Its size, the one the scene already has for that slot; tiled on all
         // sides, so it does not draw a shadow or round corners of its own: the
         // scene decides how it looks.
@@ -2084,6 +2115,8 @@ impl State {
         for m in self.toplevel_managers.clone() {
             self.announce(&m, slot);
         }
+        // X11 says whose it is before it is shown (Wayland, later: `parent_changed`).
+        self.beside_parent(slot);
         self.set_focus(Some(slot));
     }
 
@@ -2901,6 +2934,12 @@ impl XdgShellHandler for State {
         let Some(slot) = self.window_of(surface.wl_surface()) else { return };
         let title = with_states(surface.wl_surface(), |s| s.data_map.get::<XdgToplevelSurfaceData>().and_then(|d| d.lock().unwrap().title.clone())).unwrap_or_default();
         self.set_title(slot, title);
+    }
+
+    fn parent_changed(&mut self, surface: ToplevelSurface) {
+        if let Some(slot) = self.window_of(surface.wl_surface()) {
+            self.beside_parent(slot);
+        }
     }
 
     fn app_id_changed(&mut self, surface: ToplevelSurface) {
