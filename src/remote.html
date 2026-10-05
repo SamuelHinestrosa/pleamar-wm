@@ -64,12 +64,15 @@
 (() => {
   if (document.getElementById('app').style.display === 'none' || getComputedStyle(document.getElementById('app')).display === 'none') return;
   const canvas = document.getElementById('screen');
-  const ctx = canvas.getContext('2d');
+  // Painted straight to the screen, not a frame later with the rest of the page.
+  const ctx = canvas.getContext('2d', { desynchronized: true, alpha: false });
   const keys = document.getElementById('keys');
   const statusEl = document.getElementById('status');
   const bar = document.getElementById('bar');
   const toastEl = document.getElementById('toast');
-  let rtt = 0, kbps = 0, rate = 0;
+  let rtt = 0, kbps = 0, rate = 0, net = 0;
+  // The network alone, there and back (without decoding or painting).
+  setInterval(() => send('ping ' + performance.now().toFixed(1)), 2000);
   let ws, monitors = [], current = 0, pending = 0, frames = 0, lastFps = performance.now(), queue = Promise.resolve();
 
   const toast = (t) => { toastEl.textContent = t; toastEl.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(() => toastEl.classList.remove('show'), 1800); };
@@ -117,6 +120,9 @@
       } else if (verb === 'size') {
         const [, w, h] = rest.map(Number);
         if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      } else if (verb === 'pong') {
+        const ms = performance.now() - Number(arg);
+        net = net ? Math.round(net * 0.7 + ms * 0.3) : Math.round(ms);
       } else if (verb === 'stats') {
         [rtt, kbps, rate] = rest.map(Number);
       } else if (verb === 'video') {
@@ -192,7 +198,7 @@
   setInterval(() => {
     const now = performance.now();
     const fps = Math.round(frames * 1000 / (now - lastFps));
-    const way = rtt ? ' · ' + rtt + ' ms · ' + (kbps / 1000).toFixed(1) + ' Mb/s' + (rate && rate < 60 ? ' · ' + rate + ' max' : '') : '';
+    const way = rtt ? ' · ' + (net ? 'net ' + net + ' · ' : '') + rtt + ' ms · ' + (kbps / 1000).toFixed(1) + ' Mb/s' + (rate && rate < 60 ? ' · ' + rate + ' max' : '') : '';
     if (ws && ws.readyState === 1) statusEl.textContent = (fps > 0 ? fps + ' fps' : 'still') + way;
     frames = 0; lastFps = now;
   }, 2000);

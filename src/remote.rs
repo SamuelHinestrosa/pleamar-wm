@@ -734,6 +734,9 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
                         }
                     }
                     ("got", [seq]) => flow.got(*seq as u32),
+                    ("ping", _) => {
+                        let _ = ws.send(Message::Text(format!("pong {rest}").into()));
+                    }
                     ("ack", _) => {
                         waiting = false;
                         if pending.is_none() {
