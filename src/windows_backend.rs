@@ -13,6 +13,15 @@ mod ipc;
 #[path = "windows_session.rs"]
 mod session;
 
+#[path = "windows_capture.rs"]
+mod capture;
+
+#[path = "windows_wait.rs"]
+mod wait;
+
+#[path = "windows_preview.rs"]
+mod preview;
+
 const HELP: &str = "pleamar-wm — experimental native Windows desktop companion
 
   capabilities                     machine-readable support status
@@ -29,6 +38,8 @@ const HELP: &str = "pleamar-wm — experimental native Windows desktop companion
   restore-layout FILE              restore those positions without taking focus
   window ID minimize|restore        act on one window from the current catalog
   --scene FILE [OPTIONS]            a native pleamar scene, including Luau and live reload
+          --preview-monitor NAME   view-only live native windows in the scene (experimental)
+          --preview-process PID    restrict those pictures to one current process
 
 Layouts: left, right, columns, rows, grid. MONITOR is a display name or number
 from `monitors`. IDs come from `windows`. Coordinates are physical pixels.
@@ -274,7 +285,8 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
         ["--version"] => Ok(Some(json!({"version": env!("CARGO_PKG_VERSION"), "platform": "windows", "experimental": true}))),
         ["capabilities"] => Ok(Some(json!({"platform": "windows", "experimental": true,
             "monitors": true, "windows": true, "explicit_layouts": true, "minimize_restore": true,
-            "native_scenes_luau": true, "window_scene_provider": false, "automatic_session": true, "rain": false, "snow": false,
+            "native_scenes_luau": true, "read_only_window_previews": true,
+            "window_scene_provider": false, "automatic_session": true, "rain": false, "snow": false,
             "ride": false, "dock": false, "pools": false, "remote": false, "independent_agent_seat": false}))),
         ["monitors"] => Ok(Some(serde_json::to_value(monitors()?)?)),
         ["windows"] => Ok(Some(serde_json::to_value(windows()?)?)),
@@ -303,8 +315,10 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
             } else { println!("Invalid"); }
             Ok(None)
         }
-        ["--scene" | "--check" | "--grammar" | "--docs", ..] => {
-            pleamar::run_with(args.iter().map(|a| (*a).to_owned()).collect()); Ok(None)
+        ["--scene" | "--check" | "--grammar" | "--docs" | "--say", ..] => {
+            let args=args.iter().map(|a| (*a).to_owned()).collect::<Vec<_>>();
+            let args=if args.first().is_some_and(|v|v=="--scene") { preview::prepare(&args)? } else { args };
+            pleamar::run_with(args); Ok(None)
         }
         _ => Err(format!("unsupported Windows command: {}\nUse `pleamar-wm capabilities` or `--help`.", args.join(" ")).into()),
     }
@@ -343,3 +357,11 @@ mod tests;
 #[cfg(test)]
 #[path = "windows_session_tests.rs"]
 mod session_tests;
+
+#[cfg(test)]
+#[path = "windows_capture_tests.rs"]
+mod capture_tests;
+
+#[cfg(test)]
+#[path = "windows_preview_tests.rs"]
+mod preview_tests;

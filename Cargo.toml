@@ -52,4 +52,8 @@ windows = { version = "0.62", features = [
     "Win32_System_IO", "Win32_System_Pipes", "Win32_Storage_FileSystem",
     "Win32_Security", "Win32_Security_Authorization", "Win32_System_RemoteDesktop",
     "Win32_UI_Accessibility",
+    "Foundation", "Graphics_Capture", "Graphics_DirectX_Direct3D11",
+    "Win32_Graphics_Direct3D11", "Win32_Graphics_Dxgi_Common",
+    "Win32_System_WinRT", "Win32_System_WinRT_Direct3D11",
+    "Win32_System_WinRT_Graphics_Capture",
 ] }

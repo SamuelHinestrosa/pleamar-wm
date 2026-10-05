@@ -10,7 +10,7 @@ compose applications. No WSL, Wayland server or Unix shell is required.
 Install the stable Rust x64 MSVC toolchain and Visual Studio Build Tools with
 Desktop development with C++ and the Windows SDK. Keep this checkout next to
 the matching `pleamar` Windows port (`../pleamar`). The current CI pins pleamar
-commit `7c0edebd8e1c97c6c590f463ea58454e189ce55d` from the Windows PR; upstream
+commit `953b4401d43918c2b15d710fe4f17b8b1bfaff94` from the Windows PR; upstream
 pleamar alone does not yet include that backend.
 
 ```powershell
@@ -24,7 +24,8 @@ cargo test --release --locked
 Luau stays enabled through the default pleamar dependency. `--scene FILE`
 starts a native pleamar scene with its normal hot reload. Ship the same
 verified graphics runtime DLLs as pleamar when distributing this executable.
-There is no Windows installer or automatic startup for this companion yet.
+The matching Marea preview installer packages the companion and supervises its
+lifetime. This checkout's Cargo build does not install it or enable startup.
 
 ## Explicit window layouts
 
@@ -110,6 +111,37 @@ hidden. Its package includes both executables and starts a free session tied
 to Marea's process. The owner-exit cleanup works even after the PowerShell
 supervisor exits. Building this WM checkout alone does not install it.
 
+## Live window previews
+
+```powershell
+./target/release/pleamar-wm.exe --scene examples/windows-preview.plm --preview-monitor '\\.\DISPLAY2'
+# Capture only one current process on that display:
+./target/release/pleamar-wm.exe --scene examples/windows-preview.plm --preview-monitor '\\.\DISPLAY2' --preview-process 1234
+```
+
+Choose the source monitor explicitly. `--screen NAME` additionally chooses the
+scene's output; it is independent of the source monitor. The source windows
+populate the scene's first output. Multiple output layouts remain unfinished.
+These are actual Windows Graphics Capture pictures with a shared D3D11 device,
+rendered by pleamar through D3D12. Titles, counts, closing, resizing and scene
+reload use the normal `windows` scene API. `--preview-process` retains the
+current process creation identity; a reused PID does not expand its scope.
+
+This mode is **view-only**. Use the original application for input; configuration,
+launch, focus and other scene window actions report that they are unavailable.
+It does not replace the native layout session or enable Marea's pending effects.
+Capture can be denied by an application or unavailable on a Windows installation;
+errors are reported and no synthetic picture is substituted.
+
+The initial transport uses CPU readback, capped at 30 updates per window per second.
+A render acknowledgement bounds queued batches; capture dimensions are bounded
+to 8192 per edge and 16 megapixels in aggregate, with at most 64 slots. The GPU
+device and readback textures are reused. Capture callbacks and native waitable
+timers wake the preview worker; it does not change the system timer period.
+This is not a zero-copy path or a claim
+of sustained desktop performance; GPU resource sharing and further profiling
+remain work for the full port.
+
 ## Status and remaining parity work
 
 | Area | Windows status |
@@ -119,6 +151,7 @@ supervisor exits. Building this WM checkout alone does not install it.
 | Pleamar scenes, Luau and hot reload | Native D3D12 scene, Luau callbacks and saved logic/scene reloads verified on DISPLAY2 |
 | Automatic per-monitor session | Native creation/closure, minimize, failure rollback, shutdown and crash recovery verified on DISPLAY2 |
 | Window rules and live scene layouts | Pending |
+| Live window previews | Experimental native capture/render transport; view-only, explicit source monitor |
 | Marea menu/finder bridge | Module tested with real Luau, IPC and owned Windows windows; complete Marea UI acceptance pending; package lifecycle tested separately |
 | Rain, snow, ride, dock, animated window transitions | Pending native equivalents |
 | Per-monitor tide pools and overview | Pending; Windows virtual desktops are not the same model |
@@ -145,11 +178,14 @@ cargo test --release --locked native_layouts_and_restore_on_secondary_monitor --
 $env:PLEAMAR_WM_TEST_BINARY = (Resolve-Path ./target/release/pleamar-wm.exe).Path
 $env:PLEAMAR_WM_TEST_HOST = (Resolve-Path ./target/release/pleamar-wm-host.exe).Path
 cargo test --release --locked native_session_lifecycle -- --ignored --nocapture --test-threads=1
+cargo test --release --locked native_persistent_window_capture -- --ignored --nocapture --test-threads=1
+cargo test --release --locked native_window_preview_repaints -- --ignored --nocapture --test-threads=1
 ```
 
-The CI workflow is prepared to build the Windows and Linux targets and run
-ordinary unit tests; it has not been executed for this new companion yet. The
-interactive test stays ignored in CI. Neither compilation nor the geometry
+[Windows and Ubuntu CI](https://github.com/SamuelHinestrosa/pleamar-wm/actions/runs/37320045829)
+passed at `8957a590b6627429bde74f1f3a927faeab207a9e`, including default Luau,
+ordinary unit tests and the Windows background host. The interactive test
+stays ignored in CI. Neither compilation nor the geometry
 test proves completed visual effects, interaction parity or a complete WM port.
 
 On 2026-10-05, the release build with default Luau support succeeded on Windows
@@ -173,4 +209,14 @@ private commit / 8.95 MiB working set. CPU time did not increase
 at the Windows counter's resolution. This short sample covers only the WM
 daemon, not Marea, GPU rendering or sustained desktop use; working set includes
 shared pages.
-Linux execution and the new WM CI remain pending.
+The capture test verifies real pixels from two owned windows, static updates
+after a consumer pause, resizing, budget rejection, closure and three capture
+device/apartment reopenings. The preview regression starts an actual D3D12
+scene with a view-only window image. Changing only the source's pixels must
+repaint that image, and closing the source must remove it. Both tests run only
+on an explicit non-primary display, send no input, and check foreground focus.
+Separate local captures also verified Luau callbacks and scene reload with two
+live source windows. These checks do not prove interactive window composition.
+
+The CI link above covers the published session backend. Local Windows preview
+work requires a new CI run before its Linux/Windows build status is established.
