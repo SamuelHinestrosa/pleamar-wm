@@ -9,6 +9,7 @@ mod agent_cli;
 mod remote;
 #[cfg(target_os = "linux")]
 mod remote_rtc;
+mod window_rules;
 #[cfg(target_os = "linux")]
 mod config;
 #[cfg(target_os = "linux")]

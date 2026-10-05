@@ -2,6 +2,10 @@
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
 #[cfg(windows)]
+#[path = "../window_rules.rs"]
+mod window_rules;
+
+#[cfg(windows)]
 #[path = "../layout.rs"]
 mod layout;
 #[cfg(windows)]

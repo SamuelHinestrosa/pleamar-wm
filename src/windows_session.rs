@@ -18,7 +18,7 @@ struct Hooks(Vec<HWINEVENTHOOK>);
 impl Hooks {
     fn new(process: u32) -> Result<Self> {
         let mut hooks = Self(Vec::new());
-        for (first, last) in [(EVENT_OBJECT_CREATE, EVENT_OBJECT_LOCATIONCHANGE),
+        for (first, last) in [(EVENT_OBJECT_CREATE, EVENT_OBJECT_NAMECHANGE),
             (EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZEEND), (EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND)] {
             let hook = unsafe { SetWinEventHook(first, last, None, Some(changed), process, 0,
                 WINEVENT_OUTOFCONTEXT | WINEVENT_SKIPOWNPROCESS) };
@@ -31,7 +31,12 @@ impl Hooks {
 impl Drop for Hooks { fn drop(&mut self) { for hook in self.0.drain(..) { let _ = unsafe { UnhookWinEvent(hook) }; } } }
 
 #[derive(Clone, Serialize, Deserialize)]
-struct Original { id: String, monitor: String, bounds: Bounds, normal: [i32; 4] }
+struct Original {
+    id: String, monitor: String, bounds: Bounds, normal: [i32; 4],
+    // Only an unfinished rule transaction may restore across displays.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pending_monitor: Option<String>,
+}
 #[derive(Serialize, Deserialize)]
 struct Recovery { version: u32, windows: Vec<Original> }
 
@@ -47,7 +52,7 @@ impl Journal {
             let file = std::fs::File::open(&path)?;
             if file.metadata()?.len() > 65536 { return Err("WM recovery journal is too large".into()); }
             let saved: Recovery = serde_json::from_reader(file)?;
-            if saved.version != 1 || saved.windows.len() > 64 { return Err("unknown WM recovery journal".into()); }
+            if !matches!(saved.version,1|2) || saved.windows.len() > 64 { return Err("unknown WM recovery journal".into()); }
             for item in saved.windows {
                 if item.bounds.width <= 0 || item.bounds.height <= 0 || windows.insert(item.id.clone(), item).is_some() {
                     return Err("invalid WM recovery journal".into());
@@ -61,7 +66,7 @@ impl Journal {
         let temporary = self.path.with_extension(format!("{}.pending", std::process::id()));
         let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&temporary)?;
         let result = (|| -> Result<()> {
-            let bytes = serde_json::to_vec(&Recovery { version:1, windows:windows.values().cloned().collect() })?;
+            let bytes = serde_json::to_vec(&Recovery { version:2, windows:windows.values().cloned().collect() })?;
             if bytes.len() > 65536 { return Err("WM recovery journal exceeds its limit".into()); }
             file.write_all(&bytes)?;
             file.sync_all()?;
@@ -87,7 +92,7 @@ fn placement(hwnd: HWND) -> Result<WINDOWPLACEMENT> {
 fn rect_array(rect: RECT) -> [i32; 4] { [rect.left, rect.top, rect.right, rect.bottom] }
 fn original(id: &str) -> Result<Original> {
     let (hwnd, w) = target(id)?;
-    Ok(Original { id:id.into(), monitor:w.monitor, bounds:w.bounds, normal:rect_array(placement(hwnd)?.rcNormalPosition) })
+    Ok(Original { id:id.into(), monitor:w.monitor, bounds:w.bounds, normal:rect_array(placement(hwnd)?.rcNormalPosition), pending_monitor:None })
 }
 
 fn restore(old: &Original, screens: &[Monitor]) -> Result<bool> {
@@ -98,7 +103,7 @@ fn restore(old: &Original, screens: &[Monitor]) -> Result<bool> {
     let Some(screen) = screens.iter().find(|m| m.name == old.monitor) else { return Ok(false); };
     let Ok((hwnd, current)) = target(&old.id) else { return Ok(false); };
     // A move to another still-connected monitor is the user's new free position.
-    if current.monitor != old.monitor { return Ok(true); }
+    if current.monitor != old.monitor && old.pending_monitor.as_deref() != Some(&current.monitor) { return Ok(true); }
     if !screen.bounds.contains(&old.bounds) { return Ok(false); }
     if !current.minimized && !current.maximized { place(&old.id, &old.bounds)?; return Ok(true); }
     let mut p = placement(hwnd)?;
@@ -120,6 +125,7 @@ fn restore(old: &Original, screens: &[Monitor]) -> Result<bool> {
 struct Manager {
     modes: BTreeMap<String, Mode>, originals:BTreeMap<String, Original>, journal:Journal,
     process:Option<u32>, owner:Option<u32>, creation:Option<u64>, all:bool, scans:u64, changes:u64,
+    rules:rules::Rules,
 }
 impl Manager {
     fn owns(&self, window: &Window) -> bool {
@@ -131,8 +137,9 @@ impl Manager {
         let modes: BTreeMap<_, _> = screens.iter().filter(|m| options.all || options.monitors.contains(&m.name))
             .map(|m| (m.name.clone(), Mode::default())).collect();
         if !options.all && modes.len() != options.monitors.len() { return Err("a requested monitor is not connected".into()); }
+        let rules = rules::Rules::read(options.rules.clone(),options.explicit_rules)?;
         let (journal, originals) = Journal::open(options.state.clone())?;
-        let mut manager = Self { modes, originals, journal, process:options.process, owner:options.owner, creation:None, all:options.all, scans:0, changes:0 };
+        let mut manager = Self { modes, originals, journal, process:options.process, owner:options.owner, creation:None, all:options.all, scans:0, changes:0, rules };
         if let Some(pid) = options.process {
             // Store a creation stamp as well: a recycled PID must not widen a fixture's scope.
             manager.creation = windows()?.iter().find(|w| w.process == pid)
@@ -150,6 +157,7 @@ impl Manager {
         for id in ids {
             let old = &self.originals[&id];
             if !self.modes.contains_key(&old.monitor) { continue; }
+            if old.pending_monitor.as_ref().is_some_and(|m|!self.modes.contains_key(m)) { continue; }
             if let Ok((_, w)) = target(&id) { if !self.owns(&w) { continue; } }
             match restore(old, &screens) {
                 Ok(true) => { self.originals.remove(&id); }
@@ -166,6 +174,9 @@ impl Manager {
             "pools":false,"process":self.process,"owner":self.owner,"saved_windows":self.originals.len(),
             "pending_recovery":self.originals.values().filter(|w|self.modes.get(&w.monitor).is_none_or(|m|!m.tiled)).count(),
             "catalog_scans":self.scans,"geometry_changes":self.changes,
+            "rules_file":self.rules.path,"window_rules":self.rules.entries.len(),
+            "ruled_windows":self.rules.applied.len(),"rule_errors":self.rules.errors,
+            "rule_limit_reached":self.rules.applied.len()+self.rules.errors.len()>=256,
             "monitors":self.modes.iter().map(|(name,m)| json!({"name":name,"tiled":m.tiled,
                 "layout":format!("{:?}",m.layout).to_lowercase(),"windows":m.order.len(),"error":m.error})).collect::<Vec<_>>()})
     }
@@ -182,18 +193,20 @@ impl Manager {
     fn reconcile(&mut self) -> Result<()> {
         let screens = monitors()?;
         if self.all { for screen in &screens { self.modes.entry(screen.name.clone()).or_default(); } }
-        if self.originals.is_empty() && self.modes.values().all(|m| !m.tiled) { return Ok(()); }
+        if self.rules.entries.is_empty() && self.originals.is_empty() && self.modes.values().all(|m| !m.tiled) { return Ok(()); }
         self.scans += 1;
-        let live: Vec<_> = windows()?.into_iter().filter(|w| self.owns(w)).collect();
+        let mut live: Vec<_> = windows()?.into_iter().filter(|w| self.owns(w)).collect();
         // Forget only destroyed identities or deliberate moves; hidden/minimized
         // windows retain their recovery position until they return or we exit.
         let previous = self.originals.len();
         self.originals.retain(|id, old| {
             let handle = id.split(':').nth(2).and_then(|s| usize::from_str_radix(s,16).ok()).unwrap_or(0);
             Identity::read(HWND(handle as _)).is_some_and(|i| i.token() == *id)
-                && !live.iter().any(|w| w.id == *id && w.monitor != old.monitor && screens.iter().any(|m| m.name == old.monitor))
+                && !live.iter().any(|w| w.id == *id && w.monitor != old.monitor
+                    && old.pending_monitor.as_deref() != Some(&w.monitor) && screens.iter().any(|m| m.name == old.monitor))
         });
         if self.originals.len() != previous { self.journal.save(&self.originals)?; }
+        self.apply_rules(&mut live,&screens)?;
         let names:Vec<_> = self.modes.keys().cloned().collect();
         for name in names {
             if !self.modes[&name].tiled {
@@ -201,7 +214,8 @@ impl Manager {
                 continue;
             }
             let Some(screen) = screens.iter().find(|m| m.name == name) else { continue; };
-            let eligible:Vec<_> = live.iter().filter(|w| w.monitor == name && !w.minimized && !w.maximized && w.resizable).collect();
+            let eligible:Vec<_> = live.iter().filter(|w| w.monitor == name && !w.minimized && !w.maximized && w.resizable
+                && !self.rules.floats(&w.id) && !self.rules.errors.contains_key(&w.id)).collect();
             let mode = self.modes.get_mut(&name).unwrap();
             mode.order.retain(|id| eligible.iter().any(|w| w.id == *id));
             let mut added:Vec<_> = eligible.iter().filter(|w| !mode.order.contains(&w.id)).map(|w|w.id.clone()).collect();
@@ -233,6 +247,73 @@ impl Manager {
                 self.modes.get_mut(&name).unwrap().tiled = false;
                 let recovery = self.release(Some(&name)).err().map(|e|format!("; restore: {e}")).unwrap_or_default();
                 self.modes.get_mut(&name).unwrap().error = Some(format!("{error}{recovery}"));
+            }
+        }
+        Ok(())
+    }
+    fn apply_rules(&mut self, live:&mut [Window], screens:&[Monitor]) -> Result<()> {
+        if self.rules.entries.is_empty() { return Ok(()); }
+        self.rules.forget_closed();
+        for window in live {
+            if !self.modes.contains_key(&window.monitor) || self.rules.applied.contains_key(&window.id)
+                || self.rules.errors.contains_key(&window.id) || self.rules.applied.len()+self.rules.errors.len()>=256 { continue; }
+            let rule = self.rules.for_window(window);
+            if rule == crate::window_rules::ForWindow::default() { continue; }
+            // Wait for a normal state instead of restoring or unmaximizing an application.
+            if (rule.size.is_some() || rule.monitor.is_some() || self.originals.contains_key(&window.id))
+                && (window.minimized || window.maximized) { continue; }
+            let result = (|| -> Result<()> {
+                let destination = rules::destination(&rule,window,screens)?;
+                if !self.modes.contains_key(&destination.name) { return Err("rule destination is outside this WM session".into()); }
+                let geometry = rule.size.is_some() || rule.monitor.is_some();
+                if geometry || self.originals.contains_key(&window.id) {
+                    normal(window)?;
+                    if !self.originals.contains_key(&window.id) {
+                        if self.originals.len()>=64 { return Err("WM recovery supports at most 64 windows".into()); }
+                        let mut old = original(&window.id)?;
+                        let source = screens.iter().find(|m|m.name==old.monitor).ok_or("source display disconnected")?;
+                        if !source.bounds.contains(&old.bounds) { return Err("bring ruled windows wholly onto their monitor first".into()); }
+                        old.pending_monitor = Some(destination.name.clone());
+                        self.originals.insert(window.id.clone(),old);
+                    } else {
+                        self.originals.get_mut(&window.id).unwrap().pending_monitor = Some(destination.name.clone());
+                    }
+                    self.journal.save(&self.originals)?;
+                    // A late title may match after tiling: derive the rule from its
+                    // saved free position, never from the temporary layout rectangle.
+                    let old = &self.originals[&window.id];
+                    if !restore(old,screens)? { return Err("rule is waiting for its original window position".into()); }
+                    *window = target(&window.id)?.1;
+                    if geometry {
+                        let bounds = rules::bounds(&rule,window,destination)?;
+                        if window.bounds != bounds { place(&window.id,&bounds)?; self.changes+=1; }
+                        *window = target(&window.id)?.1;
+                    }
+                    // An initial rule defines the new free position. Future tiling
+                    // saves that position; shutdown does not undo the user's rule.
+                    let old = self.originals.remove(&window.id).unwrap();
+                    if let Err(error) = self.journal.save(&self.originals) {
+                        self.originals.insert(window.id.clone(),old);
+                        return Err(error);
+                    }
+                }
+                Ok(())
+            })();
+            match result {
+                Ok(()) => { self.rules.applied.insert(window.id.clone(),rule.float); }
+                Err(error) => {
+                    let mut error = error.to_string();
+                    if let Some(old) = self.originals.get(&window.id) {
+                        match restore(old,screens) {
+                            Ok(true) => { self.originals.remove(&window.id); self.journal.save(&self.originals)?; }
+                            Ok(false) => error.push_str("; rollback pending"),
+                            Err(e) => error.push_str(&format!("; rollback: {e}")),
+                        }
+                    }
+                    if let Ok((_,current)) = target(&window.id) { *window = current; }
+                    eprintln!("window rule · {}: {error}",window.id);
+                    self.rules.errors.insert(window.id.clone(),error);
+                }
             }
         }
         Ok(())
@@ -284,11 +365,15 @@ impl Owner {
     }
 }
 
-struct Options { monitors:BTreeSet<String>, all:bool, process:Option<u32>, owner:Option<u32>, state:PathBuf, namespace:String, seconds:Option<u64> }
+struct Options { monitors:BTreeSet<String>, all:bool, process:Option<u32>, owner:Option<u32>, state:PathBuf, namespace:String, seconds:Option<u64>,
+    rules:PathBuf, explicit_rules:bool }
 impl Options {
     fn parse(args:&[String]) -> Result<Self> {
+        let config = pleamar::config_dir().ok_or("Windows configuration directory unavailable")?;
+        let rule_override = std::env::var_os("PLEAMAR_WM_CONFIG").filter(|s|!s.is_empty());
         let mut options = Self { monitors:BTreeSet::new(), all:false, process:None, owner:None,
-            state:pleamar::config_dir().ok_or("Windows configuration directory unavailable")?.join("wm/windows-session.json"),
+            state:config.join("wm/windows-session.json"),
+            rules:rule_override.clone().map(PathBuf::from).unwrap_or_else(||config.join("session.conf")), explicit_rules:rule_override.is_some(),
             namespace:std::env::var("PLEAMAR_WM_NAMESPACE").unwrap_or_default(), seconds:None };
         let mut explicit_state = false;
         let mut it = args.iter();
@@ -299,6 +384,7 @@ impl Options {
                 "--process" => options.process = Some(value.parse()?),
                 "--owner" => options.owner = Some(value.parse()?),
                 "--state" => { options.state = std::path::absolute(value)?; explicit_state = true; },
+                "--rules" => { options.rules = std::path::absolute(value)?; options.explicit_rules = true; },
                 "--namespace" => options.namespace = value.clone(),
                 "--seconds" => { let seconds = value.parse()?; if !(1..=86400).contains(&seconds) { return Err("invalid session duration".into()); } options.seconds=Some(seconds); },
                 _ => return Err(format!("unknown session option: {key}").into()),
@@ -323,7 +409,7 @@ pub(super) fn run(args:&[String]) -> Result<Value> {
     let mut manager = Manager::open(&options)?;
     let _hooks = Hooks::new(options.process.unwrap_or(0))?;
     let started = Instant::now();
-    let mut dirty_since = None;
+    let mut dirty_since = (!manager.rules.entries.is_empty()).then(Instant::now);
     let mut last_topology = Instant::now();
     let mut topology = serde_json::to_string(&monitors()?)?;
     let mut handles = vec![server.wake.handle()];

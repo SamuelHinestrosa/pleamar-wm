@@ -111,6 +111,51 @@ hidden. Its package includes both executables and starts a free session tied
 to Marea's process. The owner-exit cleanup works even after the PowerShell
 supervisor exits. Building this WM checkout alone does not install it.
 
+## Window rules
+
+The native session reads the `window` lines in pleamar's `session.conf` at
+startup (`%APPDATA%/pleamar/session.conf`, or under `PLEAMAR_CONFIG`). Set
+`PLEAMAR_WM_CONFIG` or pass `session --rules 'C:/my config/session.conf'`
+to choose another UTF-8 file. A missing default file means no rules; a missing
+explicit file, invalid window rule, `private` or `workspace` fails startup.
+Other Linux session directives are not interpreted by this Windows adapter.
+
+```text
+window app=Spotify.exe float size 900x650
+window app=firefox.exe title="*Picture-in-Picture*" float
+window app=notepad.exe monitor \\.\DISPLAY2
+```
+
+`app=` matches the executable filename, including `.exe`, reported by `windows`.
+This distinguishes applications that share a native window class. If Windows
+denies the executable query, `app` is empty; no class or fake name is substituted.
+Selectors are case-insensitive, accept `*`, and combine app/title with AND.
+Matching lines merge in order; later sizes/monitors override earlier ones.
+Quotes preserve spaces and `#` in titles. Backslashes are literal.
+
+Rules apply once per window after a nonempty action matches, including titles
+that arrive later. `float` excludes it from automatic layouts. `size` sets the
+outer window rectangle in logical pixels, scaled at the destination display;
+this includes the native frame, unlike a Linux client's content size. A monitor
+can be its name or zero-based left-to-right index. Transfers are centered in
+the destination work area. Oversize, rejected or out-of-session destinations
+are reported in `status.rule_errors`; they do not silently redirect elsewhere.
+Both source and destination must belong to the explicitly managed displays,
+and the process restriction still applies. Geometry waits for normal windows;
+it does not unminimize or unmaximize applications.
+
+An initial rule defines its new free position. Tiling and returning to free
+mode preserve that position, and quitting does not undo a successful initial
+rule. A late floating match restores its previous free bounds first. Changes
+are journaled before movement; failed transactions roll back, and interrupted
+ones recover at next startup. The version-2 journal also reads version 1;
+older companions reject version 2 rather than misinterpreting a transfer.
+Errors are retained for that window until it closes or the session restarts;
+fix the rule and restart to retry. Restart to reread the file. At most 256
+matched/error identities are retained, with the existing 64-window recovery
+bound. An unchanged desktop is not continually scanned; with no rules, free
+mode still avoids catalog scans entirely.
+
 ## Live window previews
 
 ```powershell
@@ -150,7 +195,8 @@ remain work for the full port.
 | Explicit five-layout arrangement, undo, minimize/restore | Passed native tests with three owned windows on DISPLAY2; broad application acceptance pending |
 | Pleamar scenes, Luau and hot reload | Native D3D12 scene, Luau callbacks and saved logic/scene reloads verified on DISPLAY2 |
 | Automatic per-monitor session | Native creation/closure, minimize, failure rollback, shutdown and crash recovery verified on DISPLAY2 |
-| Window rules and live scene layouts | Pending |
+| Window rules | Native app/title, float, initial size and monitor rules; DISPLAY2 lifecycle tests passed; transfers between physical displays still need acceptance |
+| Live scene layouts; private/workspace rules | Pending |
 | Live window previews | Experimental native capture/render transport; view-only, explicit source monitor |
 | Marea menu/finder bridge | Module tested with real Luau, IPC and owned Windows windows; complete Marea UI acceptance pending; package lifecycle tested separately |
 | Rain, snow, ride, dock, animated window transitions | Pending native equivalents |
@@ -178,12 +224,13 @@ cargo test --release --locked native_layouts_and_restore_on_secondary_monitor --
 $env:PLEAMAR_WM_TEST_BINARY = (Resolve-Path ./target/release/pleamar-wm.exe).Path
 $env:PLEAMAR_WM_TEST_HOST = (Resolve-Path ./target/release/pleamar-wm-host.exe).Path
 cargo test --release --locked native_session_lifecycle -- --ignored --nocapture --test-threads=1
+cargo test --release --locked native_window_rules -- --ignored --nocapture --test-threads=1
 cargo test --release --locked native_persistent_window_capture -- --ignored --nocapture --test-threads=1
 cargo test --release --locked native_window_preview_repaints -- --ignored --nocapture --test-threads=1
 ```
 
-[Windows and Ubuntu CI](https://github.com/SamuelHinestrosa/pleamar-wm/actions/runs/37320045829)
-passed at `8957a590b6627429bde74f1f3a927faeab207a9e`, including default Luau,
+[Windows and Ubuntu CI](https://github.com/SamuelHinestrosa/pleamar-wm/actions/runs/37332411188)
+passed at `205f3508730e907f4faa58c37980859f6554ad46`, including default Luau,
 ordinary unit tests and the Windows background host. The interactive test
 stays ignored in CI. Neither compilation nor the geometry
 test proves completed visual effects, interaction parity or a complete WM port.
@@ -218,5 +265,15 @@ on an explicit non-primary display, send no input, and check foreground focus.
 Separate local captures also verified Luau callbacks and scene reload with two
 live source windows. These checks do not prove interactive window composition.
 
-The CI link above covers the published session backend. Local Windows preview
-work requires a new CI run before its Linux/Windows build status is established.
+The rule addition passes 14 ordinary Windows unit tests and the separate native
+rule test on DISPLAY2. That test covers executable/title selection, DPI-scaled
+size, exclusion from tiling, late titles, new windows, rejection/rollback,
+scope enforcement, version-1/2 recovery and a three-second idle sample with no
+catalog scans. An actual WGC image of its own floating fixture was inspected.
+The first attempt failed the end-to-end focus-equality assertion while external
+input occurred. The updated observer records foreground process transitions;
+the passing run observed no transition, no test-process activation and unchanged
+focus, while still recording external input. No physical input was injected.
+Transfer between physical monitors, mixed-DPI acceptance and minimized/maximized
+rule application remain unverified. The CI link above predates these rule changes;
+their cross-platform CI must pass before claiming the new head is validated.

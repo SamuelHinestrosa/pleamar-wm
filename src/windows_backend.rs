@@ -12,6 +12,8 @@ type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 mod ipc;
 #[path = "windows_session.rs"]
 mod session;
+#[path = "windows_rules.rs"]
+mod rules;
 
 #[path = "windows_capture.rs"]
 mod capture;
@@ -29,6 +31,7 @@ const HELP: &str = "pleamar-wm — experimental native Windows desktop companion
   windows                          ordinary application windows (JSON)
   session --monitor NAME|all       start in free mode; --state FILE selects its recovery journal
           [--owner PID]            restore windows and exit when the owner exits
+          [--rules FILE]           window rules; defaults to pleamar's session.conf
                                    --process PID scopes automatic management to one application
   --say wm COMMAND                status, toggle MONITOR, layout MONITOR KIND, free MONITOR, quit
   hyprctl monitors|activewindow     compatibility queries for existing scenes
@@ -104,6 +107,9 @@ fn monitors() -> Result<Vec<Monitor>> {
 struct Identity { hwnd: HWND, pid: u32, thread: u32, created: u64 }
 impl Identity {
     fn read(hwnd: HWND) -> Option<Self> {
+        Self::details(hwnd, false).map(|(identity,_)|identity)
+    }
+    fn details(hwnd: HWND, with_app: bool) -> Option<(Self, String)> {
         let mut pid = 0;
         let thread = unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
         if thread == 0 { return None; }
@@ -113,15 +119,29 @@ impl Identity {
         let mut kernel = FILETIME::default();
         let mut user = FILETIME::default();
         let result = unsafe { GetProcessTimes(process, &mut created, &mut exit, &mut kernel, &mut user) };
+        let app = if with_app { process_app(process).unwrap_or_default() } else { String::new() };
         let _ = unsafe { CloseHandle(process) };
         result.ok()?;
-        Some(Self { hwnd, pid, thread, created: (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime) })
+        Some((Self { hwnd, pid, thread, created: (u64::from(created.dwHighDateTime) << 32) | u64::from(created.dwLowDateTime) }, app))
     }
     fn token(self) -> String { format!("{}:{}:{:x}:{:x}", self.pid, self.thread, self.hwnd.0 as usize, self.created) }
 }
 
+fn process_app(process: HANDLE) -> Option<String> {
+    for capacity in [512,32768] {
+        let mut path = vec![0u16;capacity];
+        let mut size = capacity as u32;
+        match unsafe { QueryFullProcessImageNameW(process, PROCESS_NAME_WIN32, PWSTR(path.as_mut_ptr()), &mut size) } {
+            Ok(()) => return String::from_utf16_lossy(&path[..size as usize]).rsplit(['\\','/']).next().map(str::to_owned),
+            Err(error) if error.code() == ERROR_INSUFFICIENT_BUFFER.to_hresult() => continue,
+            Err(_) => return None,
+        }
+    }
+    None
+}
+
 #[derive(Clone, Debug, Serialize)]
-struct Window { id: String, title: String, class: String, process: u32, monitor: String,
+struct Window { id: String, title: String, app: String, class: String, process: u32, monitor: String,
     bounds: Bounds, minimized: bool, maximized: bool, resizable: bool }
 
 fn inspect(hwnd: HWND) -> Option<Window> {
@@ -140,12 +160,12 @@ fn inspect(hwnd: HWND) -> Option<Window> {
         let mut title = [0u16; 4096];
         let n = GetWindowTextW(hwnd, &mut title).max(0) as usize;
         if n == 0 { return None; }
-        let identity = Identity::read(hwnd)?;
+        let (identity,app) = Identity::details(hwnd, true)?;
         let mut rect = RECT::default();
         GetWindowRect(hwnd, &mut rect).ok()?;
         let m = monitor(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONULL))?;
         let style = WINDOW_STYLE(GetWindowLongPtrW(hwnd, GWL_STYLE) as u32);
-        Some(Window { id: identity.token(), title: String::from_utf16_lossy(&title[..n]), class,
+        Some(Window { id: identity.token(), title: String::from_utf16_lossy(&title[..n]), app, class,
             process: identity.pid, monitor: m.name, bounds: rect.into(), minimized: IsIconic(hwnd).as_bool(),
             maximized: IsZoomed(hwnd).as_bool(), resizable: style.contains(WS_THICKFRAME | WS_CAPTION) })
     }
@@ -286,6 +306,7 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
         ["capabilities"] => Ok(Some(json!({"platform": "windows", "experimental": true,
             "monitors": true, "windows": true, "explicit_layouts": true, "minimize_restore": true,
             "native_scenes_luau": true, "read_only_window_previews": true,
+            "window_rules": ["app", "title", "float", "size", "monitor"], "private_window_rules": false, "workspace_window_rules": false,
             "window_scene_provider": false, "automatic_session": true, "rain": false, "snow": false,
             "ride": false, "dock": false, "pools": false, "remote": false, "independent_agent_seat": false}))),
         ["monitors"] => Ok(Some(serde_json::to_value(monitors()?)?)),
