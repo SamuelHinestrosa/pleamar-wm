@@ -66,6 +66,10 @@ pub struct Agent {
     /// Per cursor, on the usual seat (for the programs that only hear that
     /// one): the surface it entered, straight on its objects.
     raw_entered: [Option<WlSurface>; CURSORS],
+    /// Where your own pointer was when that was said: it speaks through the
+    /// same objects, so if it has gone in or out since, what the program
+    /// thinks is not what was said.
+    raw_real: [Option<WlSurface>; CURSORS],
     /// Per cursor: how many things it has done, for the scene to know it moved.
     seen: [u32; CURSORS],
     /// And all of them, keys too: the scene knows the agent is at work.
@@ -145,7 +149,7 @@ pub fn start(state: &mut State) {
         return;
     }
     println!("agent · computer use: cua-inject v1 at {path}");
-    state.agent = Some(Agent { seats, raw_entered: [None, None], seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None, remote: None });
+    state.agent = Some(Agent { seats, raw_entered: [None, None], raw_real: [None, None], seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None, remote: None });
     // Whether it is at work, looked at every second: between one action and
     // the next an agent thinks, and that is still working.
     let timer = Timer::from_duration(Duration::from_secs(1));
@@ -654,7 +658,16 @@ impl State {
             if pointers.is_empty() {
                 return Err("no-pointer-resource");
             }
-            let entered = self.agent.as_ref().and_then(|a| a.raw_entered[idx].clone());
+            // Your own pointer speaks through these same objects: if it has
+            // gone into the program or out of it since the agent last said
+            // where it was, the program no longer thinks that (it was told
+            // `leave`, and went on ignoring the agent's motions and presses:
+            // Discord, after your pointer had crossed it).
+            let real = self.pointer.current_focus();
+            let mut entered = self.agent.as_ref().and_then(|a| a.raw_entered[idx].clone());
+            if self.agent.as_ref().is_some_and(|a| a.raw_real[idx] != real) {
+                entered = None;
+            }
             if entered.as_ref() != Some(&surface) {
                 if let Some(old) = entered.filter(|s| s.is_alive()) {
                     if let Some(c) = old.client() {
@@ -664,12 +677,22 @@ impl State {
                         }
                     }
                 }
-                for p in &pointers {
-                    p.enter(SERIAL_COUNTER.next_serial().into(), &surface, local.x, local.y);
-                    frame(p);
+                // Yours in that program now: the agent takes over from it
+                // (yours leaves, the agent's enters), or, on the very same
+                // surface, is already in.
+                let yours = real.as_ref().filter(|s| s.client().as_ref() == Some(&client) && s.is_alive());
+                if yours != Some(&surface) {
+                    for p in &pointers {
+                        if let Some(s) = yours {
+                            p.leave(SERIAL_COUNTER.next_serial().into(), s);
+                        }
+                        p.enter(SERIAL_COUNTER.next_serial().into(), &surface, local.x, local.y);
+                        frame(p);
+                    }
                 }
                 if let Some(a) = self.agent.as_mut() {
                     a.raw_entered[idx] = Some(surface.clone());
+                    a.raw_real[idx] = real.clone();
                 }
             }
             for p in &pointers {
