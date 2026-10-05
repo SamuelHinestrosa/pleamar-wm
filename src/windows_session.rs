@@ -1,7 +1,7 @@
 //! Event-driven per-monitor layouts. The recovery journal is flushed before
 //! changing a window; ending a session restores free positions, not focus.
 use super::*;
-use std::{cell::Cell, collections::{BTreeMap, BTreeSet}, io::Write, os::windows::{fs::OpenOptionsExt, ffi::OsStrExt},
+use std::{cell::Cell, collections::{BTreeMap, BTreeSet}, io::Write, os::windows::{fs::OpenOptionsExt, ffi::OsStrExt, io::{AsRawHandle, FromRawHandle, OwnedHandle}},
     path::PathBuf, sync::atomic::Ordering};
 use windows::Win32::{Storage::FileSystem::*, UI::Accessibility::*};
 
@@ -57,6 +57,7 @@ impl Journal {
         Ok((Self { path, _lock:lock }, windows))
     }
     fn save(&self, windows: &BTreeMap<String, Original>) -> Result<()> {
+        if windows.len() > 64 { return Err("WM recovery supports at most 64 managed windows".into()); }
         let temporary = self.path.with_extension(format!("{}.pending", std::process::id()));
         let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&temporary)?;
         let result = (|| -> Result<()> {
@@ -118,7 +119,7 @@ fn restore(old: &Original, screens: &[Monitor]) -> Result<bool> {
 
 struct Manager {
     modes: BTreeMap<String, Mode>, originals:BTreeMap<String, Original>, journal:Journal,
-    process:Option<u32>, creation:Option<u64>, all:bool, scans:u64, changes:u64,
+    process:Option<u32>, owner:Option<u32>, creation:Option<u64>, all:bool, scans:u64, changes:u64,
 }
 impl Manager {
     fn owns(&self, window: &Window) -> bool {
@@ -131,7 +132,7 @@ impl Manager {
             .map(|m| (m.name.clone(), Mode::default())).collect();
         if !options.all && modes.len() != options.monitors.len() { return Err("a requested monitor is not connected".into()); }
         let (journal, originals) = Journal::open(options.state.clone())?;
-        let mut manager = Self { modes, originals, journal, process:options.process, creation:None, all:options.all, scans:0, changes:0 };
+        let mut manager = Self { modes, originals, journal, process:options.process, owner:options.owner, creation:None, all:options.all, scans:0, changes:0 };
         if let Some(pid) = options.process {
             // Store a creation stamp as well: a recycled PID must not widen a fixture's scope.
             manager.creation = windows()?.iter().find(|w| w.process == pid)
@@ -162,7 +163,7 @@ impl Manager {
     }
     fn status(&self) -> Value {
         json!({"running":true,"automatic_layouts":true,"rain":false,"snow":false,"ride":false,"dock":false,
-            "pools":false,"process":self.process,"saved_windows":self.originals.len(),
+            "pools":false,"process":self.process,"owner":self.owner,"saved_windows":self.originals.len(),
             "pending_recovery":self.originals.values().filter(|w|self.modes.get(&w.monitor).is_none_or(|m|!m.tiled)).count(),
             "catalog_scans":self.scans,"geometry_changes":self.changes,
             "monitors":self.modes.iter().map(|(name,m)| json!({"name":name,"tiled":m.tiled,
@@ -179,9 +180,10 @@ impl Manager {
         Ok(self.status())
     }
     fn reconcile(&mut self) -> Result<()> {
-        self.scans += 1;
         let screens = monitors()?;
         if self.all { for screen in &screens { self.modes.entry(screen.name.clone()).or_default(); } }
+        if self.originals.is_empty() && self.modes.values().all(|m| !m.tiled) { return Ok(()); }
+        self.scans += 1;
         let live: Vec<_> = windows()?.into_iter().filter(|w| self.owns(w)).collect();
         // Forget only destroyed identities or deliberate moves; hidden/minimized
         // windows retain their recovery position until they return or we exit.
@@ -210,6 +212,8 @@ impl Manager {
             let layout = mode.layout;
             let changed = (|| -> Result<()> {
                 let boxes = layout::arrange((&screen.work).into(), order.len(), layout, (8.0*screen.scale).round() as i32)?;
+                let added = order.iter().filter(|id| !self.originals.contains_key(*id)).count();
+                if self.originals.len() + added > 64 { return Err("WM recovery supports at most 64 managed windows across monitors".into()); }
                 let mut saved = false;
                 for id in &order {
                     if !self.originals.contains_key(id) {
@@ -261,19 +265,40 @@ impl Manager {
     }
 }
 
-struct Options { monitors:BTreeSet<String>, all:bool, process:Option<u32>, state:PathBuf, namespace:String, seconds:Option<u64> }
+// Hold the process object, not its PID: a recycled PID cannot keep a session alive.
+struct Owner(OwnedHandle);
+impl Owner {
+    fn open(pid:u32) -> Result<Self> {
+        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE, false, pid) }?;
+        let owner = Self(unsafe { OwnedHandle::from_raw_handle(handle.0) });
+        if owner.exited()? { return Err("WM owner has already exited".into()); }
+        Ok(owner)
+    }
+    fn handle(&self) -> HANDLE { HANDLE(self.0.as_raw_handle()) }
+    fn exited(&self) -> Result<bool> {
+        match unsafe { WaitForSingleObject(self.handle(), 0) } {
+            WAIT_OBJECT_0 => Ok(true),
+            WAIT_TIMEOUT => Ok(false),
+            _ => Err(std::io::Error::last_os_error().into()),
+        }
+    }
+}
+
+struct Options { monitors:BTreeSet<String>, all:bool, process:Option<u32>, owner:Option<u32>, state:PathBuf, namespace:String, seconds:Option<u64> }
 impl Options {
     fn parse(args:&[String]) -> Result<Self> {
-        let mut options = Self { monitors:BTreeSet::new(), all:false, process:None,
+        let mut options = Self { monitors:BTreeSet::new(), all:false, process:None, owner:None,
             state:pleamar::config_dir().ok_or("Windows configuration directory unavailable")?.join("wm/windows-session.json"),
             namespace:std::env::var("PLEAMAR_WM_NAMESPACE").unwrap_or_default(), seconds:None };
+        let mut explicit_state = false;
         let mut it = args.iter();
         while let Some(key) = it.next() {
             let value = it.next().ok_or("session options need values")?;
             match key.as_str() {
                 "--monitor" => if value == "all" { options.all = true; } else { options.monitors.insert(value.clone()); },
                 "--process" => options.process = Some(value.parse()?),
-                "--state" => options.state = std::path::absolute(value)?,
+                "--owner" => options.owner = Some(value.parse()?),
+                "--state" => { options.state = std::path::absolute(value)?; explicit_state = true; },
                 "--namespace" => options.namespace = value.clone(),
                 "--seconds" => { let seconds = value.parse()?; if !(1..=86400).contains(&seconds) { return Err("invalid session duration".into()); } options.seconds=Some(seconds); },
                 _ => return Err(format!("unknown session option: {key}").into()),
@@ -281,12 +306,19 @@ impl Options {
         }
         if !options.all && options.monitors.is_empty() { return Err("session requires --monitor NAME or --monitor all".into()); }
         if options.process == Some(0) { return Err("process scope must be a nonzero PID".into()); }
+        if options.owner == Some(0) { return Err("owner must be a nonzero PID".into()); }
+        if !explicit_state && !options.namespace.is_empty() {
+            // Validate before allowing the namespace to become part of a filename.
+            ipc::Endpoint::new(&options.namespace)?;
+            options.state.set_file_name(format!("windows-session-{}.json", options.namespace));
+        }
         Ok(options)
     }
 }
 
 pub(super) fn run(args:&[String]) -> Result<Value> {
     let options = Options::parse(args)?;
+    let owner = options.owner.map(Owner::open).transpose()?;
     let server = ipc::Server::start(ipc::Endpoint::new(&options.namespace)?)?;
     let mut manager = Manager::open(&options)?;
     let _hooks = Hooks::new(options.process.unwrap_or(0))?;
@@ -294,9 +326,12 @@ pub(super) fn run(args:&[String]) -> Result<Value> {
     let mut dirty_since = None;
     let mut last_topology = Instant::now();
     let mut topology = serde_json::to_string(&monitors()?)?;
+    let mut handles = vec![server.wake.handle()];
+    if let Some(owner) = &owner { handles.push(owner.handle()); }
     let result = (|| -> Result<()> {
         loop {
             pump();
+            if owner.as_ref().map(Owner::exited).transpose()?.unwrap_or(false) { break; }
             if !server.running() { return Err("WM command listener stopped unexpectedly".into()); }
             server.wake.reset();
             let mut quit = false;
@@ -318,7 +353,7 @@ pub(super) fn run(args:&[String]) -> Result<Value> {
                 manager.reconcile()?;
             }
             let wait = if dirty_since.is_some() { 60 } else { 500 };
-            let result = unsafe { MsgWaitForMultipleObjectsEx(Some(&[server.wake.handle()]),wait,QS_ALLINPUT,MWMO_INPUTAVAILABLE) };
+            let result = unsafe { MsgWaitForMultipleObjectsEx(Some(&handles),wait,QS_ALLINPUT,MWMO_INPUTAVAILABLE) };
             if result == WAIT_FAILED { return Err(std::io::Error::last_os_error().into()); }
         }
         Ok(())
@@ -327,4 +362,22 @@ pub(super) fn run(args:&[String]) -> Result<Value> {
     result?;
     restore?;
     Ok(json!({"stopped":true,"pending_recovery":manager.originals.len()}))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn session_names_separate_default_journals_and_reject_path_injection() {
+        let parse = |args:&[&str]| Options::parse(&args.iter().map(|v|v.to_string()).collect::<Vec<_>>());
+        let one = parse(&["--monitor","all","--namespace","one"]).unwrap();
+        let two = parse(&["--monitor","all","--namespace","two"]).unwrap();
+        assert_ne!(one.state,two.state);
+        assert_eq!(one.state.file_name().unwrap(),"windows-session-one.json");
+        assert!(parse(&["--monitor","all","--namespace","../escape"]).is_err());
+        assert!(parse(&["--monitor","all","--owner","0"]).is_err());
+        let explicit = parse(&["--monitor","all","--namespace","one","--state","explicit.json"]).unwrap();
+        assert_eq!(explicit.state,std::path::absolute("explicit.json").unwrap());
+    }
 }

@@ -7,6 +7,26 @@ use std::{os::windows::process::CommandExt, process::{Child, Command, Stdio}, sy
 struct OwnedDaemon(Child);
 impl Drop for OwnedDaemon { fn drop(&mut self) { let _=self.0.kill(); let _=self.0.wait(); } }
 
+fn last_input_tick() -> u32 {
+    #[repr(C)]
+    struct LastInput { size:u32, tick:u32 }
+    #[link(name="user32")]
+    unsafe extern "system" { fn GetLastInputInfo(info:*mut LastInput) -> i32; }
+    let mut info=LastInput { size:size_of::<LastInput>() as u32,tick:0 };
+    assert_ne!(unsafe { GetLastInputInfo(&mut info) },0);
+    info.tick
+}
+
+#[test]
+#[ignore = "child-process fixture used by native_session_lifecycle"]
+fn native_owner_fixture() -> Result<()> {
+    if std::env::var("PLEAMAR_WM_OWNER_FIXTURE").as_deref() != Ok("1") {
+        return Err("this helper must be started by its parent test".into());
+    }
+    std::io::copy(&mut std::io::stdin(), &mut std::io::sink())?;
+    Ok(())
+}
+
 fn request(endpoint:&ipc::Endpoint, line:&str) -> Result<Value> {
     let endpoint=endpoint.clone();
     let line=line.to_owned();
@@ -57,6 +77,7 @@ fn native_session_lifecycle() -> Result<()> {
     let monitor=select_monitor(&requested)?;
     assert!(!monitor.primary);
     let foreground=unsafe { GetForegroundWindow() };
+    let initial_input=last_input_tick();
     let module=unsafe { windows::Win32::System::LibraryLoader::GetModuleHandleW(None) }?;
     let class=WNDCLASSW { lpfnWndProc:Some(fixture_proc), hInstance:module.into(), lpszClassName:w!("pleamar-wm-session-fixture"), ..Default::default() };
     assert_ne!(unsafe { RegisterClassW(&class) },0);
@@ -87,19 +108,26 @@ fn native_session_lifecycle() -> Result<()> {
     let endpoint=ipc::Endpoint::new(&namespace)?;
     let binary=std::path::PathBuf::from(std::env::var_os("PLEAMAR_WM_TEST_BINARY").ok_or("set PLEAMAR_WM_TEST_BINARY")?).canonicalize()?;
     let host=std::env::var_os("PLEAMAR_WM_TEST_HOST").map(std::path::PathBuf::from);
-    let start=|round:usize|->Result<OwnedDaemon> {
+    let start=|round:usize, owner:Option<u32>|->Result<OwnedDaemon> {
         let log=std::fs::File::create(out.join(format!("daemon-{round}.log")))?;
         let mut command=Command::new(host.as_ref().unwrap_or(&binary));
         if host.is_none() { command.arg("session"); }
+        if let Some(pid) = owner { command.args(["--owner", &pid.to_string()]); }
         let child=command.args(["--monitor",&requested,"--process",&std::process::id().to_string(),
             "--namespace",&namespace,"--state",state_file.to_str().unwrap(),"--seconds","120"])
             .stdout(log.try_clone()?).stderr(Stdio::from(log)).creation_flags(0x08000000|0x00004000).spawn()?;
         Ok(OwnedDaemon(child))
     };
-    let mut daemon=start(1)?;
+    let mut daemon=start(1,None)?;
     until(|| { assert!(daemon.0.try_wait().unwrap().is_none()); request(&endpoint,"status").is_ok() });
     let status=request(&endpoint,"status")?;
     assert_eq!(status["monitors"][0]["tiled"],false);
+    let free_event=create(4)?;
+    owned.0.push(free_event);
+    let settle=Instant::now();
+    while settle.elapsed()<Duration::from_millis(250) { pump(); std::thread::sleep(Duration::from_millis(10)); }
+    assert_eq!(request(&endpoint,"status")?["catalog_scans"],0,"free mode scanned unrelated window events");
+    let _=unsafe { DestroyWindow(owned.0.pop().unwrap()) };
     for old in &originals { assert_eq!(target(&old.id)?.1.bounds,old.bounds); }
     request(&endpoint,&format!("layout {requested} grid"))?;
     assert_eq!(request(&endpoint,"status")?["saved_windows"],3);
@@ -127,7 +155,7 @@ fn native_session_lifecycle() -> Result<()> {
     daemon.0.kill()?;
     daemon.0.wait()?;
     drop(daemon);
-    let mut daemon=start(2)?;
+    let mut daemon=start(2,None)?;
     until(|| { assert!(daemon.0.try_wait().unwrap().is_none()); request(&endpoint,"status").is_ok() });
     for old in &originals { assert_eq!(target(&old.id)?.1.bounds,old.bounds); }
     let settled=Instant::now();
@@ -148,14 +176,33 @@ fn native_session_lifecycle() -> Result<()> {
     until(||daemon.0.try_wait().unwrap().is_some());
     assert!(daemon.0.wait()?.success());
     for old in &originals { assert_eq!(target(&old.id)?.1.bounds,old.bounds); }
+    for (round, kill) in [(3,false),(4,true)] {
+        let mut owner=OwnedDaemon(Command::new(std::env::current_exe()?)
+            .args(["--ignored","--exact","windows_backend::session_tests::native_owner_fixture","--nocapture"])
+            .env("PLEAMAR_WM_OWNER_FIXTURE","1").stdin(Stdio::piped())
+            .stdout(Stdio::null()).stderr(Stdio::null()).creation_flags(0x08000000|0x00004000).spawn()?);
+        let mut child=start(round,Some(owner.0.id()))?;
+        until(|| { assert!(child.0.try_wait().unwrap().is_none()); request(&endpoint,"status").is_ok() });
+        request(&endpoint,&format!("layout {requested} grid"))?;
+        if kill { owner.0.kill()?; } else { drop(owner.0.stdin.take()); }
+        until(||owner.0.try_wait().unwrap().is_some());
+        if !kill { assert!(owner.0.wait()?.success()); }
+        until(||child.0.try_wait().unwrap().is_some());
+        assert!(child.0.wait()?.success());
+        for old in &originals { assert_eq!(target(&old.id)?.1.bounds,old.bounds); }
+        let journal:Value=serde_json::from_slice(&std::fs::read(&state_file)?)?;
+        assert_eq!(journal["windows"].as_array().unwrap().len(),0);
+    }
     let focus_unchanged=unsafe { GetForegroundWindow() }==foreground;
-    assert!(focus_unchanged);
+    let external_input=last_input_tick()!=initial_input;
     drop(owned);
     unsafe { UnregisterClassW(class.lpszClassName,Some(module.into())) }?;
-    let report=json!({"passed":true,"monitor":requested,"primary":false,"physical_input":false,
+    let report=json!({"passed":focus_unchanged,"monitor":requested,"primary":false,"physical_input":false,
+        "external_input_during_test":external_input,
         "focus_unchanged":focus_unchanged,"automatic_create_close":true,"minimize_restore":true,
         "free_while_minimized":true,"resize_rejection_rollback":true,"crash_recovery":true,
-        "unicode_journal":true,"idle_seconds":5,"idle_catalog_scans":0,"quit_restores":true});
+        "unicode_journal":true,"idle_seconds":5,"idle_catalog_scans":0,"quit_restores":true,
+        "owner_exit_restores":true,"owner_kill_restores":true,"free_mode_avoids_catalog_scans":true});
     let mut report=report;
     report["idle_one_core_cpu_percent"]=json!((used_after.0-used_before.0) as f64/10000000.0/elapsed*100.0);
     report["daemon_working_set_bytes"]=json!(used_after.1);
@@ -163,5 +210,6 @@ fn native_session_lifecycle() -> Result<()> {
     report["gui_host"]=json!(host.is_some());
     std::fs::write(out.join("report.json"),serde_json::to_vec_pretty(&report)?)?;
     println!("{report}");
+    assert!(focus_unchanged,"foreground changed; external input during test: {external_input}");
     Ok(())
 }

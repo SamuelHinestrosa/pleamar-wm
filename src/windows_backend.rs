@@ -19,6 +19,7 @@ const HELP: &str = "pleamar-wm — experimental native Windows desktop companion
   monitors                         connected displays and physical work areas (JSON)
   windows                          ordinary application windows (JSON)
   session --monitor NAME|all       start in free mode; --state FILE selects its recovery journal
+          [--owner PID]            restore windows and exit when the owner exits
                                    --process PID scopes automatic management to one application
   --say wm COMMAND                status, toggle MONITOR, layout MONITOR KIND, free MONITOR, quit
   hyprctl monitors|activewindow     compatibility queries for existing scenes
@@ -324,12 +325,14 @@ pub fn run(args: Vec<String>) -> i32 {
 }
 
 pub fn run_session(args: Vec<String>) -> i32 {
+    use std::io::Write;
     if let Err(error) = unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) } {
         eprintln!("pleamar-wm: could not enable per-monitor DPI: {error}"); return 1;
     }
     match session::run(&args) {
-        Ok(value) => { println!("{value}"); 0 }
-        Err(error) => { eprintln!("pleamar-wm session: {error}"); 1 }
+        // A GUI supervisor may have exited before us and closed its log pipe.
+        Ok(value) => { let _ = writeln!(std::io::stdout().lock(), "{value}"); 0 }
+        Err(error) => { let _ = writeln!(std::io::stderr().lock(), "pleamar-wm session: {error}"); 1 }
     }
 }
 

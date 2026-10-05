@@ -72,6 +72,9 @@ application restarts.
 
 Use repeated `--monitor NAME` options to limit the session to certain displays.
 `--process PID` further limits it to that application's current process identity.
+`--owner PID` binds the session lifetime to an existing process object: normal
+exit or termination restores positions and ends the session. PID reuse cannot
+keep it alive. The package uses Marea as the owner.
 New, closed, restored and minimized windows update active layouts through
 native window events. The desktop catalog is not polled continuously; display
 topology is checked every two seconds. A resize rejection returns the monitor
@@ -79,6 +82,9 @@ to free mode, restores positions and reports the error in `status`.
 
 The session stores original positions under pleamar's configuration directory
 in `wm/windows-session.json`, with an exclusive file lock and atomic updates.
+Named sessions use `wm/windows-session-NAMESPACE.json`; the namespace is
+validated before forming a path. Recovery holds at most 64 managed windows
+across monitors and rejects overflow before moving additional windows.
 `--state FILE` selects an isolated journal. `quit` restores positions while
 preserving minimized state. If the process crashes, the next session restores
 the journal before accepting commands. Unavailable/hidden windows and changed
@@ -100,8 +106,9 @@ original single executable.
 The companion Marea branch now detects this session and offers its supported
 layout/restore actions in the menu and finder. It targets the screen where
 Marea lives, requires a native acknowledgement, and keeps pending effects
-hidden. Building these sources alone does not install or start the companion:
-including it in Marea's installer and managing its lifetime there remain work.
+hidden. Its package includes both executables and starts a free session tied
+to Marea's process. The owner-exit cleanup works even after the PowerShell
+supervisor exits. Building this WM checkout alone does not install it.
 
 ## Status and remaining parity work
 
@@ -112,7 +119,7 @@ including it in Marea's installer and managing its lifetime there remain work.
 | Pleamar scenes, Luau and hot reload | Native D3D12 scene, Luau callbacks and saved logic/scene reloads verified on DISPLAY2 |
 | Automatic per-monitor session | Native creation/closure, minimize, failure rollback, shutdown and crash recovery verified on DISPLAY2 |
 | Window rules and live scene layouts | Pending |
-| Marea menu/finder bridge | Module tested with real Luau, IPC and owned Windows windows; complete Marea UI acceptance and package inclusion pending |
+| Marea menu/finder bridge | Module tested with real Luau, IPC and owned Windows windows; complete Marea UI acceptance pending; package lifecycle tested separately |
 | Rain, snow, ride, dock, animated window transitions | Pending native equivalents |
 | Per-monitor tide pools and overview | Pending; Windows virtual desktops are not the same model |
 | Independent agent pointer/keyboard, glow and stop UI | Pending; Marea currently uses guarded shared Windows input |
@@ -146,7 +153,7 @@ interactive test stays ignored in CI. Neither compilation nor the geometry
 test proves completed visual effects, interaction parity or a complete WM port.
 
 On 2026-10-05, the release build with default Luau support succeeded on Windows
-x64/MSVC. Nine ordinary unit tests passed, including IPC malformed-client
+x64/MSVC. Ten ordinary unit tests passed, including IPC malformed-client
 recovery, exclusive ownership and cancellation on shutdown. Native tests passed on
 `\\.\DISPLAY2`: all five layouts and their undo, actual minimize/restore,
 Unicode paths, closed-window rejection, and rollback after a test application
