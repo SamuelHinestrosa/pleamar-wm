@@ -1,0 +1,60 @@
+name: Native Windows and Linux builds
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      pleamar_repository:
+        description: Repository containing the matching pleamar library
+        default: SamuelHinestrosa/pleamar
+        required: true
+      pleamar_ref:
+        description: Exact pleamar revision (Windows backend required)
+        default: 7c0edebd8e1c97c6c590f463ea58454e189ce55d
+        required: true
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pleamar-wm
+      # Until the companion pleamar Windows PR is merged, test its exact head.
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.pleamar_repository || 'SamuelHinestrosa/pleamar' }}
+          ref: ${{ inputs.pleamar_ref || '7c0edebd8e1c97c6c590f463ea58454e189ce55d' }}
+          path: pleamar
+      - name: Linux system libraries
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          pkg-config libwayland-dev libxkbcommon-dev libfontconfig1-dev libpam0g-dev
+          libinput-dev libudev-dev libseat-dev libgbm-dev libdrm-dev
+          libpipewire-0.3-dev libssl-dev libclang-dev clang
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build with default Luau support
+        working-directory: pleamar-wm
+        run: cargo build --locked
+      - name: Unit tests (interactive desktop tests remain opt-in)
+        working-directory: pleamar-wm
+        run: cargo test --locked
+      - name: Native Windows capability smoke
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        shell: pwsh
+        run: |
+          $caps = & ./target/debug/pleamar-wm.exe capabilities | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $caps.platform -ne 'windows' -or !$caps.explicit_layouts) {
+            throw 'Native capability query failed'
+          }
+          & ./target/debug/pleamar-wm.exe session
+          if ($LASTEXITCODE -eq 0) { throw 'An unavailable compositor session reported success' }
+          exit 0
