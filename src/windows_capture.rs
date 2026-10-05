@@ -6,6 +6,23 @@ use windows::{core::{Interface, Result}, Foundation::TypedEventHandler,
     Win32::{Foundation::*, Graphics::{Direct3D::*, Direct3D11::*, Dxgi::{IDXGIDevice, Common::*}},
         System::WinRT::{*, Direct3D11::*, Graphics::Capture::IGraphicsCaptureItemInterop}}};
 
+fn keep_capture_code(factory: &IGraphicsCaptureSessionStatics) -> Result<()> {
+    use std::sync::OnceLock;
+    use windows::{core::{HRESULT, PCWSTR}, Win32::{Foundation::HMODULE, System::LibraryLoader::*}};
+    static PINNED: OnceLock<std::result::Result<(), HRESULT>> = OnceLock::new();
+    // Windows 11 can return from Close while internal WGC callbacks still use
+    // GraphicsCapture.dll. Retiring the last MTA worker then unloads their code
+    // (0xc0000005 in GraphicsCapture.dll_unloaded). Keep only that loaded module
+    // until process exit, not its factories, COM apartments or GPU resources.
+    // Resolve by the activated factory's code address, never a DLL search path.
+    let result = PINNED.get_or_init(|| unsafe {
+        let mut module = HMODULE::default();
+        GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+            PCWSTR(factory.vtable().IsSupported as *const () as *const u16), &mut module).map_err(|e| e.code())
+    });
+    (*result).map_err(Into::into)
+}
+
 const MAX_PIXELS: u64 = 16_777_216;
 const FRAME_BUFFERS: i32 = 1;
 
@@ -25,6 +42,7 @@ impl Device {
         let apartment = Apartment(PhantomData);
         // Avoid the generated global factory cache surviving its COM apartment.
         let factory = windows::core::factory::<GraphicsCaptureSession, IGraphicsCaptureSessionStatics>()?;
+        keep_capture_code(&factory)?;
         let mut supported = false;
         (factory.vtable().IsSupported)(factory.as_raw(), &mut supported).ok()?;
         if !supported { return Err(E_NOTIMPL.into()); }
