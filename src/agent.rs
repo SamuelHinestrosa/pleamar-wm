@@ -33,6 +33,7 @@
 //! | `k TARGET KEY` | a named key: enter, tab, escape, backspace, space, arrows, f1–f12 |
 //! | `h TARGET MODS KEY` | a chord: `ctrl,shift` and a key |
 //! | `d X Y COUNT BUTTON` | a click at a point of the desktop |
+//! | `R MONITOR HEX` · `R off` | `pleamar-wm remote`: someone uses this desktop from elsewhere, looking at that monitor, from that address (hex encoded) — said again every few seconds while it lasts, and forgotten 15 s after the last |
 //!
 //! A TARGET is `pid:N` (that process' only window), `root:N` (the only window
 //! of that process or a child of it: a browser's), or an app_id.
@@ -85,6 +86,9 @@ pub struct Agent {
     /// `pleamar-wm agent stop`): until the agent says it is done, or for a
     /// minute, everything it tries to do is refused, and it hears why.
     stopped: Option<Instant>,
+    /// Someone at this desktop from elsewhere (`pleamar-wm remote`): when
+    /// that was last said.
+    remote: Option<Instant>,
     pub path: String,
 }
 
@@ -141,7 +145,7 @@ pub fn start(state: &mut State) {
         return;
     }
     println!("agent · computer use: cua-inject v1 at {path}");
-    state.agent = Some(Agent { seats, raw_entered: [None, None], seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None });
+    state.agent = Some(Agent { seats, raw_entered: [None, None], seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None, remote: None });
     // Whether it is at work, looked at every second: between one action and
     // the next an agent thinks, and that is still working.
     let timer = Timer::from_duration(Duration::from_secs(1));
@@ -223,6 +227,21 @@ impl State {
                 }
                 Ok("ok".to_owned())
             }
+            // The remote desktop says who is in, and where they look: the
+            // scene marks it on the monitors (and only there, not in what
+            // they see from elsewhere).
+            ["R", "off"] => {
+                self.remote_mark(None);
+                Ok("ok".to_owned())
+            }
+            ["R", monitor, who] => match (monitor.parse::<i32>(), unhex(who)) {
+                (Ok(monitor), Ok(who)) => {
+                    let who: String = String::from_utf8_lossy(&who).chars().filter(|c| !c.is_control()).take(64).collect();
+                    self.remote_mark(Some((monitor, who)));
+                    Ok("ok".to_owned())
+                }
+                _ => Err("bad-args"),
+            },
             ["s"] => {
                 self.agent_done();
                 if let Some(agent) = self.agent.as_mut() {
@@ -540,7 +559,34 @@ impl State {
     /// half after its last action, or ten minutes while the process that
     /// acted (a daemon such as `cua-driver serve`) is still there. The scene
     /// keeps the monitor's light on meanwhile, and lets it go after.
+    fn remote_mark(&mut self, on: Option<(i32, String)>) {
+        let Some(agent) = self.agent.as_mut() else { return };
+        let was = agent.remote.is_some();
+        agent.remote = on.as_ref().map(|_| Instant::now());
+        let fact = |name: &str, v: f32| ToRender::Fact(pleamar::scene::intern(name), v);
+        match on {
+            Some((monitor, who)) => {
+                if !was {
+                    println!("remote · this desktop is being used from {who}");
+                }
+                let _ = self.to_render.send(fact("remote.screen", monitor as f32));
+                let _ = self.to_render.send(ToRender::Text(pleamar::scene::intern("remote.who"), who));
+                let _ = self.to_render.send(fact("remote.on", 1.0));
+            }
+            None => {
+                if was {
+                    println!("remote · no one is using this desktop from elsewhere now");
+                }
+                let _ = self.to_render.send(fact("remote.on", 0.0));
+            }
+        }
+    }
+
     fn agent_still_working(&mut self) {
+        // Not heard from the remote desktop for a while: it is not there.
+        if self.agent.as_ref().and_then(|a| a.remote).is_some_and(|t| t.elapsed() > Duration::from_secs(15)) {
+            self.remote_mark(None);
+        }
         let Some(agent) = self.agent.as_mut() else { return };
         let idle = agent.last.map_or(Duration::MAX, |t| t.elapsed());
         let alive = agent.peer != 0 && std::path::Path::new(&format!("/proc/{}", agent.peer)).exists();

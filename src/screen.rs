@@ -181,6 +181,8 @@ pub struct Layer {
     pub latest: Option<wgpu::Texture>,
     /// Where it takes the pointer, from its corner (its zones).
     pub region: Vec<[i32; 4]>,
+    /// `captures: hidden`: on the monitor, not in the pictures taken of it.
+    pub unshared: bool,
 }
 
 pub struct ScreenState {
@@ -275,7 +277,7 @@ pub fn level_rank(l: Level) -> u8 {
 pub fn layer(sheet: u32, k: usize, s: &Surface, monitor: (u32, u32), scale: f32) -> Layer {
     let main = s.name.is_empty();
     let (units, rect) = placed((s.width, s.height), s.anchor, s.margin, monitor, scale);
-    Layer { sheet, surface: k, origin: s.origin, rect, units, scale, level: s.level, main, anchor: s.anchor, margin: s.margin, latest: None, region: Vec::new() }
+    Layer { sheet, surface: k, origin: s.origin, rect, units, scale, level: s.level, main, anchor: s.anchor, margin: s.margin, latest: None, region: Vec::new(), unshared: s.hidden_from_captures }
 }
 
 /// Where a surface goes, laid out in units on a monitor of that many pixels:
@@ -639,7 +641,7 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
     let debug = std::env::var_os("PLEAMAR_DEBUG_SCREEN").is_some();
     let (lock, cv) = &*screen;
     loop {
-        let (quads, blurs, size, modifiers, fresh, anew, arrived, forget, shows, drew_clients, surfaces, changed, captures) = {
+        let (quads, blurs, size, modifiers, fresh, anew, arrived, forget, shows, drew_clients, surfaces, changed, captures, unshared) = {
             let mut st = lock.lock().unwrap();
             while !st.quit && !(st.dirty && st.idle && !st.paused) {
                 st = cv.wait_timeout(st, Duration::from_millis(500)).unwrap().0;
@@ -649,6 +651,8 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
             }
             st.dirty = false;
             let mut quads: Vec<(Source, [i32; 4], bool)> = Vec::new();
+            // The quads left out of the pictures taken of the monitor.
+            let mut unshared: Vec<usize> = Vec::new();
             // Before which quad what is behind gets blurred, and where (a program's glass).
             let mut blurs: Vec<(usize, Vec<[i32; 4]>)> = Vec::new();
             let mut arrived: Vec<(u64, Option<u64>, (u32, u32), PieceContent)> = Vec::new();
@@ -659,6 +663,9 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
                     Item::Scene(k) => {
                         let l = &st.layers[*k];
                         if let Some(t) = &l.latest {
+                            if l.unshared {
+                                unshared.push(quads.len());
+                            }
                             quads.push((Source::Texture(t.clone()), l.rect, false));
                         }
                     }
@@ -719,7 +726,7 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
             if !due.is_empty() {
                 changed = None;
             }
-            (quads, blurs, st.size, st.modifiers.clone(), std::mem::take(&mut st.fresh), anew, arrived, std::mem::take(&mut st.forget), shows, drew_clients, surfaces, changed, due)
+            (quads, blurs, st.size, st.modifiers.clone(), std::mem::take(&mut st.fresh), anew, arrived, std::mem::take(&mut st.forget), shows, drew_clients, surfaces, changed, due, unshared)
         };
         part(0, &mut parts);
         for b in &forget {
@@ -1029,7 +1036,7 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
         // The pictures asked for: what was just put together, again, whole,
         // into a texture of its own, and read back.
         for (id, piece, _, _) in &captures {
-            let pixels = capture(&device, &queue, &pipeline, &groups, &bound, size, *piece);
+            let pixels = capture(&device, &queue, &pipeline, &groups, &unshared, &bound, size, *piece);
             layers::tell(ToLayers::Captured { id: *id, pixels });
         }
         // What has not been shown for a while is not kept (a surface's frames
@@ -1100,7 +1107,7 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
 /// A piece of the monitor as it has just been put together (what the
 /// programs and the scene show; not the cursor, which is on its own plane),
 /// read back: BGRA, rows with no padding.
-fn capture(device: &wgpu::Device, queue: &wgpu::Queue, pipeline: &wgpu::RenderPipeline, groups: &[Option<usize>], bound: &[Bound], size: (u32, u32), piece: [i32; 4]) -> Option<Vec<u8>> {
+fn capture(device: &wgpu::Device, queue: &wgpu::Queue, pipeline: &wgpu::RenderPipeline, groups: &[Option<usize>], unshared: &[usize], bound: &[Bound], size: (u32, u32), piece: [i32; 4]) -> Option<Vec<u8>> {
     let x0 = piece[0].clamp(0, size.0 as i32) as u32;
     let y0 = piece[1].clamp(0, size.1 as i32) as u32;
     let x1 = (piece[0] + piece[2]).clamp(x0 as i32, size.0 as i32) as u32;
@@ -1132,8 +1139,9 @@ fn capture(device: &wgpu::Device, queue: &wgpu::Queue, pipeline: &wgpu::RenderPi
         });
         pass.set_pipeline(pipeline);
         pass.set_scissor_rect(x0, y0, w, h);
-        for k in groups.iter().flatten() {
-            pass.set_bind_group(0, &bound[*k].group, &[]);
+        // All that was put together but what is only for the monitor.
+        for (_, k) in groups.iter().enumerate().filter(|(i, _)| !unshared.contains(i)).filter_map(|(i, k)| k.map(|k| (i, k))) {
+            pass.set_bind_group(0, &bound[k].group, &[]);
             pass.draw(0..4, 0..1);
         }
     }

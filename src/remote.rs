@@ -39,6 +39,8 @@ const HELP: &str = "pleamar-wm remote — this desktop from a browser elsewhere
                written to ~/.config/pleamar/remote.conf, shown once
   (nothing)    serve the page on 127.0.0.1:8765 (`port N` in remote.conf changes it)
   --view-only  the same, but only to watch: the mouse and keys there do nothing here
+  stop         from this computer: everyone using it from elsewhere out, now, and every
+               session ended (Super+Shift+Escape in pleamar-wm's keys)
 
 Make it reachable with something that encrypts it, for example:
   tailscale funnel --bg --https=8443 http://127.0.0.1:8765";
@@ -48,6 +50,7 @@ pub fn run(args: &[String]) -> i32 {
         None | Some("serve") => serve(false),
         Some("--view-only") => serve(true),
         Some("setup") => setup(),
+        Some("stop") => stop(),
         Some("help") | Some("--help") | Some("-h") => {
             println!("{HELP}");
             Ok(())
@@ -146,6 +149,11 @@ struct Gate {
     all_failures: Vec<Instant>,
     /// The last code taken: one is good once.
     last_step: u64,
+    /// The pages connected now: which monitor each looks at, and from where.
+    present: HashMap<u64, (usize, String)>,
+    next_page: u64,
+    /// Raised by `pleamar-wm remote stop`: every page connected goes.
+    kicked: u64,
 }
 
 impl Gate {
@@ -252,9 +260,15 @@ impl Gate {
 fn serve(view_only: bool) -> Result<(), String> {
     let config = load()?;
     let port = config.port;
-    let mut gate = Gate { config, sessions: HashMap::new(), saved: 0, failures: HashMap::new(), all_failures: Vec::new(), last_step: 0 };
+    let mut gate = Gate { config, sessions: HashMap::new(), saved: 0, failures: HashMap::new(), all_failures: Vec::new(), last_step: 0, present: HashMap::new(), next_page: 0, kicked: 0 };
     gate.restore();
     let gate = Arc::new(Mutex::new(gate));
+    // The session is told who is in (it marks it on the monitors), and this
+    // computer can send everyone away (`pleamar-wm remote stop`).
+    let told = gate.clone();
+    std::thread::spawn(move || tell_the_session(told));
+    let door = gate.clone();
+    std::thread::spawn(move || control(door));
     let hands = Arc::new(Mutex::new(None::<Hands>));
     let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("127.0.0.1:{port}: {e}"))?;
     println!("pleamar-wm remote · on http://127.0.0.1:{port}{}", if view_only { " · only to watch" } else { "" });
@@ -387,7 +401,8 @@ fn connection(mut stream: TcpStream, gate: &Arc<Mutex<Gate>>, hands: &Arc<Mutex<
             let accept = base64(&sha.finalize());
             let head = format!("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n");
             stream.write_all(head.as_bytes()).map_err(|e| e.to_string())?;
-            viewer(stream, token.unwrap_or_default(), gate, hands, view_only)
+            let from = who(&req, &stream);
+            viewer(stream, token.unwrap_or_default(), from, gate, hands, view_only)
         }
         _ => respond(&mut stream, "404 Not Found", "text/plain", "", b"not here"),
     }
@@ -421,6 +436,73 @@ fn unescape(s: &str) -> String {
         k += 1;
     }
     String::from_utf8_lossy(&out).into_owned()
+}
+
+/// Every couple of seconds, the session hears who is in (the last page to
+/// arrive: which monitor it looks at, from where), or that no one is.
+fn tell_the_session(gate: Arc<Mutex<Gate>>) {
+    let mut last = String::new();
+    let mut said = Instant::now();
+    loop {
+        let now = {
+            let g = gate.lock().unwrap();
+            g.present.iter().max_by_key(|(k, _)| **k).map(|(_, (m, who))| (*m, who.clone()))
+        };
+        let line = match &now {
+            Some((m, who)) => format!("R {m} {}", hex(who.as_bytes())),
+            None => "R off".to_owned(),
+        };
+        if line != last || (now.is_some() && said.elapsed() > Duration::from_secs(4)) {
+            if crate::agent_cli::tell(&line).is_ok() {
+                last = line;
+                said = Instant::now();
+            }
+        }
+        std::thread::sleep(Duration::from_millis(700));
+    }
+}
+
+/// Where `stop` finds the server: one per port, so two never meet.
+fn control_path(port: u16) -> String {
+    let dir = std::env::var("XDG_RUNTIME_DIR").unwrap_or_else(|_| "/tmp".into());
+    format!("{dir}/pleamar-remote-{port}.sock")
+}
+
+/// `pleamar-wm remote stop`, from this computer: everyone out, now, and
+/// every session forgotten (signing in again needs the password and a code).
+fn control(gate: Arc<Mutex<Gate>>) {
+    use std::os::unix::net::UnixListener;
+    let path = control_path(gate.lock().unwrap().config.port);
+    let _ = std::fs::remove_file(&path);
+    let Ok(listener) = UnixListener::bind(&path) else { return };
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let _ = std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600));
+    }
+    for stream in listener.incoming().flatten() {
+        let mut line = String::new();
+        let _ = BufReader::new(&stream).read_line(&mut line);
+        if line.trim() == "stop" {
+            let mut g = gate.lock().unwrap();
+            let pages = g.present.len();
+            g.kicked += 1;
+            g.sessions.clear();
+            g.save();
+            drop(g);
+            notify(&format!("Remote desktop: sent away ({pages} connected), and every session ended"));
+            let _ = (&stream).write_all(b"ok\n");
+        }
+    }
+}
+
+fn stop() -> Result<(), String> {
+    let port = load()?.port;
+    let mut stream = std::os::unix::net::UnixStream::connect(control_path(port)).map_err(|_| "no remote desktop running here".to_owned())?;
+    stream.write_all(b"stop\n").map_err(|e| e.to_string())?;
+    let mut reply = String::new();
+    let _ = BufReader::new(&stream).read_line(&mut reply);
+    println!("Everyone using this desktop from elsewhere is out, and must sign in again.");
+    Ok(())
 }
 
 fn notify(text: &str) {
@@ -726,7 +808,22 @@ impl Flow {
 /// One connected page: what it says goes to the hands; the picture comes
 /// as video (or, for a browser without a video decoder, as squares of JPEG
 /// each time the page has painted the last ones).
-fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc<Mutex<Option<Hands>>>, view_only: bool) -> Result<(), String> {
+fn viewer(stream: TcpStream, token: String, from: String, gate: &Arc<Mutex<Gate>>, hands: &Arc<Mutex<Option<Hands>>>, view_only: bool) -> Result<(), String> {
+    // In the list of who is in, while this lasts, and out of it however it ends.
+    let (page, kicked) = {
+        let mut g = gate.lock().unwrap();
+        g.next_page += 1;
+        let page = g.next_page;
+        g.present.insert(page, (0, from));
+        (page, g.kicked)
+    };
+    struct Leave<'a>(&'a Arc<Mutex<Gate>>, u64);
+    impl Drop for Leave<'_> {
+        fn drop(&mut self) {
+            self.0.lock().unwrap().present.remove(&self.1);
+        }
+    }
+    let _leave = Leave(gate, page);
     stream.set_read_timeout(Some(Duration::from_millis(4))).map_err(|e| e.to_string())?;
     let _ = stream.set_nodelay(true);
     let mut ws = WebSocket::from_raw_socket(stream, Role::Server, None);
@@ -765,6 +862,11 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
     let mut last_rate = Instant::now();
     let mut low_since: Option<Instant> = None;
     loop {
+        // Sent away from this computer: at once.
+        if gate.lock().unwrap().kicked != kicked {
+            let _ = ws.send(Message::Text("bye".into()));
+            break;
+        }
         // Every so often: the session is still good (not signed out elsewhere).
         if checked.elapsed() > Duration::from_secs(30) {
             checked = Instant::now();
@@ -887,6 +989,9 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
                     ("mon", [k]) if (*k as usize) < monitors.len() => {
                         let same = monitor == *k as usize && (video.is_some() || restart);
                         monitor = *k as usize;
+                        if let Some(p) = gate.lock().unwrap().present.get_mut(&page) {
+                            p.0 = monitor;
+                        }
                         if video_wanted {
                             // The same one, already coming: nothing to start again.
                             restart |= !same;

@@ -7405,6 +7405,53 @@ scene Session {
         on press rider_zone.$i { emit unride }
     }
 
+    // ── this desktop used from elsewhere (`pleamar-wm remote`) ──
+    // While someone is in from another computer, whoever sits here sees it:
+    // the edges glow amber —the monitor they look at, brighter— and a pill
+    // says from where, and how to send them away. All of it on a surface
+    // left out of captures: the one using it from elsewhere sees the desktop
+    // as it is, without this over it. It takes no clicks (a button there
+    // would be invisible from there, waiting to be pressed by mistake):
+    // Super+Shift+Escape ends it.
+    fact remote.on = 0
+    fact remote.screen = -1
+    text remote.who = ""
+    prop remote.shown = 0 ~900ms
+    follow remote.shown = remote.on
+    surface remote_mark {
+        size: full, full
+        anchor: top_left
+        level: overlay
+        screens: each max 4
+        captures: hidden
+        open: remote.shown > 0.001
+        let rm.w = remote_mark.width
+        let rm.h = remote_mark.height
+        let rm.here = remote.screen == screen.index
+        group {
+            opacity: remote.shown * if(rm.here, 1, 0.45)
+            group {
+                blur: 20
+                opacity: 38%
+                box { from: 4, 4; size: rm.w - 8, rm.h - 8; corner: 18; stroke: 9; color: amber }
+            }
+            box { from: 2, 2; size: rm.w - 4, rm.h - 4; corner: 16; stroke: 1.5; color: amber; opacity: 60% }
+        }
+        group {
+            opacity: remote.shown
+            show: rm.here
+            body {
+                color: #0c0f12
+                rim: 16%
+                shadow: 0, 6, 18, 40%
+                box { at: 186, rm.h - 30; size: 340, 38; corner: 19 }
+            }
+            ellipse { at: 34, rm.h - 30; radius: 5; color: amber }
+            text "Used from elsewhere · {remote.who}" { at: 48, rm.h - 36; anchor: left center; size: 11.5; weight: 600; color: ink }
+            text "Super+Shift+Esc sends them away" { at: 48, rm.h - 22; anchor: left center; size: 10.5; color: #9aa3a8 }
+        }
+    }
+
     // ── a computer-use agent's cursors (`agent on` in session.conf) ──
     // An agent (Cua Driver) drives the windows with a pointer of its own: the
     // compositor says where each of its cursors is, on which monitor, and

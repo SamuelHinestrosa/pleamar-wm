@@ -43,6 +43,12 @@ the open windows without closing anything.
   outlined. `pleamar-wm agent click|type|look …` from a shell, the
   `pleamar-desktop` skill for Claude Code, Codex and OpenCode, and
   [Cua Driver](https://github.com/trycua/cua)'s `cua-inject` protocol.
+- **This desktop from any browser** (`pleamar-wm remote`): from another
+  computer, with nothing installed there, its monitors as video encoded on
+  the graphics card and its mouse and keyboard, straight between the two
+  when the networks let it (WebRTC), behind a password and six-digit codes.
+  Whoever sits here sees it (an amber edge, and from where), and the one
+  elsewhere does not get that over their picture.
 - **The window manager is a scene**: layouts, decorations, animations and drag
   behaviour are a `.plm` file — copy it (`pleamar-wm scene ~/.config/pleamar/wm`, with its shaders) and make it yours.
 - **Tiled or free, per monitor, in one key**: five tiled layouts (leader left or
@@ -429,6 +435,22 @@ Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
   is drawn in (what a picture of it is cut from): with it Cua Driver
   captures windows and clicks and drags by coordinates (a change of its own,
   proposed upstream); without it, typing, keys and accessibility actions.
+- **This desktop from elsewhere** (`pleamar-wm remote`): a page, served on
+  127.0.0.1, that shows the monitors and takes the mouse and the keyboard,
+  for working from another computer with only a browser there.
+  `pleamar-wm remote setup` makes a password and a key for an authenticator
+  app (`~/.config/pleamar/remote.conf`); `pleamar-wm remote` serves it, and
+  something in front makes it reachable and encrypted (`tailscale funnel
+  --bg --https=8443 http://127.0.0.1:8765`). The picture is H.264 from the
+  card (NVENC; libx264 without one) through wf-recorder; the page and home
+  meet over the page's socket and then speak directly over UDP (WebRTC),
+  or keep to the socket if the networks do not let it, with the rate
+  following the way. The hands are a pointer and a keyboard made with
+  uinput: the session's own shortcuts and bar, not the agent's. While
+  someone is in, the session marks it on the monitors on a surface left out
+  of captures (`captures: hidden`), so the picture sent does not carry it;
+  `Super+Shift+Escape` (`pleamar-wm remote stop`) sends everyone away and
+  ends every session.
 
 Not yet: touch screens and tablets, dragging out of the window manager's
 own scene (its `carries:` zones).

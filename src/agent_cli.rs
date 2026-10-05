@@ -47,6 +47,23 @@ fn socket() -> Option<String> {
     std::path::Path::new(&path).exists().then_some(path)
 }
 
+/// One line to the session's socket, as no agent in particular (its cursor's
+/// label is left as it is): the reply.
+pub(crate) fn tell(line: &str) -> Result<String, String> {
+    let path = socket().ok_or("no agent socket here")?;
+    let stream = UnixStream::connect(&path).map_err(|e| format!("{path}: {e}"))?;
+    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(5)));
+    let mut writer = stream.try_clone().map_err(|e| e.to_string())?;
+    let mut reader = BufReader::new(stream);
+    let mut reply = String::new();
+    for l in ["cua-inject v1", line] {
+        writeln!(writer, "{l}").map_err(|e| e.to_string())?;
+        reply.clear();
+        reader.read_line(&mut reply).map_err(|e| e.to_string())?;
+    }
+    Ok(reply.trim_end().to_owned())
+}
+
 /// The monitors, as the session counts them: name, and box in units.
 pub(crate) fn monitors() -> Result<Vec<(String, f64, f64, f64, f64)>, String> {
     let reply = Hands::open()?.say("o")?;
