@@ -13,16 +13,16 @@ unsafe extern "system" fn foreground_event(_:windows::Win32::UI::Accessibility::
     unsafe { GetWindowThreadProcessId(hwnd,Some(&mut pid)); }
     FOCUS_EVENTS.with(|events|events.borrow_mut().push(pid));
 }
-struct FocusWatch(windows::Win32::UI::Accessibility::HWINEVENTHOOK);
+pub(super) struct FocusWatch(windows::Win32::UI::Accessibility::HWINEVENTHOOK);
 impl FocusWatch {
-    fn new() -> Result<Self> {
+    pub(super) fn new() -> Result<Self> {
         use windows::Win32::UI::Accessibility::*;
         FOCUS_EVENTS.with(|events|events.borrow_mut().clear());
         let hook=unsafe { SetWinEventHook(EVENT_SYSTEM_FOREGROUND,EVENT_SYSTEM_FOREGROUND,None,Some(foreground_event),0,0,WINEVENT_OUTOFCONTEXT) };
         if hook.is_invalid() { return Err("could not observe foreground events".into()); }
         Ok(Self(hook))
     }
-    fn events(&self) -> Vec<u32> { pump(); FOCUS_EVENTS.with(|events|events.borrow().clone()) }
+    pub(super) fn events(&self) -> Vec<u32> { pump(); FOCUS_EVENTS.with(|events|events.borrow().clone()) }
 }
 impl Drop for FocusWatch { fn drop(&mut self) { let _=unsafe { windows::Win32::UI::Accessibility::UnhookWinEvent(self.0) }; } }
 

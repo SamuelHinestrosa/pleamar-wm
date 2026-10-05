@@ -46,6 +46,12 @@ jobs:
       - name: Unit tests (interactive desktop tests remain opt-in)
         working-directory: pleamar-wm
         run: cargo test --locked
+      - name: Check the preview scene
+        working-directory: pleamar-wm
+        run: cargo run --locked -- --check examples/windows-preview.plm
+      - name: Check the overview scene
+        working-directory: pleamar-wm
+        run: cargo run --locked -- --check examples/windows-overview.plm
       - name: Build the Windows background host
         if: runner.os == 'Windows'
         working-directory: pleamar-wm
@@ -58,6 +64,9 @@ jobs:
           $caps = & ./target/debug/pleamar-wm.exe capabilities | ConvertFrom-Json
           if ($LASTEXITCODE -ne 0 -or $caps.platform -ne 'windows' -or !$caps.explicit_layouts) {
             throw 'Native capability query failed'
+          }
+          if ($caps.preview_redirected_input -or ($caps.preview_window_actions -join ',') -ne 'focus,close,minimize,restore') {
+            throw 'Incorrect native preview action capabilities'
           }
           & ./target/debug/pleamar-wm.exe remote
           if ($LASTEXITCODE -eq 0) { throw 'An unavailable remote desktop reported success' }

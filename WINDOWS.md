@@ -172,15 +172,37 @@ rendered by pleamar through D3D12. Titles, counts, closing, resizing and scene
 reload use the normal `windows` scene API. `--preview-process` retains the
 current process creation identity; a reused PID does not expand its scope.
 
-This mode is **view-only**. Use the original application for input; configuration,
-launch, focus and other scene window actions report that they are unavailable.
-It does not replace the native layout session or enable Marea's pending effects.
+Without `--window-actions`, this mode is **view-only**. With that explicit flag,
+the normal scene actions `focus`, `minimize`, `restore` and `close` operate on
+the corresponding native window:
+
+```powershell
+./target/release/pleamar-wm.exe --scene examples/windows-overview.plm --screen '\\.\DISPLAY2' --preview-monitor '\\.\DISPLAY2' --window-actions
+```
+
+The overview example has six slots. Each action rechecks the window's identity,
+monitor and optional process scope. `close` requests a normal application close;
+an application that cancels or asks to save remains listed until it actually
+closes. Minimized windows keep their slot and last picture, release their capture
+resources, and resume capture when restored. Initially minimized windows are
+listed without a picture until restored. Capture failures also leave the real
+window listed; they do not invent an image or pretend it closed. A failed
+capture is retried on its next minimize/restore cycle.
+
+`focus` selects the original native window for normal application input. It
+respects Windows' foreground restrictions and reports a rejected activation to
+stderr; no injected key or input-queue attachment bypasses them. The scene's
+focus facts follow observed native focus. Pointer/keyboard forwarding through
+the picture, resizing, launch and other scene actions remain unavailable.
+Restore alone does not request keyboard focus. This does not replace the native
+layout session or enable Marea's pending effects.
 Capture can be denied by an application or unavailable on a Windows installation;
 errors are reported and no synthetic picture is substituted.
 
 The initial transport uses CPU readback, capped at 30 updates per window per second.
 A render acknowledgement bounds queued batches; capture dimensions are bounded
-to 8192 per edge and 16 megapixels in aggregate, with at most 64 slots. The GPU
+to 8192 per edge and 16 megapixels in aggregate, with at most 64 slots. Retained
+minimized pictures count towards that bound. The GPU
 device and readback textures are reused. Capture callbacks and native waitable
 timers wake the preview worker; it does not change the system timer period.
 This is not a zero-copy path or a claim
@@ -197,7 +219,7 @@ remain work for the full port.
 | Automatic per-monitor session | Native creation/closure, minimize, failure rollback, shutdown and crash recovery verified on DISPLAY2 |
 | Window rules | Native app/title, float, initial size and monitor rules; DISPLAY2 lifecycle tests passed; transfers between physical displays still need acceptance |
 | Live scene layouts; private/workspace rules | Pending |
-| Live window previews | Experimental native capture/render transport; view-only, explicit source monitor |
+| Live window previews | Experimental native capture/render transport; explicit source monitor, optional native focus/close/minimize/restore actions |
 | Marea menu/finder bridge | Module tested with real Luau, IPC and owned Windows windows; complete Marea UI acceptance pending; package lifecycle tested separately |
 | Rain, snow, ride, dock, animated window transitions | Pending native equivalents |
 | Per-monitor tide pools and overview | Pending; Windows virtual desktops are not the same model |
@@ -227,10 +249,11 @@ cargo test --release --locked native_session_lifecycle -- --ignored --nocapture 
 cargo test --release --locked native_window_rules -- --ignored --nocapture --test-threads=1
 cargo test --release --locked native_persistent_window_capture -- --ignored --nocapture --test-threads=1
 cargo test --release --locked native_window_preview_repaints -- --ignored --nocapture --test-threads=1
+cargo test --release --locked native_window_preview_actions -- --ignored --nocapture --test-threads=1
 ```
 
-[Windows and Ubuntu CI](https://github.com/SamuelHinestrosa/pleamar-wm/actions/runs/37332411188)
-passed at `205f3508730e907f4faa58c37980859f6554ad46`, including default Luau,
+[Windows and Ubuntu CI](https://github.com/SamuelHinestrosa/pleamar-wm/actions/runs/37337638887)
+passed at `f68911b3386faa3d98e426d593a5e30ea46efa2b`, including default Luau,
 ordinary unit tests and the Windows background host. The interactive test
 stays ignored in CI. Neither compilation nor the geometry
 test proves completed visual effects, interaction parity or a complete WM port.
@@ -275,5 +298,20 @@ input occurred. The updated observer records foreground process transitions;
 the passing run observed no transition, no test-process activation and unchanged
 focus, while still recording external input. No physical input was injected.
 Transfer between physical monitors, mixed-DPI acceptance and minimized/maximized
-rule application remain unverified. The CI link above predates these rule changes;
-their cross-platform CI must pass before claiming the new head is validated.
+rule application remain unverified. That rule revision passed the CI above.
+The optional overview actions are a subsequent change and require their own
+cross-platform CI; the earlier run does not validate them. Locally, 16 ordinary
+tests pass. The separate native overview test passed on DISPLAY2 with actual
+WGC-to-D3D12 pictures: initially minimized windows, retained slots, restoration
+and subsequent pixel updates, view-only rejection, an application cancelling
+close, confirmed close and a command addressing a closed slot. Its product
+cards were captured and inspected. The test invokes scene actions over IPC;
+physical clicks and successful foreground activation remain untested. The
+foreground observer recorded no activation or focus change.
+
+The two-window preview regression also passed actual source repaint, resize,
+Luau callbacks, scene reload and closure after this change. In its short
+eight-second animation sample, the scene process kept 657 handles and private
+commit changed from 186.5 to 187.3 MiB; it consumed 0.688 CPU seconds (about
+8.6% of one core). This is a small fixture, not an all-day Marea measurement,
+presentation frame rate, or proof that full desktop composition is optimized.
