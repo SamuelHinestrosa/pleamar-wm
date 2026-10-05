@@ -445,8 +445,14 @@ Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
   and Electron programs, which cut a key's character to 16 bits, emoji go
   by number, Ctrl+Shift+U). A program's own windows come before those of
   the programs it started (a browser Discord opened a link in is not
-  Discord). `tools/agent/demo.py` moves the cursors over a
-  window. `pleamar-wm agent windows | look | click | type | key | hotkey |
+  Discord). A program the agent needs is started with `pleamar-wm agent
+  open COMMAND`: the monitor it works on lights up first (the one asked for,
+  the one it is working on, or one your pointer is not on), and the window
+  opens there without taking your keyboard —a program already running that
+  opens it from its old process, or asks to come forward, included—. The
+  agent's keys stay in the window it types in while it works there, as a
+  window you type in stays focused. `tools/agent/demo.py` moves the cursors over a
+  window. `pleamar-wm agent windows | open | look | click | type | key | hotkey |
   scroll | drag | focus | monitors | send | done | stop` is the same from a shell, for an agent or a script:
   a window by its process, its coordinates those of `look`'s picture. Besides
   the protocol's commands, `l` lists the windows and `r PID` says the box the window

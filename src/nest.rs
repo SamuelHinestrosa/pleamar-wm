@@ -1034,7 +1034,9 @@ impl State {
                     self.tell(NestEvent::Order(self.order.clone()));
                 }
             }
-            ToNest::Launch(command) => self.launch(&command),
+            ToNest::Launch(command) => {
+                self.launch(&command);
+            }
             ToNest::Pin(program, yes) => self.pin(&program, yes),
             // Its workspace is no longer shown: nobody has the keyboard.
             ToNest::Blur => self.set_focus(None),
@@ -1369,7 +1371,8 @@ impl State {
         crate::config::write_dock(&self.pins);
     }
 
-    fn launch(&self, command: &str) {
+    /// A command, as the session starts its programs; its process.
+    fn launch(&self, command: &str) -> Option<u32> {
         let mut c = std::process::Command::new("sh");
         c.arg("-c").arg(command);
         c.env("WAYLAND_DISPLAY", &self.socket);
@@ -1427,13 +1430,18 @@ impl State {
         std::os::unix::process::CommandExt::process_group(&mut c, 0);
         match c.spawn() {
             Ok(mut child) => {
-                LAUNCHED.lock().unwrap().push(child.id() as i32);
+                let pid = child.id();
+                LAUNCHED.lock().unwrap().push(pid as i32);
                 // Reaped when it ends, so it does not linger as a zombie.
                 std::thread::spawn(move || {
                     let _ = child.wait();
                 });
+                Some(pid)
             }
-            Err(e) => eprintln!("windows · '{command}' could not start: {e}"),
+            Err(e) => {
+                eprintln!("windows · '{command}' could not start: {e}");
+                None
+            }
         }
     }
 
@@ -1780,7 +1788,9 @@ impl State {
                 let monitor = layers::monitors().iter().position(|m| m.name == name);
                 self.frame_done(monitor);
             }
-            ToLayers::Launch(command) => self.launch(&command),
+            ToLayers::Launch(command) => {
+                self.launch(&command);
+            }
             ToLayers::Released(numbers) => self.release(numbers),
             ToLayers::Monitors => self.monitors_changed(),
             ToLayers::Captured { id, pixels } => self.hand_picture(id, pixels),
@@ -2081,7 +2091,10 @@ impl State {
             Toplevel::X11(x) => x.pid().unwrap_or(0),
             Toplevel::Xdg(_) => surface.client().and_then(|c| c.get_credentials(&self.dh).ok()).map_or(0, |c| c.pid as u32),
         };
-        let screen = self.agent_screen_for(pid).filter(|s| *s < self.outputs.len()).unwrap_or(self.on_screen);
+        // One the agent opened (`agent open`): on its monitor, and yours
+        // stays where it was.
+        let opened = self.agent_opened(pid, &app).filter(|s| *s < self.outputs.len());
+        let screen = opened.or_else(|| self.agent_screen_for(pid)).filter(|s| *s < self.outputs.len()).unwrap_or(self.on_screen);
         // Its size, the one the scene already has for that slot; tiled on all
         // sides, so it does not draw a shadow or round corners of its own: the
         // scene decides how it looks.
@@ -2117,7 +2130,9 @@ impl State {
         }
         // X11 says whose it is before it is shown (Wayland, later: `parent_changed`).
         self.beside_parent(slot);
-        self.set_focus(Some(slot));
+        if opened.is_none() {
+            self.set_focus(Some(slot));
+        }
     }
 
     fn forget(&mut self, toplevel: &Toplevel) {
@@ -3460,6 +3475,19 @@ impl XdgActivationHandler for State {
     }
 
     fn request_activation(&mut self, token: XdgActivationToken, data: XdgActivationTokenData, surface: WlSurface) {
+        // A program the agent just opened asking to come forward (Chrome's
+        // new window; Discord, already running, shown again): to the
+        // agent's monitor, and your keyboard stays where it is.
+        if let Some(slot) = self.window_of(&surface) {
+            let app = self.slots[slot].as_ref().map(|w| w.app.clone()).unwrap_or_default();
+            if let Some(screen) = self.agent_opened(self.pid_of(slot), &app) {
+                if self.slots[slot].as_ref().is_some_and(|w| w.screen != screen) {
+                    self.handle(ToNest::Send(slot, screen));
+                }
+                self.activation.remove_token(&token);
+                return;
+            }
+        }
         if data.timestamp.elapsed() < Duration::from_secs(10) {
             if let Some(slot) = self.window_of(&surface) {
                 self.tell(NestEvent::Reveal(slot));
