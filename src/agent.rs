@@ -70,6 +70,15 @@ pub struct Agent {
     /// same objects, so if it has gone in or out since, what the program
     /// thinks is not what was said.
     raw_real: [Option<WlSurface>; CURSORS],
+    /// The window its keys went to straight on its objects (one that is not
+    /// yours): it stays entered while the agent works with it, as a window
+    /// you type in stays focused. Entering and leaving around every key
+    /// command made a program think it lost focus between the agent's
+    /// Ctrl+K and its letters, and Discord's search box got none of them.
+    kb_entered: Option<WlSurface>,
+    /// Where your keyboard was when that was said: if it has been anywhere
+    /// since (that window too), the program may have been told `leave`.
+    kb_real: Option<WlSurface>,
     /// Per cursor: how many things it has done, for the scene to know it moved.
     seen: [u32; CURSORS],
     /// And all of them, keys too: the scene knows the agent is at work.
@@ -149,7 +158,7 @@ pub fn start(state: &mut State) {
         return;
     }
     println!("agent · computer use: cua-inject v1 at {path}");
-    state.agent = Some(Agent { seats, raw_entered: [None, None], raw_real: [None, None], seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None, remote: None });
+    state.agent = Some(Agent { seats, raw_entered: [None, None], raw_real: [None, None], kb_entered: None, kb_real: None, seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None, remote: None });
     // Whether it is at work, looked at every second: between one action and
     // the next an agent thinks, and that is still working.
     let timer = Timer::from_duration(Duration::from_secs(1));
@@ -557,6 +566,20 @@ impl State {
         agent.last = None;
         agent.peer = 0;
         self.agent_still_working();
+        self.agent_keyboard_leave();
+    }
+
+    /// The window its keys went to is left (unless it is yours now: then
+    /// its focus is your keyboard's).
+    fn agent_keyboard_leave(&mut self) {
+        let Some(old) = self.agent.as_mut().and_then(|a| a.kb_entered.take()) else { return };
+        if !old.is_alive() || self.keyboard.current_focus().as_ref() == Some(&old) {
+            return;
+        }
+        let Some(client) = old.client() else { return };
+        for k in self.keyboard.client_keyboards(&client) {
+            k.leave(SERIAL_COUNTER.next_serial().into(), &old);
+        }
     }
 
     /// At work, as long as it may be thinking what to do next: a minute and a
@@ -598,6 +621,9 @@ impl State {
         if working != agent.active {
             agent.active = working;
             let _ = self.to_render.send(ToRender::Fact(pleamar::scene::intern("agent.active"), if working { 1.0 } else { 0.0 }));
+            if !working {
+                self.agent_keyboard_leave();
+            }
         }
     }
 
@@ -929,6 +955,9 @@ impl State {
         // If it is the window you are typing in, as if you typed it (the
         // characters were already looked up in your layout).
         if mine && special.is_none() {
+            if self.agent.as_ref().is_some_and(|a| a.kb_entered.as_ref() != Some(&root)) {
+                self.agent_keyboard_leave();
+            }
             let keyboard = self.keyboard.clone();
             for (held, code) in presses {
                 for (code, down) in held.iter().map(|c| (*c, true)).chain(std::iter::once((*code, true))).chain(std::iter::once((*code, false))).chain(held.iter().rev().map(|c| (*c, false))) {
@@ -939,12 +968,19 @@ impl State {
             }
             return Ok(());
         }
-        // Not yours: straight to its keyboard objects, entered and left around
-        // the keys, with the US keymap for that while and yours back after.
+        // Not yours: straight to its keyboard objects, with the US keymap for
+        // the while and yours back after. Entered once and left when the
+        // agent goes to another window or is done (`agent_keyboard_leave`).
         let keyboards: Vec<wl_keyboard::WlKeyboard> = self.keyboard.client_keyboards(&client).collect();
         if keyboards.is_empty() {
             return Err("no-keyboard-resource");
         }
+        let real = self.keyboard.current_focus();
+        let entered = self.agent.as_ref().and_then(|a| a.kb_entered.clone());
+        if entered.as_ref() != Some(&root) {
+            self.agent_keyboard_leave();
+        }
+        let still = !mine && entered.as_ref() == Some(&root) && self.agent.as_ref().is_some_and(|a| a.kb_real == real);
         let keymap = self.your_keymap(|k| k.get_as_string(xkb::KEYMAP_FORMAT_TEXT_V1));
         let us_keymap = special.map_or_else(us_keymap_string, str::to_owned);
         let us = keymap_fd(&us_keymap).ok_or("no-keymap")?;
@@ -952,8 +988,9 @@ impl State {
         let time = self.time();
         for k in &keyboards {
             k.keymap(wl_keyboard::KeymapFormat::XkbV1, us.0.as_fd(), us.1);
-            // The window you are typing in already has its keyboard entered.
-            if !mine {
+            // The window you are typing in already has its keyboard entered,
+            // and so has the one the agent is typing in.
+            if !mine && !still {
                 k.enter(SERIAL_COUNTER.next_serial().into(), &root, Vec::new());
             }
             k.modifiers(SERIAL_COUNTER.next_serial().into(), 0, 0, 0, 0);
@@ -972,12 +1009,13 @@ impl State {
             }
         }
         for k in &keyboards {
-            if !mine {
-                k.leave(SERIAL_COUNTER.next_serial().into(), &root);
-            }
             if let Some(y) = &yours {
                 k.keymap(wl_keyboard::KeymapFormat::XkbV1, y.0.as_fd(), y.1);
             }
+        }
+        if let Some(a) = self.agent.as_mut() {
+            a.kb_entered = (!mine).then(|| root.clone());
+            a.kb_real = real;
         }
         Ok(())
     }
