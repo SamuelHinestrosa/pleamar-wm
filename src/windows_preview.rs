@@ -78,7 +78,7 @@ fn start(max:usize,to_render:Sender<ToRender>) -> Option<pleamar::NestSender> {
 }
 
 struct Slot { window:Window, capture:Option<capture::Capture>, received:bool, pixels:u64, born:Instant, next_frame:Instant,
-    configure:configure::Configure }
+    configure:configure::Configure, visible:bool }
 impl Slot {
     // A minimized window still has its last texture in the renderer. It must
     // count towards the same bound even after its capture resources are freed.
@@ -92,6 +92,7 @@ struct Preview {
     slots:Vec<Option<Slot>>, send:Sender<ToRender>, _hooks:Hooks,
     consumed:Option<mpsc::Receiver<String>>, scale:f64, waiter:wait::Waiter, warned:HashSet<&'static str>,
     focused:Option<usize>,
+    visible:HashSet<usize>,
 }
 impl Preview {
     fn new(max:usize,scope:Scope,send:Sender<ToRender>,wake:std::sync::Arc<wait::Wake>) -> Result<Self> {
@@ -108,7 +109,7 @@ impl Preview {
         hooks.add(EVENT_SYSTEM_FOREGROUND,EVENT_SYSTEM_FOREGROUND,0)?;
         let waiter=wait::Waiter::new(wake.clone())?;
         Ok(Self { scope,created,device:capture::Device::new(Some(wake))?,slots:(0..max).map(|_|None).collect(),
-            send,_hooks:hooks,consumed:None,scale:1.0,waiter,warned:HashSet::new(),focused:None })
+            send,_hooks:hooks,consumed:None,scale:1.0,waiter,warned:HashSet::new(),focused:None,visible:HashSet::new() })
     }
     fn tell(&self,event:NestEvent) -> Result<()> { self.send.send(ToRender::Nest(event))?; Ok(()) }
     fn order(&self) -> Result<()> {
@@ -127,7 +128,7 @@ impl Preview {
         let existing:u64=self.slots.iter().enumerate().filter(|(k,_)|*k!=i)
             .filter_map(|(_,s)|s.as_ref()).map(Slot::pixels).sum();
         let Some(slot)=self.slots[i].as_mut() else { return; };
-        if slot.window.minimized { return; }
+        if slot.window.minimized || !slot.visible { return; }
         let result=(|| -> Result<_> { let (hwnd,_)=target(&slot.window.id)?;
             Ok(capture::Capture::new(self.device.clone(),hwnd,16_777_216u64.saturating_sub(existing))?) })();
         match result {
@@ -177,7 +178,7 @@ impl Preview {
             self.tell(NestEvent::Opened {slot:i,title:window.title.clone(),app:window.app.clone(),screen:0})?;
             self.tell(NestEvent::Minimized(i,window.minimized))?;
             self.slots[i]=Some(Slot {window,capture:None,received:false,pixels:0,born:Instant::now(),next_frame:Instant::now(),
-                configure:configure::Configure::default()});
+                configure:configure::Configure::default(),visible:self.visible.contains(&i)});
             self.capture(i);
         }
         self.order()?;
@@ -224,6 +225,23 @@ impl Preview {
         }
         Ok(())
     }
+    fn visible(&mut self,slots:Vec<usize>) -> Result<()> {
+        self.visible=slots.into_iter().filter(|i|*i<self.slots.len()).collect();
+        // Retire every hidden image before starting the newly visible captures,
+        // so an old page cannot consume the next page's capture budget.
+        for i in 0..self.slots.len() {
+            let Some(slot)=self.slots[i].as_mut() else { continue; };
+            if slot.visible && !self.visible.contains(&i) {
+                slot.visible=false;slot.capture=None;slot.pixels=0;slot.received=false;
+                self.tell(NestEvent::Frame {slot:i,geometry:[0,0,0,0],pieces:Vec::new()})?;
+            }
+        }
+        for i in 0..self.slots.len() {
+            let Some(slot)=self.slots[i].as_mut() else { continue; };
+            if !slot.visible && self.visible.contains(&i) { slot.visible=true;self.capture(i); }
+        }
+        Ok(())
+    }
     fn run(&mut self,commands:mpsc::Receiver<ToNest>) -> Result<()> {
         let mut topology=Instant::now();
         loop {
@@ -233,6 +251,7 @@ impl Preview {
                     Ok(ToNest::Quit)|Err(TryRecvError::Disconnected) => return Ok(()),
                     Err(TryRecvError::Empty) => break,
                     Ok(ToNest::FrameDone) => {},
+                    Ok(ToNest::Visible(slots)) => self.visible(slots)?,
                     Ok(ToNest::Size(..)|ToNest::Shown {..}|ToNest::OnScreen(..)|ToNest::Gpu {..}|ToNest::Released(..)|ToNest::PointerOut|ToNest::HostFocus(..)) => {},
                     Ok(ToNest::Configure {slot,w,h}) => {
                         if !self.scope.actions && (w,h)==(0,0) { continue; }
@@ -350,7 +369,7 @@ mod tests {
         window.process=13;assert!(!scope.allows(&window,Some(255)));
         window.process=12;window.monitor="primary".into();assert!(!scope.allows(&window,Some(255)));
         let slot=Slot {window,capture:None,received:true,pixels:1_000_000,born:Instant::now(),next_frame:Instant::now(),
-            configure:configure::Configure::default()};
+            configure:configure::Configure::default(),visible:false};
         assert_eq!(slot.pixels(),1_000_000,"suspended capture must retain its renderer memory budget");
     }
 }

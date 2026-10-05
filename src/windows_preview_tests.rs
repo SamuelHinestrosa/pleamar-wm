@@ -23,6 +23,109 @@ unsafe extern "system" fn size_fixture(hwnd:HWND,message:u32,w:WPARAM,l:LPARAM) 
 struct Scene(Child);
 impl Drop for Scene { fn drop(&mut self) { let _=self.0.kill();let _=self.0.wait(); } }
 
+#[test]
+#[ignore = "Marea overview pagination on owned secondary-monitor windows without input or activation"]
+fn native_marea_overview_pages() -> Result<()> {
+    let requested=std::env::var("PLEAMAR_WM_TEST_MONITOR")?;
+    let binary=std::fs::canonicalize(std::env::var_os("PLEAMAR_WM_TEST_BINARY").ok_or("set PLEAMAR_WM_TEST_BINARY")?)?;
+    let product=std::path::PathBuf::from(std::env::var_os("PLEAMAR_WM_TEST_OVERVIEW").ok_or("set PLEAMAR_WM_TEST_OVERVIEW")?);
+    let dpi=unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+    assert!(!dpi.0.is_null());let _dpi=ThreadDpi(dpi);
+    let monitor=select_monitor(&requested)?;assert!(!monitor.primary);
+    let watch=super::session_tests::FocusWatch::new()?;
+    let foreground=unsafe { GetForegroundWindow() };
+    let module=unsafe { windows::Win32::System::LibraryLoader::GetModuleHandleW(None) }?;
+    let class=WNDCLASSW {lpfnWndProc:Some(super::capture_tests::paint_fixture),hInstance:module.into(),
+        lpszClassName:w!("pleamar-wm-marea-pages"),..Default::default()};
+    assert_ne!(unsafe { RegisterClassW(&class) },0);
+    let mut owned=OwnWindows(Vec::new());
+    let colors=[0x0020c060,0x00d03080,0x006040e0,0x00c09020,0x0070c030,0x003070d0];
+    for i in 0..6 {
+        let title:Vec<_>=format!("Overview ñ {i}").encode_utf16().chain([0]).collect();
+        let hwnd=unsafe { CreateWindowExW(WS_EX_APPWINDOW,class.lpszClassName,PCWSTR(title.as_ptr()),WS_OVERLAPPEDWINDOW,
+            monitor.work.x+20+i as i32*35,monitor.work.y+40+i as i32*30,400,280,None,None,Some(module.into()),None) }?;
+        owned.0.push(hwnd);
+        unsafe { SetWindowLongPtrW(hwnd,GWLP_USERDATA,colors[i]);let _=ShowWindow(hwnd,SW_SHOWNOACTIVATE); }
+        pump();assert!(monitor.work.contains(&inspect(hwnd).unwrap().bounds));
+    }
+    let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
+    let directory=std::path::PathBuf::from(std::env::var_os("PLEAMAR_WM_TEST_OUTPUT").ok_or("set PLEAMAR_WM_TEST_OUTPUT")?);
+    std::fs::create_dir(&directory)?;
+    let path=directory.join("windows-overview.plm");
+    let source=std::fs::read_to_string(&product)?;
+    let surface="surface { size: full, full; level: overlay; keyboard: on_demand; rate: 30 }";
+    assert!(source.contains(surface));
+    std::fs::write(&path,source.replace(surface,"surface { size: 960, 640; anchor: center; keyboard: none; reserve: 0; rate: 30 }"))?;
+    std::fs::copy(product.with_extension("luau"),path.with_extension("luau"))?;
+    let namespace=format!("wm-marea-pages-{nonce}");
+    let log=std::fs::File::create(directory.join("scene.log"))?;
+    let mut paths=vec![binary.parent().unwrap().to_owned()];
+    paths.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()));
+    let mut scene=Scene(Command::new(&binary).arg("--scene").arg(&path)
+        .args(["--screen",&requested,"--preview-monitor",&requested,"--preview-process",&std::process::id().to_string(),
+            "--window-actions","--no-hud","--stall","0","--seconds","120"])
+        .env("PLEAMAR_SOCKET_DIR",&namespace).env("PLEAMAR_TEST_WINDOWS","1").env("PLEAMAR_NO_RELAUNCH","1")
+        .env("MAREA_LOCALE","es").env("PATH",std::env::join_paths(paths)?)
+        .stdout(log.try_clone()?).stderr(Stdio::from(log)).creation_flags(0x08000000|0x00004000).spawn()?);
+    let query=|line:&str|ask(&binary,&path,&namespace,line);
+    let wait_for=|line:&str,predicate:fn(&str)->bool| -> Result<String> {
+        let start=Instant::now();
+        loop {
+            pump();let result=query(line);
+            if let Ok(value)=&result { if predicate(value) { return Ok(value.clone()); } }
+            if start.elapsed()>Duration::from_secs(15) { return Err(format!("{line}: {result:?}").into()); }
+            std::thread::sleep(Duration::from_millis(25));
+        }
+    };
+    wait_for("get win.count",|s|s=="6")?;
+    assert_eq!(query("get locale")?,"es");
+    let mut slots=Vec::new();
+    for i in 0..6 {
+        let title=query(&format!("get win.{i}.title"))?;
+        let fixture=title.strip_prefix("Overview ñ ").ok_or("unexpected window title")?.parse::<usize>()?;
+        let place=query(&format!("get win.{i}.place"))?.parse::<usize>()?;
+        slots.push((place,i,fixture));
+    }
+    slots.sort_unstable();
+    let hwnd=canvas(scene.0.id(),&monitor)?.ok_or("overview canvas missing")?;
+    let mut capture=capture::Capture::new(capture::Device::new(None)?,hwnd,16_777_216)?;
+    let mut stages=Vec::new();
+    for page in [0,1,0,1] {
+        query(if page==0 { "emit overview_previous" } else { "emit overview_next" })?;
+        for &(place,slot,_) in &slots {
+            let visible=place/4==page;
+            wait_for(&format!("get win.{slot}.width"),if visible { |s|s.parse::<f64>().is_ok_and(|v|v>0.0) } else { |s|s=="0" })?;
+            assert!(matches!(query(&format!("get win.{slot}.open"))?.as_str(),"1"|"true"));
+        }
+        let fixture=slots[page*4].2;
+        let color=colors[fixture] as u32;
+        let pixels=[(color>>16) as u8,(color>>8) as u8,color as u8,255];
+        let frame=picture(&mut capture,&mut scene,pixels,true)?;
+        std::fs::write(directory.join(format!("page-{page}.bgra")),frame.pixels)?;
+        std::fs::write(directory.join(format!("page-{page}-size.json")),serde_json::to_string(&frame.size)?)?;
+        stages.push(json!({"page":page,"visible_captures":if page==0 {4} else {2},"hidden_geometry_cleared":true,"catalog_count":6}));
+    }
+    // Hidden sources keep their identity, but their next page must show fresh pixels.
+    let (..,fixture)=slots[0];
+    unsafe { SetWindowLongPtrW(owned.0[fixture],GWLP_USERDATA,0x00e060a0);let _=InvalidateRect(Some(owned.0[fixture]),None,false); }
+    query("emit overview_previous")?;
+    picture(&mut capture,&mut scene,[0xe0,0x60,0xa0,255],true)?;
+    let child=scene.0.id();
+    query("emit overview_close")?;
+    let start=Instant::now();
+    while scene.0.try_wait()?.is_none()&&start.elapsed()<Duration::from_secs(10) { pump();std::thread::sleep(Duration::from_millis(15)); }
+    assert_eq!(scene.0.try_wait()?.and_then(|s|s.code()),Some(0));
+    drop(capture);
+    let activated=watch.events().iter().any(|pid|*pid==std::process::id()||*pid==child);
+    let report=json!({"result":"passed","monitor":monitor.name,"primary":monitor.primary,"dpi_scale":monitor.scale,
+        "product_scene":product,"owned_windows":6,"stages":stages,"fresh_pixels_on_return":true,
+        "luau_close":true,"physical_input":false,"foreground_unchanged":foreground==unsafe{GetForegroundWindow()},"activated":activated});
+    std::fs::write(directory.join("report.json"),serde_json::to_vec_pretty(&report)?)?;
+    println!("{report}");assert!(!activated);
+    drop(owned);unsafe { UnregisterClassW(class.lpszClassName,Some(module.into())) }?;
+    Ok(())
+}
+
 fn canvas(pid:u32,monitor:&Monitor) -> Result<Option<HWND>> {
     struct Find { pid:u32,window:Option<HWND> }
     unsafe extern "system" fn visit(hwnd:HWND,data:LPARAM) -> BOOL { unsafe {

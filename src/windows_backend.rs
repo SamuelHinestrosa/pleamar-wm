@@ -306,7 +306,7 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
         ["--version"] => Ok(Some(json!({"version": env!("CARGO_PKG_VERSION"), "platform": "windows", "experimental": true}))),
         ["capabilities"] => Ok(Some(json!({"platform": "windows", "experimental": true,
             "monitors": true, "windows": true, "explicit_layouts": true, "minimize_restore": true,
-            "native_scenes_luau": true, "read_only_window_previews": true,
+            "native_scenes_luau": true, "read_only_window_previews": true, "visible_window_capture": true,
             "preview_window_actions": ["focus", "close", "minimize", "restore", "configure"], "preview_redirected_input": false,
             "window_rules": ["app", "title", "float", "size", "monitor"], "private_window_rules": false, "workspace_window_rules": false,
             "window_scene_provider": false, "automatic_session": true, "rain": false, "snow": false,

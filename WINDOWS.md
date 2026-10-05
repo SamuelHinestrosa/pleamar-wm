@@ -15,7 +15,7 @@ merging them does not enable them in the capability report below.
 Install the stable Rust x64 MSVC toolchain and Visual Studio Build Tools with
 Desktop development with C++ and the Windows SDK. Keep this checkout next to
 the matching `pleamar` Windows port (`../pleamar`). The current CI pins pleamar
-commit `fba25a9189d51a6137ac633358cf21400c82e174` from the Windows PR; upstream
+commit `9636ef7216897095830376bed4ad8e1471e5e351` from the Windows PR; upstream
 pleamar alone does not yet include that backend.
 
 ```powershell
@@ -33,6 +33,20 @@ The matching Marea preview installer packages the companion and supervises its
 lifetime. This checkout's Cargo build does not install it or enable startup.
 
 ## Explicit window layouts
+
+The matching Marea profile includes a paged **Window overview** on its selected
+monitor. The session advertises `window_overview`; `capabilities` advertises
+`visible_window_capture`. The renderer sends demand independently of input
+placement, including before a window's first image. Hidden pages stop native
+capture and clear retained CPU pictures, while keeping window identities and
+titles. The GPU atlas may retain its capacity for reuse. The Linux compositor
+ignores this resource-demand message and keeps its existing client-buffer and
+input-placement behavior.
+
+The Marea scene shows four windows at a time, up to the PLM language's 32-slot
+limit. Uncapturable/minimized windows remain reachable. Source captures still
+share the 16,777,216-pixel budget; multiple very large windows can exceed it.
+This is an overview of native windows, not redirected input into their pictures.
 
 The backend manages normal, resizable application windows. It ignores desktop
 surfaces, tool windows and windows on other virtual desktops. Automatic
@@ -281,6 +295,9 @@ cargo test --release --locked native_persistent_window_capture -- --ignored --no
 cargo test --release --locked native_window_preview_repaints -- --ignored --nocapture --test-threads=1
 cargo test --release --locked native_window_preview_actions -- --ignored --nocapture --test-threads=1
 cargo test --release --locked native_window_scene_sizes -- --ignored --nocapture --test-threads=1
+# Optional integration with the matching Marea checkout:
+$env:PLEAMAR_WM_TEST_OVERVIEW = (Resolve-Path '../marea-plm/tools/windows-overview.plm').Path
+cargo test --release --locked native_marea_overview_pages -- --ignored --nocapture --test-threads=1
 ```
 
 [Windows and Ubuntu CI](https://github.com/SamuelHinestrosa/pleamar-wm/actions/runs/37337638887)
@@ -356,3 +373,14 @@ eight-second animation sample, the scene process kept 657 handles and private
 commit changed from 186.5 to 187.3 MiB; it consumed 0.688 CPU seconds (about
 8.6% of one core). This is a small fixture, not an all-day Marea measurement,
 presentation frame rate, or proof that full desktop composition is optimized.
+
+The demand-driven capture change passes 18 ordinary WM tests and the matching
+engine's 155 library tests. Its native Marea overview test ran on DISPLAY2 at
+125% scaling with six owned windows and four page changes: only the current
+page retained image geometry, all six identities remained present, and returning
+to a changed source showed fresh real pixels. Actual WGC captures of both pages
+were inspected, including Spanish controls and preserved image proportions.
+Closing through the scene's exported Luau event ended the process successfully.
+The existing native action regression also passed after this change. Neither
+test injected input or activated its windows. Successful click-to-focus remains
+unverified; unit tests cover the denied-focus and failed-close logic.
