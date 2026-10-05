@@ -20,6 +20,11 @@
   swaybg,
   pam,
   pipewire,
+  openssl,
+  grim,
+  wf-recorder,
+  wl-clipboard,
+  libnotify,
 }:
 let
   version = (lib.importTOML ../Cargo.toml).package.version;
@@ -53,6 +58,8 @@ rustPlatform.buildRustPackage {
     libdrm
     pam
     pipewire
+    # `pleamar-wm remote`'s direct way (WebRTC) encrypts with it.
+    openssl
   ];
 
   doCheck = false;
@@ -88,6 +95,13 @@ rustPlatform.buildRustPackage {
         lib.makeBinPath [
           xwayland
           swaybg
+          # The agent's pictures and the remote desktop's: the monitors
+          # taken (grim), as video (wf-recorder), the clipboard both ways,
+          # and the notice when someone signs in from elsewhere.
+          grim
+          wf-recorder
+          wl-clipboard
+          libnotify
         ]
       } \
       --set-default FONTCONFIG_FILE ${fontconfig.out}/etc/fonts/fonts.conf

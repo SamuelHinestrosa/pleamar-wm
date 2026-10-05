@@ -143,6 +143,15 @@ pleamar-update --agent       # and AI agents may use your windows (computer use)
 Then log out and choose **pleamar-wm**, or from a TTY of its own (Ctrl+Alt+F3,
 log in there): `pleamar-session`. `pleamar-update` keeps it up to date.
 
+To use it from another computer, with only a browser there (it needs
+`wf-recorder` and `grim`, and `wl-clipboard` for the clipboard):
+
+```sh
+pleamar-wm remote setup      # a password, and a key for your authenticator app
+pleamar-wm remote            # the page, on 127.0.0.1:8765 (keep it running)
+tailscale funnel --bg --https=8443 http://127.0.0.1:8765   # reachable, encrypted
+```
+
 From the source, next to a clone of [pleamar] (`../pleamar`):
 
 ```sh
@@ -257,6 +266,8 @@ The ones that come with it (`pleamar-wm keys` prints them all), as on Hyprland:
 | `Super+Shift+arrows` | lead, move to the other monitor, change places |
 | `Super+-` · `Super++` | the leader narrower / wider |
 | `Super+Space` · `Super+L` | Marea's search · lock |
+| `Super+Shift+A` | talk with Marea (her chat, which can use the desktop for you) |
+| `Super+Shift+Escape` | whoever uses this desktop from elsewhere: out, now |
 | `Print` · `Shift+Print` · `Ctrl+Print` | a piece, the screen, the window |
 | three fingers down / up | close / fullscreen |
 | four fingers sideways | the keyboard to the next / previous |
@@ -427,7 +438,11 @@ Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
   acting on it reach the dialog, which opens on the monitor of the window it
   belongs to —as does any dialog—, and so does a window the program opens
   while the agent works with it. Any text is typed, accents and emoji too
-  (a keymap made for it, as wtype does). `tools/agent/demo.py` moves the cursors over a
+  (a keymap made for it, as wtype does, on keys that only write; in Chromium
+  and Electron programs, which cut a key's character to 16 bits, emoji go
+  by number, Ctrl+Shift+U). A program's own windows come before those of
+  the programs it started (a browser Discord opened a link in is not
+  Discord). `tools/agent/demo.py` moves the cursors over a
   window. `pleamar-wm agent windows | look | click | type | key | hotkey |
   scroll | drag | focus | monitors | send | done | stop` is the same from a shell, for an agent or a script:
   a window by its process, its coordinates those of `look`'s picture. Besides
