@@ -173,7 +173,7 @@
     // Fallen behind (a slow moment): skip to a whole frame, newer.
     if (!key && decoder.decodeQueueSize > 6) { needKey = true; send('full'); return; }
     needKey = false;
-    decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: (stamp += 33333), data }));
+    decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: (stamp += 16667), data }));
   }
 
   function tile(buf) {

@@ -379,11 +379,11 @@ enum Want {
 /// Intel), and the processor's. Each with what makes it answer at once:
 /// no frames held back to compare with later ones.
 const ENCODERS: &[(&str, &[&str])] = &[
-    ("h264_nvenc", &["preset=p1", "tune=ull", "zerolatency=1", "bf=0", "g=900", "rc=vbr", "b=8M", "maxrate=14M"]),
-    ("libx264", &["preset=ultrafast", "tune=zerolatency", "bf=0", "g=900", "crf=24"]),
+    ("h264_nvenc", &["preset=p1", "tune=ull", "zerolatency=1", "bf=0", "g=1800", "rc=vbr", "b=10M", "maxrate=18M"]),
+    ("libx264", &["preset=ultrafast", "tune=zerolatency", "bf=0", "g=1800", "crf=24"]),
 ];
 
-/// A monitor as video: wf-recorder taking it 30 times a second (the
+/// A monitor as video: wf-recorder taking it 60 times a second (the
 /// compositor's own copies) into H.264, cut here into frames.
 struct Video {
     child: std::process::Child,
@@ -404,7 +404,7 @@ impl Video {
         use std::os::fd::AsRawFd;
         let mut why = String::new();
         for (codec, params) in ENCODERS {
-            let mut args: Vec<String> = ["-D", "--no-dmabuf", "-o", monitor, "-r", "30", "-c", codec].iter().map(|v| v.to_string()).collect();
+            let mut args: Vec<String> = ["-D", "--no-dmabuf", "-o", monitor, "-r", "60", "-c", codec].iter().map(|v| v.to_string()).collect();
             for p in *params {
                 args.push("-p".into());
                 args.push(p.to_string());
