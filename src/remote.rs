@@ -763,6 +763,7 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
     let mut direct = false;
     let mut hands_direct = false;
     let mut last_rate = Instant::now();
+    let mut low_since: Option<Instant> = None;
     loop {
         // Every so often: the session is still good (not signed out elsewhere).
         if checked.elapsed() > Duration::from_secs(30) {
@@ -801,15 +802,28 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
                 }
                 PeerEvent::WholeFrame => restart = true,
                 PeerEvent::Estimate(k) if direct => {
-                    // What the way takes: less at once, more only now and then.
+                    // What the way takes. Less only when it says so for a
+                    // while (a still screen sends little, and one low guess
+                    // while a monitor starts again is not the way being
+                    // full); more only now and then.
                     let k = k.clamp(KBPS_MIN, KBPS_MAX);
-                    let lower = k < flow.kbps * 7 / 10;
-                    let higher = k > flow.kbps * 13 / 10 && last_rate.elapsed() > Duration::from_secs(15);
-                    if lower || higher {
-                        flow.kbps = (k * 9 / 10).max(KBPS_MIN);
-                        flow.fps = if flow.kbps < 4000 { 30 } else { 60 };
-                        last_rate = Instant::now();
-                        restart = true;
+                    if k < flow.kbps * 7 / 10 {
+                        let since = *low_since.get_or_insert_with(Instant::now);
+                        if since.elapsed() > Duration::from_secs(3) {
+                            low_since = None;
+                            flow.kbps = (k * 9 / 10).max(3000);
+                            flow.fps = if k < 2500 { 30 } else { 60 };
+                            last_rate = Instant::now();
+                            restart = true;
+                        }
+                    } else {
+                        low_since = None;
+                        if k > flow.kbps * 13 / 10 && last_rate.elapsed() > Duration::from_secs(15) {
+                            flow.kbps = (k * 9 / 10).min(KBPS_MAX);
+                            flow.fps = 60;
+                            last_rate = Instant::now();
+                            restart = true;
+                        }
                     }
                 }
                 PeerEvent::Estimate(_) => {}
