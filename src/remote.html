@@ -25,7 +25,7 @@
   #bar button:hover { border-color: var(--sea); }
   #bar button.on { background: var(--sea); color: var(--sea-ink); border-color: var(--sea); }
   #bar .sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 2px; }
-  #bar .status { color: var(--faint); font-size: 12px; padding: 0 4px; min-width: 70px; text-align: center; }
+  #bar .status { color: var(--faint); font-size: 12px; padding: 0 4px; min-width: 150px; text-align: center; }
   #stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
   canvas { max-width: 100%; max-height: 100%; image-rendering: auto; cursor: default; outline: none; }
   #keys { position: absolute; opacity: 0; width: 1px; height: 1px; left: -10px; top: -10px; }
@@ -69,6 +69,7 @@
   const statusEl = document.getElementById('status');
   const bar = document.getElementById('bar');
   const toastEl = document.getElementById('toast');
+  let rtt = 0, kbps = 0, rate = 0;
   let ws, monitors = [], current = 0, pending = 0, frames = 0, lastFps = performance.now(), queue = Promise.resolve();
 
   const toast = (t) => { toastEl.textContent = t; toastEl.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(() => toastEl.classList.remove('show'), 1800); };
@@ -116,6 +117,8 @@
       } else if (verb === 'size') {
         const [, w, h] = rest.map(Number);
         if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      } else if (verb === 'stats') {
+        [rtt, kbps, rate] = rest.map(Number);
       } else if (verb === 'video') {
         newDecoder();
       } else if (verb === 'novideo') {
@@ -140,12 +143,14 @@
 
   // The video: H.264 frames as they come, decoded by the browser (the card's
   // decoder where there is one), each painted as soon as it is out.
-  let decoder = null, configured = false, needKey = true, stamp = 0;
+  let decoder = null, configured = false, needKey = true;
   function newDecoder() {
     if (decoder) { try { decoder.close(); } catch (_) {} }
     configured = false; needKey = true;
     decoder = new VideoDecoder({
       output: (f) => {
+        // Shown: home measures the way (and this computer) with it.
+        send('got ' + Math.round(f.timestamp / 1000));
         if (canvas.width !== f.displayWidth || canvas.height !== f.displayHeight) { canvas.width = f.displayWidth; canvas.height = f.displayHeight; }
         ctx.drawImage(f, 0, 0); f.close(); frames++;
       },
@@ -164,16 +169,16 @@
   function video(buf) {
     if (!decoder) newDecoder();
     const all = new Uint8Array(buf);
-    const key = all[1] === 1, data = all.subarray(2);
+    const key = all[1] === 1, data = all.subarray(6), seq = new DataView(buf).getUint32(2);
     if (needKey && !key) return;
     if (!configured) {
       decoder.configure({ codec: codecOf(data) || 'avc1.640028', optimizeForLatency: true });
       configured = true;
     }
-    // Fallen behind (a slow moment): skip to a whole frame, newer.
-    if (!key && decoder.decodeQueueSize > 6) { needKey = true; send('full'); return; }
+    // Hopelessly behind: start again from a whole frame (home slows down by itself before this).
+    if (decoder.decodeQueueSize > 40) { newDecoder(); send('full'); return; }
     needKey = false;
-    decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: (stamp += 16667), data }));
+    decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: seq * 1000, data }));
   }
 
   function tile(buf) {
@@ -187,7 +192,8 @@
   setInterval(() => {
     const now = performance.now();
     const fps = Math.round(frames * 1000 / (now - lastFps));
-    if (ws && ws.readyState === 1) statusEl.textContent = fps > 0 ? fps + ' fps' : 'live · still';
+    const way = rtt ? ' · ' + rtt + ' ms · ' + (kbps / 1000).toFixed(1) + ' Mb/s' + (rate && rate < 60 ? ' · ' + rate + ' max' : '') : '';
+    if (ws && ws.readyState === 1) statusEl.textContent = (fps > 0 ? fps + ' fps' : 'still') + way;
     frames = 0; lastFps = now;
   }, 2000);
 

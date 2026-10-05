@@ -206,8 +206,11 @@ fn serve(view_only: bool) -> Result<(), String> {
         let Ok(stream) = stream else { continue };
         let (gate, hands) = (gate.clone(), hands.clone());
         std::thread::spawn(move || {
-            if let Err(e) = connection(stream, &gate, &hands, view_only) {
-                eprintln!("remote · {e}");
+            // A connection opened ahead and never used (browsers do) is not news.
+            if let Err(e) = connection(stream, &gate, &hands, view_only).map_err(|e| e.to_string()) {
+                if e != "bad request" && !e.contains("os error 11") {
+                    eprintln!("remote · {e}");
+                }
             }
         });
     }
@@ -379,11 +382,11 @@ enum Want {
 /// Intel), and the processor's. Each with what makes it answer at once:
 /// no frames held back to compare with later ones.
 const ENCODERS: &[(&str, &[&str])] = &[
-    ("h264_nvenc", &["preset=p1", "tune=ull", "zerolatency=1", "bf=0", "g=1800", "rc=vbr", "b=10M", "maxrate=18M"]),
-    ("libx264", &["preset=ultrafast", "tune=zerolatency", "bf=0", "g=1800", "crf=24"]),
+    ("h264_nvenc", &["preset=p1", "tune=ull", "zerolatency=1", "bf=0", "g=1800", "rc=vbr"]),
+    ("libx264", &["preset=ultrafast", "tune=zerolatency", "bf=0", "g=1800"]),
 ];
 
-/// A monitor as video: wf-recorder taking it 60 times a second (the
+/// A monitor as video: wf-recorder taking it 60 (or 30) times a second (the
 /// compositor's own copies) into H.264, cut here into frames.
 struct Video {
     child: std::process::Child,
@@ -400,14 +403,17 @@ impl Drop for Video {
 }
 
 impl Video {
-    fn start(monitor: &str) -> Result<Video, String> {
+    /// At that many kilobits a second (more in a burst: a page scrolled).
+    fn start(monitor: &str, kbps: u32, fps: u32) -> Result<Video, String> {
         use std::os::fd::AsRawFd;
         let mut why = String::new();
         for (codec, params) in ENCODERS {
-            let mut args: Vec<String> = ["-D", "--no-dmabuf", "-o", monitor, "-r", "60", "-c", codec].iter().map(|v| v.to_string()).collect();
-            for p in *params {
+            let fps = fps.to_string();
+            let mut args: Vec<String> = ["-D", "--no-dmabuf", "-o", monitor, "-r", &fps, "-c", codec].iter().map(|v| v.to_string()).collect();
+            let rate = [format!("b={kbps}k"), format!("maxrate={}k", kbps * 3 / 2), format!("bufsize={}k", kbps / 2)];
+            for p in params.iter().map(|p| p.to_string()).chain(rate) {
                 args.push("-p".into());
-                args.push(p.to_string());
+                args.push(p);
             }
             args.extend(["-m", "h264", "-f", "pipe:1"].iter().map(|v| v.to_string()));
             let mut child = match std::process::Command::new("wf-recorder").args(&args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn() {
@@ -424,7 +430,7 @@ impl Video {
                 why.push_str(&format!("{codec} did not start; "));
                 continue;
             }
-            println!("remote · {monitor} as video with {codec}");
+            println!("remote · {monitor} as video with {codec}, {kbps} kb/s, {fps} a second");
             let (tx, rx) = mpsc::sync_channel(24);
             let behind = Arc::new(std::sync::atomic::AtomicBool::new(false));
             let late = behind.clone();
@@ -505,6 +511,110 @@ fn access_units(data: &[u8]) -> Vec<(bool, Vec<u8>)> {
     out
 }
 
+/// How the video is doing on the way: each frame the page says it has
+/// shown (so a computer slow to decode counts as much as a slow network),
+/// how long that took, and how much is still on the way.
+struct Flow {
+    seq: u32,
+    on_the_way: std::collections::VecDeque<(u32, Instant)>,
+    /// Round trip, smoothed (ms).
+    rtt: f64,
+    kbps: u32,
+    fps: u32,
+    waiting: bool,
+    last_trouble: Instant,
+    last_raise: Instant,
+    last_stats: Instant,
+}
+
+enum Pace {
+    Go,
+    /// Too much on the way: send nothing until it arrives.
+    Wait,
+    /// It arrived: start again (a whole frame), with less.
+    Again,
+}
+
+const KBPS_START: u32 = 8000;
+const KBPS_MIN: u32 = 1500;
+const KBPS_MAX: u32 = 16000;
+
+impl Flow {
+    fn new() -> Flow {
+        let now = Instant::now();
+        Flow { seq: 0, on_the_way: Default::default(), rtt: 0.0, kbps: KBPS_START, fps: 60, waiting: false, last_trouble: now, last_raise: now, last_stats: now }
+    }
+
+    fn sent(&mut self) -> u32 {
+        self.seq = self.seq.wrapping_add(1);
+        self.on_the_way.push_back((self.seq, Instant::now()));
+        self.seq
+    }
+
+    fn got(&mut self, seq: u32) {
+        while let Some((s, at)) = self.on_the_way.front().copied() {
+            if s > seq {
+                break;
+            }
+            self.on_the_way.pop_front();
+            if s == seq {
+                let ms = at.elapsed().as_secs_f64() * 1000.0;
+                self.rtt = if self.rtt == 0.0 { ms } else { self.rtt * 0.85 + ms * 0.15 };
+            }
+        }
+    }
+
+    fn state(&mut self) -> Pace {
+        let oldest = self.on_the_way.front().map_or(Duration::ZERO, |(_, at)| at.elapsed());
+        if self.waiting {
+            // Arrived (or lost for good): again, with less.
+            if self.on_the_way.is_empty() || oldest > Duration::from_secs(4) {
+                self.waiting = false;
+                // Fewer frames first (half the work for both ends), then fewer bits.
+                if self.fps > 30 {
+                    self.fps = 30;
+                    self.kbps = (self.kbps * 8 / 10).max(KBPS_MIN);
+                } else {
+                    self.kbps = (self.kbps * 6 / 10).max(KBPS_MIN);
+                }
+                return Pace::Again;
+            }
+            return Pace::Wait;
+        }
+        if oldest > Duration::from_millis(300) {
+            self.waiting = true;
+            self.last_trouble = Instant::now();
+            return Pace::Wait;
+        }
+        // A good while calm and quick: a little more.
+        let calm = Duration::from_secs(40);
+        if (self.kbps < KBPS_MAX || self.fps < 60) && self.last_trouble.elapsed() > calm && self.last_raise.elapsed() > calm && self.rtt > 0.0 && self.rtt < 150.0 {
+            self.last_raise = Instant::now();
+            if self.kbps < KBPS_START {
+                self.kbps = (self.kbps * 13 / 10).min(KBPS_MAX);
+            } else if self.fps < 60 {
+                self.fps = 60;
+            } else {
+                self.kbps = (self.kbps * 13 / 10).min(KBPS_MAX);
+            }
+            return Pace::Again;
+        }
+        Pace::Go
+    }
+
+    fn restarted(&mut self) {
+        self.on_the_way.clear();
+    }
+
+    fn stats_due(&mut self) -> bool {
+        let due = self.last_stats.elapsed() > Duration::from_secs(1);
+        if due {
+            self.last_stats = Instant::now();
+        }
+        due
+    }
+}
+
 /// One connected page: what it says goes to the hands; the picture comes
 /// as video (or, for a browser without a video decoder, as squares of JPEG
 /// each time the page has painted the last ones).
@@ -531,6 +641,7 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
     std::thread::spawn(move || pictures(names, want_rx, frame_tx));
 
     let mut monitor = 0usize;
+    let mut flow = Flow::new();
     let mut video_wanted = false;
     let mut video: Option<Video> = None;
     let mut restart = false;
@@ -570,6 +681,7 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
                             pending = Some(true);
                         }
                     }
+                    ("got", [seq]) => flow.got(*seq as u32),
                     ("ack", _) => {
                         waiting = false;
                         if pending.is_none() {
@@ -628,10 +740,25 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
             if video.as_ref().is_some_and(|v| v.behind.load(std::sync::atomic::Ordering::Relaxed)) {
                 restart = true;
             }
+            // The way there filling up (a slower moment of the network, the
+            // buffers of whoever is in between): stop sending until it has
+            // emptied, and go on with less.
+            match flow.state() {
+                Pace::Go => {}
+                Pace::Wait => {
+                    while let Some(Ok(_)) = video.as_ref().map(|v| v.frames.try_recv()) {}
+                    continue;
+                }
+                Pace::Again => restart = true,
+            }
+            if flow.stats_due() {
+                let _ = ws.send(Message::Text(format!("stats {} {} {}", flow.rtt.round(), flow.kbps, flow.fps).into()));
+            }
             if restart {
                 restart = false;
                 video = None;
-                match Video::start(&monitors[monitor].0) {
+                flow.restarted();
+                match Video::start(&monitors[monitor].0, flow.kbps, flow.fps) {
                     Ok(v) => {
                         video = Some(v);
                         let _ = ws.send(Message::Text(format!("video {monitor}").into()));
@@ -646,8 +773,10 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
             }
             let mut sent = false;
             while let Some(Ok((key, data))) = video.as_ref().map(|v| v.frames.try_recv()) {
-                let mut message = Vec::with_capacity(data.len() + 2);
+                let seq = flow.sent();
+                let mut message = Vec::with_capacity(data.len() + 6);
                 message.extend_from_slice(&[2, key as u8]);
+                message.extend_from_slice(&seq.to_be_bytes());
                 message.extend_from_slice(&data);
                 ws.write(Message::Binary(message.into())).map_err(|e| e.to_string())?;
                 sent = true;
