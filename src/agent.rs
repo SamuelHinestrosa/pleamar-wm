@@ -582,6 +582,68 @@ impl State {
         Ok(format!("opened {pid} {screen}"))
     }
 
+    /// Whether a window of this process must leave your keyboard where it is:
+    /// it is of the program the agent is working with this moment (it did
+    /// something with it in the last few seconds), and your keyboard is in
+    /// another program. A dialog its keys opened, a window asking to come
+    /// forward after its click, did take it.
+    pub(super) fn agent_keeps_your_keyboard(&self, pid: u32) -> bool {
+        self.agent_keeps_your_keyboard_for(pid, self.focus)
+    }
+
+    /// The same, with your keyboard in `yours`.
+    pub(super) fn agent_keeps_your_keyboard_for(&self, pid: u32, yours: Option<usize>) -> bool {
+        let Some(a) = self.agent.as_ref() else { return false };
+        let Some((root, _)) = a.working else { return false };
+        let recent = a.last.is_some_and(|t| t.elapsed() < Duration::from_secs(5));
+        if !recent || pid == 0 || root == 0 || !(in_family(pid, root) || in_family(root, pid)) {
+            return false;
+        }
+        let yours = yours.map_or(0, |s| self.pid_of(s));
+        !(yours != 0 && (in_family(yours, root) || in_family(root, yours)))
+    }
+
+    /// A character typed by number (Ctrl+Shift+U, its code, a space) into a
+    /// Chromium program, with your keyboard lent to it for those keys and
+    /// given back at once, without telling anyone. Typed with the agent's
+    /// own keys, Discord took the Ctrl+Shift+U as its «upload a file» (the
+    /// character was written too); with the keyboard on it, Chromium keeps
+    /// the keys to itself. The window is entered again for the agent's
+    /// keys after: lending yours told it `leave` when it came back.
+    fn agent_by_number_with_yours(&mut self, slot: usize, c: char) -> Result<(), &'static str> {
+        let root = self.slots.get(slot).and_then(Option::as_ref).ok_or("gone")?.surface.clone();
+        let client = root.client().ok_or("gone")?;
+        let keyboard = self.keyboard.clone();
+        let before = keyboard.current_focus();
+        keyboard.set_focus(self, Some(root.clone()), SERIAL_COUNTER.next_serial());
+        let mut presses: Vec<(Vec<u32>, u32)> = vec![(vec![29, 42], 22)];
+        for d in format!("{:x}", c as u32).bytes() {
+            presses.push((Vec::new(), us_key(d).map_or(57, |(code, _)| code)));
+        }
+        presses.push((Vec::new(), 57));
+        for (held, code) in &presses {
+            for (code, down) in held.iter().map(|c| (*c, true)).chain(std::iter::once((*code, true))).chain(std::iter::once((*code, false))).chain(held.iter().rev().map(|c| (*c, false))) {
+                let state = if down { KeyState::Pressed } else { KeyState::Released };
+                let time = self.time();
+                keyboard.input::<(), _>(self, (code + 8).into(), state, SERIAL_COUNTER.next_serial(), time, |_, _, _| FilterResult::Forward);
+            }
+        }
+        keyboard.set_focus(self, before.clone(), SERIAL_COUNTER.next_serial());
+        // In again for the agent's keys, where it was.
+        if before.as_ref() != Some(&root) {
+            for k in self.keyboard.client_keyboards(&client) {
+                k.enter(SERIAL_COUNTER.next_serial().into(), &root, Vec::new());
+                k.modifiers(SERIAL_COUNTER.next_serial().into(), 0, 0, 0, 0);
+            }
+            if let Some(a) = self.agent.as_mut() {
+                a.kb_entered = Some(root);
+                a.kb_slot = Some(slot);
+                a.kb_real = before;
+            }
+        }
+        Ok(())
+    }
+
     /// The monitors, in the order `windows` numbers them.
     fn agent_monitors(&self) -> String {
         let mut out = String::from("monitors");
@@ -958,8 +1020,13 @@ impl State {
                     self.agent_type_keys(slot, &run)?;
                     run.clear();
                 }
-                self.agent_press(slot, &[(vec![29, 42], 22)])?;
-                self.agent_type(slot, format!("{:x} ", c as u32).as_bytes())?;
+                if self.agent_through_yours(slot) {
+                    self.agent_press(slot, &[(vec![29, 42], 22)])?;
+                    self.agent_type(slot, format!("{:x} ", c as u32).as_bytes())?;
+                } else {
+                    self.agent_busy(slot);
+                    self.agent_by_number_with_yours(slot, c)?;
+                }
             } else {
                 run.push(c);
             }

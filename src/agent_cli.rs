@@ -23,6 +23,7 @@ const HELP: &str = "pleamar-wm agent — use the desktop with the agent's own po
   drag PID X1 Y1 X2 Y2            press at one point, glide to the other, let go
   scroll PID X Y up|down|left|right [STEPS]
   type PID TEXT                   text (accents, ñ, emoji too), typed into the window without taking the keyboard
+  type PID -                      the same, the text read from the input (for a password)
   key PID NAME                    enter tab escape backspace space up down left right delete home end pageup pagedown f1…f12
   hotkey PID MODS+KEY             ctrl+l, ctrl+shift+t, alt+f4 …
   open [--monitor N] COMMAND…      start a program for the agent: the monitor it works on lights
@@ -367,7 +368,15 @@ fn go(args: &[String]) -> Result<(), String> {
         }
         "type" => {
             let p = pid()?;
-            let text = args[2..].join(" ");
+            // `-`: the text from the input, not the command line (a password
+            // must not be seen in the list of processes).
+            let text = if args.len() == 3 && args[2] == "-" {
+                let mut s = String::new();
+                std::io::Read::read_to_string(&mut std::io::stdin(), &mut s).map_err(|e| e.to_string())?;
+                s.strip_suffix('\n').map(str::to_owned).unwrap_or(s)
+            } else {
+                args[2..].join(" ")
+            };
             let mut h = Hands::open()?;
             // In pieces (one line of the protocol has its limits), whole
             // characters each: any text, accents and all.
