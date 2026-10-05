@@ -474,7 +474,10 @@ Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
   someone is in, the session marks it on the monitors on a surface left out
   of captures (`captures: hidden`), so the picture sent does not carry it;
   `Super+Shift+Escape` (`pleamar-wm remote stop`) sends everyone away and
-  ends every session.
+  ends every session. A page whose tab is hidden for a few seconds (another
+  tab, minimized, a laptop closed) lets go —no picture, not counted as
+  someone there— and takes it up again when it is seen; one with no mouse
+  or key from it for half an hour is signed out.
 
 Not yet: touch screens and tablets, dragging out of the window manager's
 own scene (its `carries:` zones).
