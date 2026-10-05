@@ -14,7 +14,7 @@ commit `7c0edebd8e1c97c6c590f463ea58454e189ce55d` from the Windows PR; upstream
 pleamar alone does not yet include that backend.
 
 ```powershell
-cargo build --release --locked
+cargo build --release --locked --features windows-host
 cargo test --release --locked
 ./target/release/pleamar-wm.exe capabilities
 ./target/release/pleamar-wm.exe monitors
@@ -28,10 +28,9 @@ There is no Windows installer or automatic startup for this companion yet.
 
 ## Explicit window layouts
 
-The current backend manages only explicitly selected normal, resizable
-application windows. It ignores desktop surfaces, tool windows and windows
-on other virtual desktops. It does not automatically rearrange applications,
-replace Explorer, intercept keys, or implement its own compositor input seat.
+The backend manages normal, resizable application windows. It ignores desktop
+surfaces, tool windows and windows on other virtual desktops. Automatic
+management is opt-in per monitor; explicit one-shot layouts are also available.
 
 Get IDs from `windows` and a monitor name from `monitors`, then:
 
@@ -58,6 +57,52 @@ each operation. They are short-lived desktop references, not persisted app
 identities or an authorization boundary. Do not reuse an old catalog across
 application restarts.
 
+## Persistent session and Marea
+
+```powershell
+# Keep this running; all monitors initially stay in free mode.
+./target/release/pleamar-wm.exe session --monitor all
+
+# From another PowerShell window:
+./target/release/pleamar-wm.exe --say wm 'status'
+./target/release/pleamar-wm.exe --say wm 'layout \\.\DISPLAY2 grid'
+./target/release/pleamar-wm.exe --say wm 'toggle \\.\DISPLAY2'
+./target/release/pleamar-wm.exe --say wm 'quit'
+```
+
+Use repeated `--monitor NAME` options to limit the session to certain displays.
+`--process PID` further limits it to that application's current process identity.
+New, closed, restored and minimized windows update active layouts through
+native window events. The desktop catalog is not polled continuously; display
+topology is checked every two seconds. A resize rejection returns the monitor
+to free mode, restores positions and reports the error in `status`.
+
+The session stores original positions under pleamar's configuration directory
+in `wm/windows-session.json`, with an exclusive file lock and atomic updates.
+`--state FILE` selects an isolated journal. `quit` restores positions while
+preserving minimized state. If the process crashes, the next session restores
+the journal before accepting commands. Unavailable/hidden windows and changed
+display geometry can leave pending recovery entries, which `status` reports;
+real hotplug and maximized-window acceptance are still pending.
+
+Commands use a local named pipe restricted to the current Windows user and
+session; remote pipe clients are rejected. Frames, waits and cancellation are
+bounded. One request runs on the desktop thread at a time. Idle connections
+wait on kernel events. `PLEAMAR_WM_NAMESPACE` separates test sessions.
+
+For a persistent background session, `pleamar-wm-host.exe --monitor all` runs
+the same manager as a GUI-subsystem process with no console. It omits the
+scene renderer from its executable; use `pleamar-wm.exe` for commands and
+scenes. Build this optional Windows-only packaging target with
+`--features windows-host`. Default Linux builds/installations keep their
+original single executable.
+
+The companion Marea branch now detects this session and offers its supported
+layout/restore actions in the menu and finder. It targets the screen where
+Marea lives, requires a native acknowledgement, and keeps pending effects
+hidden. Building these sources alone does not install or start the companion:
+including it in Marea's installer and managing its lifetime there remain work.
+
 ## Status and remaining parity work
 
 | Area | Windows status |
@@ -65,8 +110,9 @@ application restarts.
 | Monitor/catalog queries and `hyprctl` compatibility reads | Native implementation |
 | Explicit five-layout arrangement, undo, minimize/restore | Passed native tests with three owned windows on DISPLAY2; broad application acceptance pending |
 | Pleamar scenes, Luau and hot reload | Native D3D12 scene, Luau callbacks and saved logic/scene reloads verified on DISPLAY2 |
-| Automatic per-monitor session, rules and live scene layouts | Pending |
-| Marea menu/launcher integration and package inclusion | Pending; do not set `in_wm` merely because the executable exists |
+| Automatic per-monitor session | Native creation/closure, minimize, failure rollback, shutdown and crash recovery verified on DISPLAY2 |
+| Window rules and live scene layouts | Pending |
+| Marea menu/finder bridge | Module tested with real Luau, IPC and owned Windows windows; complete Marea UI acceptance and package inclusion pending |
 | Rain, snow, ride, dock, animated window transitions | Pending native equivalents |
 | Per-monitor tide pools and overview | Pending; Windows virtual desktops are not the same model |
 | Independent agent pointer/keyboard, glow and stop UI | Pending; Marea currently uses guarded shared Windows input |
@@ -89,6 +135,9 @@ chosen secondary display before running it:
 ```powershell
 $env:PLEAMAR_WM_TEST_MONITOR = '\\.\DISPLAY2'
 cargo test --release --locked native_layouts_and_restore_on_secondary_monitor -- --ignored --nocapture --test-threads=1
+$env:PLEAMAR_WM_TEST_BINARY = (Resolve-Path ./target/release/pleamar-wm.exe).Path
+$env:PLEAMAR_WM_TEST_HOST = (Resolve-Path ./target/release/pleamar-wm-host.exe).Path
+cargo test --release --locked native_session_lifecycle -- --ignored --nocapture --test-threads=1
 ```
 
 The CI workflow is prepared to build the Windows and Linux targets and run
@@ -97,7 +146,8 @@ interactive test stays ignored in CI. Neither compilation nor the geometry
 test proves completed visual effects, interaction parity or a complete WM port.
 
 On 2026-10-05, the release build with default Luau support succeeded on Windows
-x64/MSVC. Six ordinary unit tests passed. The separate native test passed on
+x64/MSVC. Nine ordinary unit tests passed, including IPC malformed-client
+recovery, exclusive ownership and cancellation on shutdown. Native tests passed on
 `\\.\DISPLAY2`: all five layouts and their undo, actual minimize/restore,
 Unicode paths, closed-window rejection, and rollback after a test application
 rejected its new size. It created three owned windows, sent no physical input,
@@ -108,4 +158,12 @@ captures checked startup, a Luau event, a saved Luau change, a saved scene
 change and a subsequent callback. The counter reached seven, accented text
 rendered correctly, and the process closed successfully without changing
 foreground focus. This was passive validation, not a physical input test.
+The separate session test verified automatic create/close handling, keeping a
+minimized window minimized when releasing its layout, crash recovery and clean
+shutdown. The same test passed with the small background host. In its
+five-second idle sample, it performed zero catalog scans and used 1.34 MiB
+private commit / 8.95 MiB working set. CPU time did not increase
+at the Windows counter's resolution. This short sample covers only the WM
+daemon, not Marea, GPU rendering or sustained desktop use; working set includes
+shared pages.
 Linux execution and the new WM CI remain pending.

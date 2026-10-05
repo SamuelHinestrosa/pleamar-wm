@@ -3,11 +3,11 @@ use super::*;
 #[test]
 fn unsupported_capabilities_do_not_report_success() {
     for args in [vec!["session"], vec!["agent", "click", "0", "1", "2"], vec!["remote"],
-        vec!["--say", "wm", "emit toggle_rain"], vec!["tile", "0", "grid", "--save", "undo.json"]] {
+        vec!["tile", "0", "grid", "--save", "undo.json"]] {
         assert!(execute(&args.into_iter().map(String::from).collect::<Vec<_>>()).is_err());
     }
     let caps = execute(&["capabilities".into()]).unwrap().unwrap();
-    for feature in ["window_scene_provider", "automatic_session", "rain", "snow", "ride", "dock", "pools", "remote", "independent_agent_seat"] {
+    for feature in ["window_scene_provider", "rain", "snow", "ride", "dock", "pools", "remote", "independent_agent_seat"] {
         assert_eq!(caps[feature], false);
     }
 }
@@ -27,19 +27,19 @@ fn rejects_invalid_window_identifiers() {
     }
 }
 
-struct OwnWindows(Vec<HWND>);
+pub(super) struct OwnWindows(pub(super) Vec<HWND>);
 impl Drop for OwnWindows {
     fn drop(&mut self) {
         for hwnd in self.0.drain(..) { let _ = unsafe { DestroyWindow(hwnd) }; }
     }
 }
 
-struct ThreadDpi(DPI_AWARENESS_CONTEXT);
+pub(super) struct ThreadDpi(pub(super) DPI_AWARENESS_CONTEXT);
 impl Drop for ThreadDpi {
     fn drop(&mut self) { unsafe { SetThreadDpiAwarenessContext(self.0); } }
 }
 
-unsafe extern "system" fn fixture_proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESULT {
+pub(super) unsafe extern "system" fn fixture_proc(hwnd: HWND, message: u32, w: WPARAM, l: LPARAM) -> LRESULT {
     // Model an application that rejects resizing. Only these owned test HWNDs
     // use this procedure; no application is subclassed or injected into.
     if message == WM_WINDOWPOSCHANGING && unsafe { GetWindowLongPtrW(hwnd, GWLP_USERDATA) } == 1 {

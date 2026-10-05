@@ -46,6 +46,10 @@ jobs:
       - name: Unit tests (interactive desktop tests remain opt-in)
         working-directory: pleamar-wm
         run: cargo test --locked
+      - name: Build the Windows background host
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        run: cargo build --locked --features windows-host --bin pleamar-wm-host
       - name: Native Windows capability smoke
         if: runner.os == 'Windows'
         working-directory: pleamar-wm
@@ -55,6 +59,6 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $caps.platform -ne 'windows' -or !$caps.explicit_layouts) {
             throw 'Native capability query failed'
           }
-          & ./target/debug/pleamar-wm.exe session
-          if ($LASTEXITCODE -eq 0) { throw 'An unavailable compositor session reported success' }
+          & ./target/debug/pleamar-wm.exe remote
+          if ($LASTEXITCODE -eq 0) { throw 'An unavailable remote desktop reported success' }
           exit 0

@@ -8,11 +8,19 @@ use windows::{core::*, Win32::{Foundation::*, Graphics::{Dwm::*, Gdi::*},
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+#[path = "windows_ipc.rs"]
+mod ipc;
+#[path = "windows_session.rs"]
+mod session;
+
 const HELP: &str = "pleamar-wm — experimental native Windows desktop companion
 
   capabilities                     machine-readable support status
   monitors                         connected displays and physical work areas (JSON)
   windows                          ordinary application windows (JSON)
+  session --monitor NAME|all       start in free mode; --state FILE selects its recovery journal
+                                   --process PID scopes automatic management to one application
+  --say wm COMMAND                status, toggle MONITOR, layout MONITOR KIND, free MONITOR, quit
   hyprctl monitors|activewindow     compatibility queries for existing scenes
   tile MONITOR LAYOUT --save FILE ID...
                                    tile these normal windows on their current monitor;
@@ -23,8 +31,8 @@ const HELP: &str = "pleamar-wm — experimental native Windows desktop companion
 
 Layouts: left, right, columns, rows, grid. MONITOR is a display name or number
 from `monitors`. IDs come from `windows`. Coordinates are physical pixels.
-Automatic management, compositor effects, pools and remote/agent seats are not
-implemented here yet. Unsupported commands fail instead of pretending to work.";
+Compositor effects, pools and remote/agent seats are not implemented here yet.
+Unsupported commands fail instead of pretending to work.";
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 struct Bounds { x: i32, y: i32, width: i32, height: i32 }
@@ -100,7 +108,7 @@ impl Identity {
     fn token(self) -> String { format!("{}:{}:{:x}:{:x}", self.pid, self.thread, self.hwnd.0 as usize, self.created) }
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Clone, Debug, Serialize)]
 struct Window { id: String, title: String, class: String, process: u32, monitor: String,
     bounds: Bounds, minimized: bool, maximized: bool, resizable: bool }
 
@@ -265,10 +273,12 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
         ["--version"] => Ok(Some(json!({"version": env!("CARGO_PKG_VERSION"), "platform": "windows", "experimental": true}))),
         ["capabilities"] => Ok(Some(json!({"platform": "windows", "experimental": true,
             "monitors": true, "windows": true, "explicit_layouts": true, "minimize_restore": true,
-            "native_scenes_luau": true, "window_scene_provider": false, "automatic_session": false, "rain": false, "snow": false,
+            "native_scenes_luau": true, "window_scene_provider": false, "automatic_session": true, "rain": false, "snow": false,
             "ride": false, "dock": false, "pools": false, "remote": false, "independent_agent_seat": false}))),
         ["monitors"] => Ok(Some(serde_json::to_value(monitors()?)?)),
         ["windows"] => Ok(Some(serde_json::to_value(windows()?)?)),
+        ["session", rest @ ..] => session::run(&rest.iter().map(|s|(*s).to_owned()).collect::<Vec<_>>()).map(Some),
+        ["--say", "wm", command] => ipc::Endpoint::current()?.ask(command).map(Some),
         ["window", id, "minimize"] => state(id, true).map(Some),
         ["window", id, "restore"] => state(id, false).map(Some),
         ["restore-layout", path] => restore_layout(Path::new(path)).map(Some),
@@ -300,6 +310,7 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
 }
 
 pub fn run(args: Vec<String>) -> i32 {
+    if args.first().map(String::as_str) == Some("session") { return run_session(args[1..].to_vec()); }
     // No windows or threads have been created yet; coordinates remain physical
     // when displays have different scaling and origins.
     if let Err(error) = unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) } {
@@ -312,6 +323,20 @@ pub fn run(args: Vec<String>) -> i32 {
     }
 }
 
+pub fn run_session(args: Vec<String>) -> i32 {
+    if let Err(error) = unsafe { SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) } {
+        eprintln!("pleamar-wm: could not enable per-monitor DPI: {error}"); return 1;
+    }
+    match session::run(&args) {
+        Ok(value) => { println!("{value}"); 0 }
+        Err(error) => { eprintln!("pleamar-wm session: {error}"); 1 }
+    }
+}
+
 #[cfg(test)]
 #[path = "windows_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "windows_session_tests.rs"]
+mod session_tests;

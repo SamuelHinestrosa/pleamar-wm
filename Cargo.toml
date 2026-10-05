@@ -5,6 +5,16 @@ edition = "2024"
 license = "BSD-3-Clause"
 description = "A window manager written as a pleamar scene: a Wayland compositor that fills a scene's `windows`"
 repository = "https://github.com/k4ditano/pleamar-wm"
+default-run = "pleamar-wm"
+
+[features]
+windows-host = []
+
+[[bin]]
+name = "pleamar-wm-host"
+path = "src/bin/pleamar-wm-host.rs"
+test = false
+required-features = ["windows-host"]
 
 [dependencies]
 pleamar = { path = "../pleamar" }
@@ -38,4 +48,8 @@ windows = { version = "0.62", features = [
     "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi",
     "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging",
     "Win32_System_Threading", "Win32_System_LibraryLoader",
+    "Win32_System_ProcessStatus",
+    "Win32_System_IO", "Win32_System_Pipes", "Win32_Storage_FileSystem",
+    "Win32_Security", "Win32_Security_Authorization", "Win32_System_RemoteDesktop",
+    "Win32_UI_Accessibility",
 ] }
