@@ -122,7 +122,29 @@ pub struct Agent {
     /// Someone at this desktop from elsewhere (`pleamar-wm remote`): when
     /// that was last said.
     remote: Option<Instant>,
+    /// What the last command pasted, until the window reads it, and what
+    /// was copied before, to give back then: its answer waits for that (see
+    /// `agent_lines`).
+    pasting: Option<(std::sync::Arc<super::Kept>, Option<std::sync::Arc<super::Kept>>)>,
     pub path: String,
+}
+
+/// A connection to the socket: what it sent that is not answered yet, and
+/// whether an answer is being waited for (a paste the window has not read).
+struct Conn {
+    stream: UnixStream,
+    buffer: Vec<u8>,
+    hello: bool,
+    waiting: bool,
+}
+
+/// An answer, down a connection. Blocking for it: it is one short line.
+fn answer(conn: &std::rc::Rc<std::cell::RefCell<Conn>>, reply: &str) -> bool {
+    let c = conn.borrow_mut();
+    let _ = c.stream.set_nonblocking(false);
+    let ok = (&c.stream).write_all(format!("{reply}\n").as_bytes()).is_ok();
+    let _ = c.stream.set_nonblocking(true);
+    ok
 }
 
 /// Where the socket goes: beside the session's other ones.
@@ -178,7 +200,7 @@ pub fn start(state: &mut State) {
         return;
     }
     println!("agent · computer use: cua-inject v1 at {path}");
-    state.agent = Some(Agent { seats, raw_entered: [None, None], raw_real: [None, None], kb_entered: None, kb_slot: None, kb_real: None, opening: Vec::new(), seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None, remote: None });
+    state.agent = Some(Agent { seats, raw_entered: [None, None], raw_real: [None, None], kb_entered: None, kb_slot: None, kb_real: None, opening: Vec::new(), seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None, remote: None, pasting: None });
     // Whether it is at work, looked at every second: between one action and
     // the next an agent thinks, and that is still working.
     let timer = Timer::from_duration(Duration::from_secs(1));
@@ -190,48 +212,80 @@ pub fn start(state: &mut State) {
 
 impl State {
     fn agent_connection(&mut self, stream: UnixStream) {
-        let mut buffer = Vec::<u8>::new();
-        let mut hello = false;
-        let source = Generic::new(stream, Interest::READ, Mode::Level);
+        let Ok(reading) = stream.try_clone() else { return };
+        let conn = std::rc::Rc::new(std::cell::RefCell::new(Conn { stream, buffer: Vec::new(), hello: false, waiting: false }));
+        let source = Generic::new(reading, Interest::READ, Mode::Level);
         let _ = self.handle.insert_source(source, move |_, stream, state: &mut State| {
             let stream: &mut UnixStream = unsafe { stream.get_mut() };
             let mut chunk = [0u8; 4096];
             loop {
                 match stream.read(&mut chunk) {
                     Ok(0) => return Ok(PostAction::Remove),
-                    Ok(n) => buffer.extend_from_slice(&chunk[..n]),
+                    Ok(n) => conn.borrow_mut().buffer.extend_from_slice(&chunk[..n]),
                     Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
                     Err(_) => return Ok(PostAction::Remove),
                 }
                 // A line longer than any command is not one.
-                if buffer.len() > 64 * 1024 {
+                if conn.borrow().buffer.len() > 64 * 1024 {
                     return Ok(PostAction::Remove);
                 }
             }
-            while let Some(end) = buffer.iter().position(|b| *b == b'\n') {
-                let line: Vec<u8> = buffer.drain(..=end).collect();
-                let line = String::from_utf8_lossy(&line).trim_end_matches(['\n', '\r']).to_owned();
-                let reply = if !hello {
-                    if line == HELLO {
-                        hello = true;
-                        HELLO.to_owned()
-                    } else {
-                        let _ = stream.write_all(b"err unsupported-version\n");
-                        return Ok(PostAction::Remove);
-                    }
-                } else {
-                    state.agent_command(&line)
-                };
-                // Blocking for the reply: it is one short line.
-                let _ = stream.set_nonblocking(false);
-                let ok = stream.write_all(format!("{reply}\n").as_bytes()).is_ok();
-                let _ = stream.set_nonblocking(true);
-                if !ok {
-                    return Ok(PostAction::Remove);
-                }
-            }
-            Ok(PostAction::Continue)
+            Ok(if state.agent_lines(&conn) { PostAction::Continue } else { PostAction::Remove })
         });
+    }
+
+    /// The lines a connection sent, answered in order. One that pasted
+    /// (`agent_paste_with_yours`) is answered once the window has read what
+    /// was pasted, or after a second and a half: a program reads it when it
+    /// gets round to the Ctrl+V, and something pasted next could otherwise
+    /// get there first —Chromium pasted the second emoji in place of the
+    /// first—. The lines after it wait meanwhile. false: the connection is over.
+    fn agent_lines(&mut self, conn: &std::rc::Rc<std::cell::RefCell<Conn>>) -> bool {
+        loop {
+            let line = {
+                let mut c = conn.borrow_mut();
+                if c.waiting {
+                    return true;
+                }
+                let Some(end) = c.buffer.iter().position(|b| *b == b'\n') else { return true };
+                let line: Vec<u8> = c.buffer.drain(..=end).collect();
+                String::from_utf8_lossy(&line).trim_end_matches(['\n', '\r']).to_owned()
+            };
+            let reply = if !conn.borrow().hello {
+                if line == HELLO {
+                    conn.borrow_mut().hello = true;
+                    HELLO.to_owned()
+                } else {
+                    let _ = conn.borrow_mut().stream.write_all(b"err unsupported-version\n");
+                    return false;
+                }
+            } else {
+                self.agent_command(&line)
+            };
+            if let Some((pasted, back)) = self.agent.as_mut().and_then(|a| a.pasting.take()) {
+                conn.borrow_mut().waiting = true;
+                let (conn, since) = (conn.clone(), Instant::now());
+                let mut back = Some(back);
+                let timer = Timer::from_duration(Duration::from_millis(5));
+                let _ = self.handle.insert_source(timer, move |_, _, state: &mut State| {
+                    if !pasted.read.load(std::sync::atomic::Ordering::Relaxed) && since.elapsed() < Duration::from_millis(1500) {
+                        return TimeoutAction::ToDuration(Duration::from_millis(5));
+                    }
+                    if let Some(back) = back.take() {
+                        state.agent_give_back(&pasted, back);
+                    }
+                    conn.borrow_mut().waiting = false;
+                    if answer(&conn, &reply) {
+                        state.agent_lines(&conn);
+                    }
+                    TimeoutAction::Drop
+                });
+                return true;
+            }
+            if !answer(conn, &reply) {
+                return false;
+            }
+        }
     }
 
     /// One command, answered once it has been delivered.
@@ -603,25 +657,102 @@ impl State {
         !(yours != 0 && (in_family(yours, root) || in_family(root, yours)))
     }
 
+    /// Text pasted into a Chromium program (Discord, a browser): put on the
+    /// clipboard, Ctrl+V with your keyboard lent to the window for that key
+    /// —what is copied goes with the keyboard: only the window that has it is
+    /// offered it—, and what you had copied given back at once. Typed by
+    /// number instead (Ctrl+Shift+U), an emoji was written, and Discord took
+    /// the Ctrl+Shift+U as its own «upload a file» all the same.
+    /// Ok(false): what you had copied could not be kept to give it back (an
+    /// X11 program's, or one that did not hand it over in time), and nothing
+    /// was done.
+    fn agent_paste_with_yours(&mut self, slot: usize, text: &str) -> Result<bool, &'static str> {
+        use smithay::wayland::selection::data_device::set_data_device_selection;
+        let back = match &self.clipboard {
+            super::Clipboard::Nothing => None,
+            super::Clipboard::Kept(k) => Some(k.clone()),
+            super::Clipboard::X11 => return Ok(false),
+            super::Clipboard::Program(kinds) => {
+                let kinds = kinds.clone();
+                match super::read_copied(self, &kinds) {
+                    Some(k) => Some(super::Kept::new(k)),
+                    None => return Ok(false),
+                }
+            }
+        };
+        let seat = self.seat.clone();
+        let kinds = ["text/plain;charset=utf-8", "text/plain", "UTF8_STRING", "TEXT", "STRING"];
+        let pasted = super::Kept::new(kinds.iter().map(|k| (k.to_string(), text.as_bytes().to_vec())).collect());
+        set_data_device_selection(&self.dh, &seat, kinds.iter().map(|k| k.to_string()).collect(), super::Copied::Kept(pasted.clone()));
+        self.clipboard = super::Clipboard::Kept(pasted.clone());
+        // An X11 program pastes through XWayland: it is told too.
+        super::x11::wayland_copied(self, smithay::wayland::selection::SelectionTarget::Clipboard, Some(pasted.kinds()));
+        let lent = self.agent_with_your_keyboard(slot, &[(vec![29], 47)]);
+        // What you had copied comes back once the window has read the text
+        // (`agent_lines`): before, one that has your keyboard is offered it at
+        // once, and pasted that instead.
+        match lent {
+            Ok(()) => {
+                if let Some(a) = self.agent.as_mut() {
+                    a.pasting = Some((pasted, back));
+                }
+            }
+            Err(_) => self.agent_give_back(&pasted, back),
+        }
+        lent.map(|_| true)
+    }
+
+    /// What was copied before the agent pasted, back on the clipboard (or
+    /// nothing, if nothing was) —unless something else was copied meanwhile:
+    /// that one stays—.
+    fn agent_give_back(&mut self, pasted: &std::sync::Arc<super::Kept>, back: Option<std::sync::Arc<super::Kept>>) {
+        use smithay::wayland::selection::data_device::{clear_data_device_selection, current_data_device_selection_userdata, set_data_device_selection};
+        use smithay::wayland::selection::SelectionTarget;
+        let seat = self.seat.clone();
+        let still = current_data_device_selection_userdata(&seat).is_some_and(|c| matches!(&*c, super::Copied::Kept(k) if std::sync::Arc::ptr_eq(k, pasted)));
+        if !still {
+            return;
+        }
+        match back {
+            Some(k) => {
+                let kinds = k.kinds();
+                set_data_device_selection(&self.dh, &seat, kinds.clone(), super::Copied::Kept(k.clone()));
+                self.clipboard = super::Clipboard::Kept(k);
+                super::x11::wayland_copied(self, SelectionTarget::Clipboard, Some(kinds));
+            }
+            None => {
+                clear_data_device_selection(&self.dh, &seat);
+                self.clipboard = super::Clipboard::Nothing;
+                super::x11::wayland_copied(self, SelectionTarget::Clipboard, None);
+            }
+        }
+    }
+
     /// A character typed by number (Ctrl+Shift+U, its code, a space) into a
-    /// Chromium program, with your keyboard lent to it for those keys and
-    /// given back at once, without telling anyone. Typed with the agent's
-    /// own keys, Discord took the Ctrl+Shift+U as its «upload a file» (the
-    /// character was written too); with the keyboard on it, Chromium keeps
-    /// the keys to itself. The window is entered again for the agent's
-    /// keys after: lending yours told it `leave` when it came back.
+    /// Chromium program, with your keyboard lent to it for those keys: what
+    /// is left when what you copied cannot be kept to give it back.
     fn agent_by_number_with_yours(&mut self, slot: usize, c: char) -> Result<(), &'static str> {
-        let root = self.slots.get(slot).and_then(Option::as_ref).ok_or("gone")?.surface.clone();
-        let client = root.client().ok_or("gone")?;
-        let keyboard = self.keyboard.clone();
-        let before = keyboard.current_focus();
-        keyboard.set_focus(self, Some(root.clone()), SERIAL_COUNTER.next_serial());
         let mut presses: Vec<(Vec<u32>, u32)> = vec![(vec![29, 42], 22)];
         for d in format!("{:x}", c as u32).bytes() {
             presses.push((Vec::new(), us_key(d).map_or(57, |(code, _)| code)));
         }
         presses.push((Vec::new(), 57));
-        for (held, code) in &presses {
+        self.agent_with_your_keyboard(slot, &presses)
+    }
+
+    /// Keys pressed into a window with your keyboard lent to it, and given
+    /// back at once, without telling anyone. Chromium keeps them to itself
+    /// then (with the agent's own keys, Discord saw a Ctrl+Shift+U as its
+    /// shortcut), and the window is offered what is copied. The window is
+    /// entered again for the agent's keys after: lending yours told it
+    /// `leave` when it came back.
+    fn agent_with_your_keyboard(&mut self, slot: usize, presses: &[(Vec<u32>, u32)]) -> Result<(), &'static str> {
+        let root = self.slots.get(slot).and_then(Option::as_ref).ok_or("gone")?.surface.clone();
+        let client = root.client().ok_or("gone")?;
+        let keyboard = self.keyboard.clone();
+        let before = keyboard.current_focus();
+        keyboard.set_focus(self, Some(root.clone()), SERIAL_COUNTER.next_serial());
+        for (held, code) in presses {
             for (code, down) in held.iter().map(|c| (*c, true)).chain(std::iter::once((*code, true))).chain(std::iter::once((*code, false))).chain(held.iter().rev().map(|c| (*c, false))) {
                 let state = if down { KeyState::Pressed } else { KeyState::Released };
                 let time = self.time();
@@ -1009,10 +1140,17 @@ impl State {
     /// such keys.
     fn agent_type_any(&mut self, slot: usize, text: &str) -> Result<(), &'static str> {
         // Chromium (a browser, Discord, any Electron program) cuts what a key
-        // writes to 16 bits: an emoji came out as a blank. It takes those
-        // the way a person types them by number, Ctrl+Shift+U, the number
-        // and a space.
+        // writes to 16 bits: an emoji came out as a blank. A text with one is
+        // pasted whole, at once (a line break in it is a line break, not an
+        // Enter); typed by number, Ctrl+Shift+U, only if what you copied
+        // cannot be kept to give it back.
         let chromium = is_chromium(self.pid_of(slot));
+        if chromium && text.chars().any(|c| c as u32 > 0xFFFF) {
+            self.agent_busy(slot);
+            if self.agent_paste_with_yours(slot, text)? {
+                return Ok(());
+            }
+        }
         let mut run = String::new();
         for c in text.chars() {
             if chromium && c as u32 > 0xFFFF {

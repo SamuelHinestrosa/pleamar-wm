@@ -446,8 +446,11 @@ Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
   belongs to —as does any dialog—, and so does a window the program opens
   while the agent works with it. Any text is typed, accents and emoji too
   (a keymap made for it, as wtype does, on keys that only write; in Chromium
-  and Electron programs, which cut a key's character to 16 bits, emoji go
-  by number, Ctrl+Shift+U). A program's own windows come before those of
+  and Electron programs, which cut a key's character to 16 bits, a text with
+  emoji is pasted: put on the clipboard, Ctrl+V, and what you had copied
+  given back once the window has read it —by number, Ctrl+Shift+U, which
+  Discord takes as «upload a file», only if what you copied cannot be kept—).
+  A program's own windows come before those of
   the programs it started (a browser Discord opened a link in is not
   Discord). A program the agent needs is started with `pleamar-wm agent
   open COMMAND`: the monitor it works on lights up first (the one asked for,

@@ -241,6 +241,17 @@ impl XwmHandler for State {
     /// An X11 program pastes what a Wayland one copied.
     fn send_selection(&mut self, _: XwmId, selection: SelectionTarget, mime_type: String, fd: std::os::fd::OwnedFd) {
         let seat = self.seat.clone();
+        // Something kept here (given back after the agent pasted): from here.
+        if matches!(selection, SelectionTarget::Clipboard) {
+            let kept = current_data_device_selection_userdata(&seat).and_then(|c| match &*c {
+                super::Copied::Kept(k) => Some(k.clone()),
+                super::Copied::X11 => None,
+            });
+            if let Some(kept) = kept {
+                super::serve_kept(&kept, &mime_type, fd);
+                return;
+            }
+        }
         let sent = match selection {
             SelectionTarget::Clipboard => request_data_device_client_selection(&seat, mime_type, fd).map_err(|e| e.to_string()),
             SelectionTarget::Primary => request_primary_client_selection(&seat, mime_type, fd).map_err(|e| e.to_string()),
@@ -254,8 +265,11 @@ impl XwmHandler for State {
     fn new_selection(&mut self, _: XwmId, selection: SelectionTarget, mime_types: Vec<String>) {
         let seat = self.seat.clone();
         match selection {
-            SelectionTarget::Clipboard => set_data_device_selection(&self.dh, &seat, mime_types, ()),
-            SelectionTarget::Primary => set_primary_selection(&self.dh, &seat, mime_types, ()),
+            SelectionTarget::Clipboard => {
+                set_data_device_selection(&self.dh, &seat, mime_types, super::Copied::X11);
+                self.clipboard = super::Clipboard::X11;
+            }
+            SelectionTarget::Primary => set_primary_selection(&self.dh, &seat, mime_types, super::Copied::X11),
         }
     }
 
@@ -263,8 +277,9 @@ impl XwmHandler for State {
         let seat = self.seat.clone();
         match selection {
             SelectionTarget::Clipboard => {
-                if current_data_device_selection_userdata(&seat).is_some() {
+                if current_data_device_selection_userdata(&seat).is_some_and(|c| matches!(*c, super::Copied::X11)) {
                     clear_data_device_selection(&self.dh, &seat);
+                    self.clipboard = super::Clipboard::Nothing;
                 }
             }
             SelectionTarget::Primary => {
