@@ -1,0 +1,984 @@
+//! `pleamar-wm remote …`: this desktop from a browser somewhere else —the
+//! monitors seen, the mouse and the keyboard used— to work from there.
+//!
+//! - `pleamar-wm remote setup` makes a password and a key for six-digit
+//!   codes (TOTP, an authenticator app on the phone), kept in
+//!   `~/.config/pleamar/remote.conf`.
+//! - `pleamar-wm remote` serves the page on 127.0.0.1 (port 8765, or `port N`
+//!   in that file). Something in front makes it reachable and encrypted:
+//!   `tailscale funnel --bg --https=8443 http://127.0.0.1:8765`.
+//!
+//! The picture: the monitor is taken with grim (wlr-screencopy) and only the
+//! squares that changed travel, as JPEG, each time the page says it has
+//! painted the last ones. The hands: a pointer and a keyboard made with
+//! uinput, which the session takes as any other mouse and keyboard plugged
+//! in —its shortcuts, its bar, everything—. Not the agent's: these are yours.
+
+use std::collections::{HashMap, HashSet};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::net::{TcpListener, TcpStream};
+use std::sync::mpsc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+use hmac::{Hmac, Mac};
+use sha2::Digest;
+use tungstenite::protocol::Role;
+use tungstenite::{Message, WebSocket};
+
+const PAGE: &str = include_str!("remote.html");
+const PORT: u16 = 8765;
+const TILE: usize = 64;
+/// How long a session lasts without being used, and at most.
+const IDLE: Duration = Duration::from_secs(8 * 3600);
+const LIFE: Duration = Duration::from_secs(24 * 3600);
+
+const HELP: &str = "pleamar-wm remote — this desktop from a browser elsewhere
+
+  setup        a new password and a key for six-digit codes (an authenticator app):
+               written to ~/.config/pleamar/remote.conf, shown once
+  (nothing)    serve the page on 127.0.0.1:8765 (`port N` in remote.conf changes it)
+  --view-only  the same, but only to watch: the mouse and keys there do nothing here
+
+Make it reachable with something that encrypts it, for example:
+  tailscale funnel --bg --https=8443 http://127.0.0.1:8765";
+
+pub fn run(args: &[String]) -> i32 {
+    let result = match args.first().map(String::as_str) {
+        None | Some("serve") => serve(false),
+        Some("--view-only") => serve(true),
+        Some("setup") => setup(),
+        Some("help") | Some("--help") | Some("-h") => {
+            println!("{HELP}");
+            Ok(())
+        }
+        Some(other) => Err(format!("unknown: {other}\n\n{HELP}")),
+    };
+    match result {
+        Ok(()) => 0,
+        Err(e) => {
+            eprintln!("pleamar-wm remote: {e}");
+            1
+        }
+    }
+}
+
+// ---------------------------------------------------------------- settings
+
+struct Config {
+    password: [u8; 32],
+    totp: Vec<u8>,
+    port: u16,
+}
+
+fn config_path() -> String {
+    let base = std::env::var("XDG_CONFIG_HOME").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| format!("{}/.config", std::env::var("HOME").unwrap_or_default()));
+    format!("{base}/pleamar/remote.conf")
+}
+
+fn load() -> Result<Config, String> {
+    let path = config_path();
+    let text = std::fs::read_to_string(&path).map_err(|_| format!("no {path}: run `pleamar-wm remote setup` first"))?;
+    let (mut password, mut totp, mut port) = (None, None, PORT);
+    for line in text.lines() {
+        let mut f = line.split_whitespace();
+        match (f.next(), f.next()) {
+            (Some("password-sha256"), Some(v)) => password = unhex(v).and_then(|b| b.try_into().ok()),
+            (Some("totp"), Some(v)) => totp = unbase32(v),
+            (Some("port"), Some(v)) => port = v.parse().map_err(|_| format!("{path}: port {v}?"))?,
+            _ => {}
+        }
+    }
+    Ok(Config {
+        password: password.ok_or(format!("{path}: no password-sha256"))?,
+        totp: totp.ok_or(format!("{path}: no totp"))?,
+        port,
+    })
+}
+
+fn setup() -> Result<(), String> {
+    // About 100 bits, in pieces that can be read out and typed.
+    const LETTERS: &[u8] = b"abcdefghjkmnpqrstuvwxyz23456789";
+    let bytes = random(20);
+    let mut password = String::new();
+    for (k, b) in bytes.iter().enumerate() {
+        if k > 0 && k % 5 == 0 {
+            password.push('-');
+        }
+        password.push(LETTERS[*b as usize % LETTERS.len()] as char);
+    }
+    let secret = random(20);
+    let key = base32(&secret);
+    let path = config_path();
+    if let Some(dir) = std::path::Path::new(&path).parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let port = load().map(|c| c.port).unwrap_or(PORT);
+    let text = format!(
+        "# pleamar-wm remote: made by `pleamar-wm remote setup` (run it again for new ones).\npassword-sha256 {}\ntotp {key}\nport {port}\n",
+        hex(&sha2::Sha256::digest(password.as_bytes()))
+    );
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&path).map_err(|e| format!("{path}: {e}"))?;
+        f.write_all(text.as_bytes()).map_err(|e| e.to_string())?;
+    }
+    let host = std::fs::read_to_string("/etc/hostname").map(|h| h.trim().to_owned()).unwrap_or_else(|_| "pleamar".into());
+    println!("Written to {path}. Shown only now:\n");
+    println!("  password  {password}");
+    println!("  code key  {key}");
+    println!("  for an authenticator app: otpauth://totp/pleamar:{host}?secret={key}&issuer=pleamar");
+    println!("\nA running `pleamar-wm remote` reads them when it starts again.");
+    Ok(())
+}
+
+// ---------------------------------------------------------------- the server
+
+struct Gate {
+    config: Config,
+    /// Session cookies: when they began and when they were last used.
+    sessions: HashMap<String, (Instant, Instant)>,
+    /// Failed sign-ins, by address and all together.
+    failures: HashMap<String, Vec<Instant>>,
+    all_failures: Vec<Instant>,
+    /// The last code taken: one is good once.
+    last_step: u64,
+}
+
+impl Gate {
+    fn valid(&mut self, token: &str) -> bool {
+        let now = Instant::now();
+        self.sessions.retain(|_, (born, used)| now.duration_since(*used) < IDLE && now.duration_since(*born) < LIFE);
+        match self.sessions.get_mut(token) {
+            Some((_, used)) => {
+                *used = now;
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn blocked(&mut self, who: &str) -> bool {
+        let window = Duration::from_secs(15 * 60);
+        let now = Instant::now();
+        self.all_failures.retain(|t| now.duration_since(*t) < window);
+        let mine = self.failures.entry(who.to_owned()).or_default();
+        mine.retain(|t| now.duration_since(*t) < window);
+        mine.len() >= 5 || self.all_failures.len() >= 20
+    }
+
+    fn sign_in(&mut self, who: &str, password: &str, code: &str) -> Option<String> {
+        let typed = sha2::Sha256::digest(password.trim().as_bytes());
+        let password_ok = same(&typed, &self.config.password);
+        let step = now_secs() / 30;
+        let code = code.trim().replace(' ', "");
+        let mut code_step = None;
+        for s in [step - 1, step, step + 1] {
+            if s > self.last_step && same(totp(&self.config.totp, s).as_bytes(), code.as_bytes()) {
+                code_step = Some(s);
+            }
+        }
+        match (password_ok, code_step) {
+            (true, Some(s)) => {
+                self.last_step = s;
+                let token = hex(&random(32));
+                let now = Instant::now();
+                self.sessions.insert(token.clone(), (now, now));
+                Some(token)
+            }
+            _ => {
+                self.failures.entry(who.to_owned()).or_default().push(Instant::now());
+                self.all_failures.push(Instant::now());
+                None
+            }
+        }
+    }
+}
+
+fn serve(view_only: bool) -> Result<(), String> {
+    let config = load()?;
+    let port = config.port;
+    let gate = Arc::new(Mutex::new(Gate { config, sessions: HashMap::new(), failures: HashMap::new(), all_failures: Vec::new(), last_step: 0 }));
+    let hands = Arc::new(Mutex::new(None::<Hands>));
+    let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("127.0.0.1:{port}: {e}"))?;
+    println!("pleamar-wm remote · on http://127.0.0.1:{port}{}", if view_only { " · only to watch" } else { "" });
+    for stream in listener.incoming() {
+        let Ok(stream) = stream else { continue };
+        let (gate, hands) = (gate.clone(), hands.clone());
+        std::thread::spawn(move || {
+            if let Err(e) = connection(stream, &gate, &hands, view_only) {
+                eprintln!("remote · {e}");
+            }
+        });
+    }
+    Ok(())
+}
+
+struct Request {
+    method: String,
+    path: String,
+    headers: HashMap<String, String>,
+    body: Vec<u8>,
+}
+
+fn read_request(stream: &mut TcpStream) -> Result<Request, String> {
+    stream.set_read_timeout(Some(Duration::from_secs(20))).map_err(|e| e.to_string())?;
+    let mut reader = BufReader::new(stream.try_clone().map_err(|e| e.to_string())?);
+    let mut first = String::new();
+    reader.read_line(&mut first).map_err(|e| e.to_string())?;
+    let mut parts = first.split_whitespace();
+    let (method, path) = (parts.next().unwrap_or("").to_owned(), parts.next().unwrap_or("/").to_owned());
+    let mut headers = HashMap::new();
+    let mut size = first.len();
+    loop {
+        let mut line = String::new();
+        let n = reader.read_line(&mut line).map_err(|e| e.to_string())?;
+        size += n;
+        if n == 0 || size > 32 * 1024 {
+            return Err("bad request".into());
+        }
+        let line = line.trim_end();
+        if line.is_empty() {
+            break;
+        }
+        if let Some((k, v)) = line.split_once(':') {
+            headers.insert(k.trim().to_ascii_lowercase(), v.trim().to_owned());
+        }
+    }
+    let length: usize = headers.get("content-length").and_then(|v| v.parse().ok()).unwrap_or(0).min(16 * 1024);
+    let mut body = vec![0; length];
+    reader.read_exact(&mut body).map_err(|e| e.to_string())?;
+    Ok(Request { method, path, headers, body })
+}
+
+fn respond(stream: &mut TcpStream, status: &str, kind: &str, extra: &str, body: &[u8]) -> Result<(), String> {
+    let head = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {kind}\r\nContent-Length: {}\r\nCache-Control: no-store\r\nX-Frame-Options: DENY\r\nX-Content-Type-Options: nosniff\r\nReferrer-Policy: no-referrer\r\nContent-Security-Policy: default-src 'self'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src 'self' blob: data:; connect-src 'self'; frame-ancestors 'none'\r\n{extra}Connection: close\r\n\r\n",
+        body.len()
+    );
+    stream.write_all(head.as_bytes()).and_then(|_| stream.write_all(body)).map_err(|e| e.to_string())
+}
+
+fn cookie(req: &Request) -> Option<String> {
+    req.headers.get("cookie")?.split(';').map(str::trim).find_map(|c| c.strip_prefix("pleamar_remote=")).map(str::to_owned)
+}
+
+/// Who is asking: the address the proxy in front says (Tailscale's), or the socket's.
+fn who(req: &Request, stream: &TcpStream) -> String {
+    req.headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.split(',').next())
+        .map(|v| v.trim().to_owned())
+        .unwrap_or_else(|| stream.peer_addr().map(|a| a.ip().to_string()).unwrap_or_default())
+}
+
+fn page(signed_in: bool, error: &str) -> String {
+    let (login, app) = if signed_in { ("none", "block") } else { ("flex", "none") };
+    PAGE.replace("{{LOGIN}}", login).replace("{{APP}}", app).replace("{{ERROR}}", error)
+}
+
+fn connection(mut stream: TcpStream, gate: &Arc<Mutex<Gate>>, hands: &Arc<Mutex<Option<Hands>>>, view_only: bool) -> Result<(), String> {
+    let req = read_request(&mut stream)?;
+    let token = cookie(&req);
+    let signed_in = token.as_deref().is_some_and(|t| gate.lock().unwrap().valid(t));
+    let html = "text/html; charset=utf-8";
+    match (req.method.as_str(), req.path.split('?').next().unwrap_or("/")) {
+        ("GET", "/") => respond(&mut stream, "200 OK", html, "", page(signed_in, "").as_bytes()),
+        ("POST", "/login") => {
+            let who = who(&req, &stream);
+            let form = form(&String::from_utf8_lossy(&req.body));
+            let (password, code) = (form.get("password").cloned().unwrap_or_default(), form.get("code").cloned().unwrap_or_default());
+            if gate.lock().unwrap().blocked(&who) {
+                std::thread::sleep(Duration::from_secs(2));
+                return respond(&mut stream, "429 Too Many Requests", html, "", page(false, "Too many tries. Wait a quarter of an hour.").as_bytes());
+            }
+            let signed = gate.lock().unwrap().sign_in(&who, &password, &code);
+            match signed {
+                Some(token) => {
+                    notify(&format!("Someone signed in to this desktop from {who}"));
+                    let set = format!("Set-Cookie: pleamar_remote={token}; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age={}\r\nLocation: /\r\n", LIFE.as_secs());
+                    respond(&mut stream, "303 See Other", html, &set, b"")
+                }
+                None => {
+                    std::thread::sleep(Duration::from_secs(1));
+                    respond(&mut stream, "401 Unauthorized", html, "", page(false, "That password or code is not right.").as_bytes())
+                }
+            }
+        }
+        ("POST", "/logout") => {
+            if let Some(t) = token {
+                gate.lock().unwrap().sessions.remove(&t);
+            }
+            respond(&mut stream, "303 See Other", html, "Set-Cookie: pleamar_remote=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0\r\nLocation: /\r\n", b"")
+        }
+        ("GET", "/ws") => {
+            if !signed_in {
+                return respond(&mut stream, "401 Unauthorized", "text/plain", "", b"sign in first");
+            }
+            // Only from this page: a page elsewhere cannot use the cookie here.
+            let host = req.headers.get("host").cloned().unwrap_or_default();
+            let origin = req.headers.get("origin").cloned().unwrap_or_default();
+            if origin != format!("https://{host}") && origin != format!("http://{host}") {
+                return respond(&mut stream, "403 Forbidden", "text/plain", "", b"wrong origin");
+            }
+            let key = req.headers.get("sec-websocket-key").ok_or("no websocket key")?;
+            let mut sha = sha1::Sha1::new();
+            sha.update(key.as_bytes());
+            sha.update(b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11");
+            let accept = base64(&sha.finalize());
+            let head = format!("HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: {accept}\r\n\r\n");
+            stream.write_all(head.as_bytes()).map_err(|e| e.to_string())?;
+            viewer(stream, token.unwrap_or_default(), gate, hands, view_only)
+        }
+        _ => respond(&mut stream, "404 Not Found", "text/plain", "", b"not here"),
+    }
+}
+
+fn form(body: &str) -> HashMap<String, String> {
+    body.split('&')
+        .filter_map(|kv| kv.split_once('='))
+        .map(|(k, v)| (unescape(k), unescape(v)))
+        .collect()
+}
+
+fn unescape(s: &str) -> String {
+    let b = s.as_bytes();
+    let mut out = Vec::with_capacity(b.len());
+    let mut k = 0;
+    while k < b.len() {
+        match b[k] {
+            b'+' => out.push(b' '),
+            b'%' if k + 2 < b.len() => {
+                match u8::from_str_radix(std::str::from_utf8(&b[k + 1..k + 3]).unwrap_or("zz"), 16) {
+                    Ok(v) => {
+                        out.push(v);
+                        k += 2;
+                    }
+                    Err(_) => out.push(b'%'),
+                }
+            }
+            c => out.push(c),
+        }
+        k += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
+fn notify(text: &str) {
+    println!("remote · {text}");
+    let _ = std::process::Command::new("notify-send").args(["-a", "pleamar", "-u", "critical", "Remote desktop", text]).spawn();
+}
+
+// ---------------------------------------------------------------- a viewer
+
+enum Want {
+    Frame { monitor: usize, whole: bool },
+}
+
+/// One connected page: what it says goes to the hands; the pictures come
+/// from a thread of their own, one batch each time the page has painted.
+fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc<Mutex<Option<Hands>>>, view_only: bool) -> Result<(), String> {
+    stream.set_read_timeout(Some(Duration::from_millis(8))).map_err(|e| e.to_string())?;
+    let _ = stream.set_nodelay(true);
+    let mut ws = WebSocket::from_raw_socket(stream, Role::Server, None);
+    if !view_only {
+        let mut h = hands.lock().unwrap();
+        if h.is_none() {
+            *h = Some(Hands::new()?);
+        }
+    }
+    let monitors = crate::agent_cli::monitors()?;
+    let mut list = String::from("mons");
+    for (name, x, y, w, h) in &monitors {
+        list.push_str(&format!(" {name},{x},{y},{w},{h}"));
+    }
+    ws.send(Message::Text(list.into())).map_err(|e| e.to_string())?;
+
+    let (want_tx, want_rx) = mpsc::channel::<Want>();
+    let (frame_tx, frame_rx) = mpsc::channel::<Result<(usize, u32, u32, Vec<Vec<u8>>), String>>();
+    let names: Vec<String> = monitors.iter().map(|m| m.0.clone()).collect();
+    std::thread::spawn(move || pictures(names, want_rx, frame_tx));
+
+    let mut monitor = 0usize;
+    let mut size = (1u32, 1u32);
+    let mut waiting = false;
+    let mut pending = Some(true);
+    let mut last_ask = Instant::now() - Duration::from_secs(1);
+    let mut checked = Instant::now();
+    loop {
+        // Every so often: the session is still good (not signed out elsewhere).
+        if checked.elapsed() > Duration::from_secs(30) {
+            checked = Instant::now();
+            if !gate.lock().unwrap().valid(&token) {
+                let _ = ws.send(Message::Text("bye".into()));
+                break;
+            }
+        }
+        match ws.read() {
+            Ok(Message::Text(t)) => {
+                let t = t.to_string();
+                let mut f = t.splitn(2, ' ');
+                let (verb, rest) = (f.next().unwrap_or(""), f.next().unwrap_or(""));
+                let n: Vec<f64> = rest.split_whitespace().filter_map(|v| v.parse().ok()).collect();
+                let mut guard = hands.lock().unwrap();
+                // Only watching: the hands are not there, and what would use them is let go.
+                let mut idle = None;
+                let h = match guard.as_mut() {
+                    Some(h) if !view_only => h,
+                    _ => idle.insert(Hands::none()),
+                };
+                match (verb, &n[..]) {
+                    ("ack", _) => {
+                        waiting = false;
+                        if pending.is_none() {
+                            pending = Some(false);
+                        }
+                    }
+                    ("mon", [k]) if (*k as usize) < monitors.len() => {
+                        monitor = *k as usize;
+                        pending = Some(true);
+                        waiting = false;
+                    }
+                    ("full", _) => {
+                        pending = Some(true);
+                        waiting = false;
+                    }
+                    ("m", [x, y]) => {
+                        let m = &monitors[monitor];
+                        // From the picture's pixels to the desktop's units.
+                        let ux = m.1 + x * m.3 / size.0 as f64;
+                        let uy = m.2 + y * m.4 / size.1 as f64;
+                        h.point(&monitors, ux, uy);
+                    }
+                    ("b", [b, d]) => h.button(*b as u32, *d != 0.0),
+                    ("w", [dx, dy]) => h.wheel(*dx, *dy),
+                    ("k", [c, d]) => h.key(*c as u16, *d != 0.0),
+                    ("rel", _) => h.release(),
+                    ("paste", _) => {
+                        // Your text in the clipboard here; then the page's
+                        // own Ctrl+V lands with it.
+                        let ok = wl_copy(rest);
+                        let _ = ws.send(Message::Text(if ok { "pasted".into() } else { "nopaste".into() }));
+                    }
+                    ("copy", _) => {
+                        let text = std::process::Command::new("wl-paste").args(["-n", "-t", "text/plain"]).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default();
+                        let _ = ws.send(Message::Text(format!("clip {text}").into()));
+                    }
+                    _ => {}
+                }
+            }
+            Ok(Message::Close(_)) => break,
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            Err(_) => break,
+        }
+        // A new batch when the page painted the last one, at most ~15 a second.
+        if !waiting && pending.is_some() && last_ask.elapsed() > Duration::from_millis(66) {
+            let whole = pending.take().unwrap_or(false);
+            let _ = want_tx.send(Want::Frame { monitor, whole });
+            last_ask = Instant::now();
+            waiting = true;
+        }
+        while let Ok(done) = frame_rx.try_recv() {
+            match done {
+                Ok((k, w, h, tiles)) => {
+                    if k != monitor {
+                        continue;
+                    }
+                    if (w, h) != size {
+                        size = (w, h);
+                        let _ = ws.send(Message::Text(format!("size {k} {w} {h}").into()));
+                    }
+                    if tiles.is_empty() {
+                        // Nothing changed: ask again in a moment.
+                        waiting = false;
+                        pending = Some(false);
+                        continue;
+                    }
+                    for t in tiles {
+                        ws.write(Message::Binary(t.into())).map_err(|e| e.to_string())?;
+                    }
+                    ws.send(Message::Text("frame".into())).map_err(|e| e.to_string())?;
+                    // `ack` asks for the next.
+                    pending = None;
+                }
+                Err(e) => {
+                    let _ = ws.send(Message::Text(format!("error {e}").into()));
+                    std::thread::sleep(Duration::from_millis(500));
+                    waiting = false;
+                    pending = Some(true);
+                }
+            }
+        }
+    }
+    if let Some(h) = hands.lock().unwrap().as_mut() {
+        h.release();
+    }
+    Ok(())
+}
+
+/// The pictures of a viewer: each monitor taken, compared with the last
+/// time in squares, and the changed squares (joined along each row) as JPEG.
+fn pictures(names: Vec<String>, want: mpsc::Receiver<Want>, out: mpsc::Sender<Result<(usize, u32, u32, Vec<Vec<u8>>), String>>) {
+    let mut last: HashMap<usize, (u32, u32, Vec<u8>)> = HashMap::new();
+    while let Ok(Want::Frame { monitor, whole }) = want.recv() {
+        let result = (|| {
+            let name = names.get(monitor).ok_or("no such monitor")?;
+            let shot = std::process::Command::new("grim").args(["-o", name, "-t", "ppm", "-"]).output().map_err(|e| format!("grim: {e}"))?;
+            if !shot.status.success() {
+                return Err(format!("grim: {}", String::from_utf8_lossy(&shot.stderr).trim()));
+            }
+            let (w, h, rgb) = ppm(&shot.stdout).ok_or("grim: not a picture")?;
+            let before = last.get(&monitor).filter(|(lw, lh, _)| !whole && (*lw, *lh) == (w, h)).map(|l| &l.2);
+            let tiles = changed(w as usize, h as usize, &rgb, before);
+            last.insert(monitor, (w, h, rgb));
+            Ok((monitor, w, h, tiles))
+        })();
+        if out.send(result).is_err() {
+            break;
+        }
+    }
+}
+
+fn ppm(data: &[u8]) -> Option<(u32, u32, Vec<u8>)> {
+    // P6, width, height, maxval, then one whitespace and the pixels.
+    let mut fields = Vec::new();
+    let mut k = 0;
+    while fields.len() < 4 && k < data.len() {
+        while k < data.len() && data[k].is_ascii_whitespace() {
+            k += 1;
+        }
+        if data.get(k) == Some(&b'#') {
+            while k < data.len() && data[k] != b'\n' {
+                k += 1;
+            }
+            continue;
+        }
+        let start = k;
+        while k < data.len() && !data[k].is_ascii_whitespace() {
+            k += 1;
+        }
+        fields.push(std::str::from_utf8(&data[start..k]).ok()?.to_owned());
+    }
+    if fields.first()? != "P6" || fields.get(3)? != "255" {
+        return None;
+    }
+    let (w, h): (u32, u32) = (fields[1].parse().ok()?, fields[2].parse().ok()?);
+    let pixels = data.get(k + 1..k + 1 + (w * h * 3) as usize)?;
+    Some((w, h, pixels.to_vec()))
+}
+
+/// The squares that differ from `before` (all, without it), each row's
+/// neighbours joined: `x y w h` (u16, big-endian) and the JPEG.
+fn changed(w: usize, h: usize, rgb: &[u8], before: Option<&Vec<u8>>) -> Vec<Vec<u8>> {
+    let mut out = Vec::new();
+    for ty in (0..h).step_by(TILE) {
+        let th = TILE.min(h - ty);
+        let mut run: Option<(usize, usize)> = None;
+        let mut tx = 0;
+        loop {
+            let dirty = tx < w && {
+                let tw = TILE.min(w - tx);
+                match before {
+                    None => true,
+                    Some(b) => (ty..ty + th).any(|y| {
+                        let at = (y * w + tx) * 3;
+                        rgb[at..at + tw * 3] != b[at..at + tw * 3]
+                    }),
+                }
+            };
+            match (dirty, run) {
+                (true, None) => run = Some((tx, tx)),
+                (true, Some((s, _))) => run = Some((s, tx)),
+                (false, Some((s, e))) => {
+                    let x1 = (e + TILE).min(w);
+                    if let Some(t) = jpeg(w, rgb, s, ty, x1 - s, th) {
+                        out.push(t);
+                    }
+                    run = None;
+                }
+                (false, None) => {}
+            }
+            if tx >= w {
+                break;
+            }
+            tx += TILE;
+        }
+    }
+    out
+}
+
+fn jpeg(w: usize, rgb: &[u8], x: usize, y: usize, cw: usize, ch: usize) -> Option<Vec<u8>> {
+    let mut cut = Vec::with_capacity(cw * ch * 3);
+    for row in y..y + ch {
+        let at = (row * w + x) * 3;
+        cut.extend_from_slice(&rgb[at..at + cw * 3]);
+    }
+    let mut out = Vec::with_capacity(16 + cw * ch / 4);
+    for v in [x, y, cw, ch] {
+        out.extend_from_slice(&(v as u16).to_be_bytes());
+    }
+    image::codecs::jpeg::JpegEncoder::new_with_quality(&mut out, 80).encode(&cut, cw as u32, ch as u32, image::ExtendedColorType::Rgb8).ok()?;
+    Some(out)
+}
+
+fn wl_copy(text: &str) -> bool {
+    let Ok(mut child) = std::process::Command::new("wl-copy").stdin(std::process::Stdio::piped()).spawn() else { return false };
+    if let Some(mut input) = child.stdin.take() {
+        let _ = input.write_all(text.as_bytes());
+    }
+    child.wait().is_ok_and(|s| s.success())
+}
+
+// ---------------------------------------------------------------- the hands (uinput)
+
+const EV_SYN: u16 = 0;
+const EV_KEY: u16 = 1;
+const EV_REL: u16 = 2;
+const EV_ABS: u16 = 3;
+const REL_HWHEEL: u16 = 6;
+const REL_WHEEL: u16 = 8;
+const REL_WHEEL_HI_RES: u16 = 11;
+const REL_HWHEEL_HI_RES: u16 = 12;
+const ABS_X: u16 = 0;
+const ABS_Y: u16 = 1;
+const BTN_LEFT: u16 = 0x110;
+const BTN_RIGHT: u16 = 0x111;
+const BTN_MIDDLE: u16 = 0x112;
+const ABS_MAX: i32 = 65535;
+
+const UI_SET_EVBIT: libc::c_ulong = 0x4004_5564;
+const UI_SET_KEYBIT: libc::c_ulong = 0x4004_5565;
+const UI_SET_RELBIT: libc::c_ulong = 0x4004_5566;
+const UI_SET_ABSBIT: libc::c_ulong = 0x4004_5567;
+const UI_DEV_SETUP: libc::c_ulong = 0x405c_5503;
+const UI_ABS_SETUP: libc::c_ulong = 0x401c_5504;
+const UI_DEV_CREATE: libc::c_ulong = 0x5501;
+const UI_DEV_DESTROY: libc::c_ulong = 0x5502;
+
+#[repr(C)]
+struct UinputSetup {
+    bustype: u16,
+    vendor: u16,
+    product: u16,
+    version: u16,
+    name: [u8; 80],
+    ff_effects_max: u32,
+}
+
+#[repr(C)]
+struct AbsSetup {
+    code: u16,
+    _pad: u16,
+    value: i32,
+    minimum: i32,
+    maximum: i32,
+    fuzz: i32,
+    flat: i32,
+    resolution: i32,
+}
+
+#[repr(C)]
+struct InputEvent {
+    sec: i64,
+    usec: i64,
+    kind: u16,
+    code: u16,
+    value: i32,
+}
+
+/// A device of our own: what it presses reaches the session as from a
+/// mouse or keyboard plugged in.
+struct Device {
+    fd: std::os::fd::OwnedFd,
+}
+
+impl Device {
+    fn new(name: &str, product: u16, setup: impl Fn(i32) -> bool) -> Result<Device, String> {
+        use std::os::fd::{AsRawFd, FromRawFd};
+        let path = std::ffi::CString::new("/dev/uinput").unwrap();
+        let raw = unsafe { libc::open(path.as_ptr(), libc::O_WRONLY | libc::O_NONBLOCK | libc::O_CLOEXEC) };
+        if raw < 0 {
+            return Err(format!("/dev/uinput: {}", std::io::Error::last_os_error()));
+        }
+        let fd = unsafe { std::os::fd::OwnedFd::from_raw_fd(raw) };
+        if !setup(fd.as_raw_fd()) {
+            return Err(format!("/dev/uinput: {}", std::io::Error::last_os_error()));
+        }
+        let mut s = UinputSetup { bustype: 0x06, vendor: 0x1d6b, product, version: 1, name: [0; 80], ff_effects_max: 0 };
+        s.name[..name.len().min(79)].copy_from_slice(&name.as_bytes()[..name.len().min(79)]);
+        unsafe {
+            if libc::ioctl(fd.as_raw_fd(), UI_DEV_SETUP, &s) < 0 || libc::ioctl(fd.as_raw_fd(), UI_DEV_CREATE) < 0 {
+                return Err(format!("/dev/uinput: {}", std::io::Error::last_os_error()));
+            }
+        }
+        Ok(Device { fd })
+    }
+
+    fn emit(&self, events: &[(u16, u16, i32)]) {
+        use std::os::fd::AsRawFd;
+        let mut all: Vec<InputEvent> = events.iter().map(|(kind, code, value)| InputEvent { sec: 0, usec: 0, kind: *kind, code: *code, value: *value }).collect();
+        all.push(InputEvent { sec: 0, usec: 0, kind: EV_SYN, code: 0, value: 0 });
+        let bytes = unsafe { std::slice::from_raw_parts(all.as_ptr() as *const u8, all.len() * std::mem::size_of::<InputEvent>()) };
+        unsafe {
+            libc::write(self.fd.as_raw_fd(), bytes.as_ptr() as *const libc::c_void, bytes.len());
+        }
+    }
+}
+
+impl Drop for Device {
+    fn drop(&mut self) {
+        use std::os::fd::AsRawFd;
+        unsafe {
+            libc::ioctl(self.fd.as_raw_fd(), UI_DEV_DESTROY);
+        }
+    }
+}
+
+struct Hands {
+    pointer: Option<Device>,
+    keyboard: Option<Device>,
+    held_keys: HashSet<u16>,
+    held_buttons: HashSet<u16>,
+    wheel: (f64, f64),
+}
+
+impl Hands {
+    fn new() -> Result<Hands, String> {
+        // A pointer that says where it is (as a tablet, or a virtual
+        // machine's mouse): over all of the desktop, 0…65535.
+        let pointer = Device::new("pleamar remote pointer", 0x0701, |fd| unsafe {
+            let mut ok = libc::ioctl(fd, UI_SET_EVBIT, EV_KEY as libc::c_int) >= 0
+                && libc::ioctl(fd, UI_SET_EVBIT, EV_ABS as libc::c_int) >= 0
+                && libc::ioctl(fd, UI_SET_EVBIT, EV_REL as libc::c_int) >= 0;
+            for b in [BTN_LEFT, BTN_RIGHT, BTN_MIDDLE] {
+                ok &= libc::ioctl(fd, UI_SET_KEYBIT, b as libc::c_int) >= 0;
+            }
+            for r in [REL_WHEEL, REL_HWHEEL, REL_WHEEL_HI_RES, REL_HWHEEL_HI_RES] {
+                ok &= libc::ioctl(fd, UI_SET_RELBIT, r as libc::c_int) >= 0;
+            }
+            for a in [ABS_X, ABS_Y] {
+                ok &= libc::ioctl(fd, UI_SET_ABSBIT, a as libc::c_int) >= 0;
+                let s = AbsSetup { code: a, _pad: 0, value: 0, minimum: 0, maximum: ABS_MAX, fuzz: 0, flat: 0, resolution: 0 };
+                ok &= libc::ioctl(fd, UI_ABS_SETUP, &s) >= 0;
+            }
+            ok
+        })?;
+        let keyboard = Device::new("pleamar remote keyboard", 0x0702, |fd| unsafe {
+            let mut ok = libc::ioctl(fd, UI_SET_EVBIT, EV_KEY as libc::c_int) >= 0;
+            for k in 1..=248 {
+                ok &= libc::ioctl(fd, UI_SET_KEYBIT, k as libc::c_int) >= 0;
+            }
+            ok
+        })?;
+        // The session finds them a moment later.
+        std::thread::sleep(Duration::from_millis(300));
+        Ok(Hands { pointer: Some(pointer), keyboard: Some(keyboard), held_keys: HashSet::new(), held_buttons: HashSet::new(), wheel: (0.0, 0.0) })
+    }
+
+    /// Hands that do nothing: only watching.
+    fn none() -> Hands {
+        Hands { pointer: None, keyboard: None, held_keys: HashSet::new(), held_buttons: HashSet::new(), wheel: (0.0, 0.0) }
+    }
+
+    fn press(&self, pointer: bool, events: &[(u16, u16, i32)]) {
+        if let Some(d) = if pointer { &self.pointer } else { &self.keyboard } {
+            d.emit(events);
+        }
+    }
+
+    /// The pointer to a point of the desktop, in units.
+    fn point(&mut self, monitors: &[(String, f64, f64, f64, f64)], x: f64, y: f64) {
+        let x0 = monitors.iter().map(|m| m.1).fold(f64::MAX, f64::min);
+        let y0 = monitors.iter().map(|m| m.2).fold(f64::MAX, f64::min);
+        let x1 = monitors.iter().map(|m| m.1 + m.3).fold(f64::MIN, f64::max);
+        let y1 = monitors.iter().map(|m| m.2 + m.4).fold(f64::MIN, f64::max);
+        let ax = (((x - x0) / (x1 - x0).max(1.0)) * (ABS_MAX as f64 + 1.0)).round().clamp(0.0, ABS_MAX as f64) as i32;
+        let ay = (((y - y0) / (y1 - y0).max(1.0)) * (ABS_MAX as f64 + 1.0)).round().clamp(0.0, ABS_MAX as f64) as i32;
+        self.press(true, &[(EV_ABS, ABS_X, ax), (EV_ABS, ABS_Y, ay)]);
+    }
+
+    fn button(&mut self, which: u32, down: bool) {
+        let code = match which {
+            0 => BTN_LEFT,
+            1 => BTN_MIDDLE,
+            2 => BTN_RIGHT,
+            _ => return,
+        };
+        if down {
+            self.held_buttons.insert(code);
+        } else {
+            self.held_buttons.remove(&code);
+        }
+        self.press(true, &[(EV_KEY, code, down as i32)]);
+    }
+
+    /// The wheel, in notches (a fraction of one too: a touchpad).
+    fn wheel(&mut self, dx: f64, dy: f64) {
+        let mut events = Vec::new();
+        let (hx, hy) = ((dx * 120.0).round() as i32, (-dy * 120.0).round() as i32);
+        if hy != 0 {
+            events.push((EV_REL, REL_WHEEL_HI_RES, hy));
+        }
+        if hx != 0 {
+            events.push((EV_REL, REL_HWHEEL_HI_RES, hx));
+        }
+        // The old notches too, for whoever reads only those.
+        self.wheel.0 += dx;
+        self.wheel.1 -= dy;
+        for (sum, code) in [(&mut self.wheel.0, REL_HWHEEL), (&mut self.wheel.1, REL_WHEEL)] {
+            let whole = sum.trunc();
+            if whole != 0.0 {
+                events.push((EV_REL, code, whole as i32));
+                *sum -= whole;
+            }
+        }
+        if !events.is_empty() {
+            self.press(true, &events);
+        }
+    }
+
+    fn key(&mut self, code: u16, down: bool) {
+        if code == 0 || code > 248 {
+            return;
+        }
+        if down {
+            self.held_keys.insert(code);
+        } else if !self.held_keys.remove(&code) {
+            return;
+        }
+        self.press(false, &[(EV_KEY, code, down as i32)]);
+    }
+
+    /// Nothing left pressed (the page lost focus, or went away).
+    fn release(&mut self) {
+        for code in std::mem::take(&mut self.held_keys) {
+            self.press(false, &[(EV_KEY, code, 0)]);
+        }
+        for code in std::mem::take(&mut self.held_buttons) {
+            self.press(true, &[(EV_KEY, code, 0)]);
+        }
+    }
+}
+
+// ---------------------------------------------------------------- little things
+
+fn random(n: usize) -> Vec<u8> {
+    let mut out = vec![0u8; n];
+    let mut f = std::fs::File::open("/dev/urandom").expect("/dev/urandom");
+    f.read_exact(&mut out).expect("/dev/urandom");
+    out
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).map_or(0, |d| d.as_secs())
+}
+
+/// RFC 6238: six digits, from HMAC-SHA1 of the 30-second step.
+fn totp(key: &[u8], step: u64) -> String {
+    let mut mac = <Hmac<sha1::Sha1> as Mac>::new_from_slice(key).expect("any key size");
+    mac.update(&step.to_be_bytes());
+    let h = mac.finalize().into_bytes();
+    let at = (h[19] & 0x0f) as usize;
+    let v = u32::from_be_bytes([h[at] & 0x7f, h[at + 1], h[at + 2], h[at + 3]]) % 1_000_000;
+    format!("{v:06}")
+}
+
+/// Equal, taking as long whatever the difference.
+fn same(a: &[u8], b: &[u8]) -> bool {
+    a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
+fn hex(b: &[u8]) -> String {
+    b.iter().map(|v| format!("{v:02x}")).collect()
+}
+
+fn unhex(s: &str) -> Option<Vec<u8>> {
+    (s.len() % 2 == 0).then_some(())?;
+    (0..s.len()).step_by(2).map(|k| u8::from_str_radix(&s[k..k + 2], 16).ok()).collect()
+}
+
+const B32: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZ234567";
+
+fn base32(b: &[u8]) -> String {
+    let mut out = String::new();
+    let (mut buffer, mut bits) = (0u32, 0);
+    for &v in b {
+        buffer = (buffer << 8) | v as u32;
+        bits += 8;
+        while bits >= 5 {
+            out.push(B32[((buffer >> (bits - 5)) & 31) as usize] as char);
+            bits -= 5;
+        }
+    }
+    if bits > 0 {
+        out.push(B32[((buffer << (5 - bits)) & 31) as usize] as char);
+    }
+    out
+}
+
+fn unbase32(s: &str) -> Option<Vec<u8>> {
+    let mut out = Vec::new();
+    let (mut buffer, mut bits) = (0u32, 0);
+    for c in s.trim_end_matches('=').bytes() {
+        let v = B32.iter().position(|x| *x == c.to_ascii_uppercase())? as u32;
+        buffer = (buffer << 5) | v;
+        bits += 5;
+        if bits >= 8 {
+            out.push((buffer >> (bits - 8)) as u8);
+            bits -= 8;
+        }
+    }
+    Some(out)
+}
+
+fn base64(b: &[u8]) -> String {
+    const T: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::new();
+    for c in b.chunks(3) {
+        let n = (c[0] as u32) << 16 | (*c.get(1).unwrap_or(&0) as u32) << 8 | *c.get(2).unwrap_or(&0) as u32;
+        for k in 0..4 {
+            if k <= c.len() {
+                out.push(T[((n >> (18 - 6 * k)) & 63) as usize] as char);
+            } else {
+                out.push('=');
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn totp_matches_the_rfc() {
+        // RFC 6238, appendix B (SHA1, 8 digits there: the last six here).
+        let key = b"12345678901234567890";
+        assert_eq!(totp(key, 59 / 30), "287082");
+        assert_eq!(totp(key, 1111111109 / 30), "081804");
+        assert_eq!(totp(key, 2000000000 / 30), "279037");
+    }
+
+    #[test]
+    fn base32_both_ways() {
+        let b = random(20);
+        assert_eq!(unbase32(&base32(&b)).unwrap(), b);
+        assert_eq!(base64(b"hello"), "aGVsbG8=");
+    }
+
+    #[test]
+    fn squares_that_changed() {
+        let (w, h) = (130usize, 70usize);
+        let a = vec![0u8; w * h * 3];
+        let mut b = a.clone();
+        assert_eq!(changed(w, h, &b, Some(&a)).len(), 0);
+        b[(10 * w + 100) * 3] = 255;
+        let t = changed(w, h, &b, Some(&a));
+        assert_eq!(t.len(), 1);
+        assert_eq!(&t[0][..8], &[0, 64, 0, 0, 0, 64, 0, 64]);
+        // All of it: two rows of three squares, joined along each row.
+        assert_eq!(changed(w, h, &a, None).len(), 2);
+    }
+}

@@ -4,6 +4,7 @@
 //! pleamar's own.
 
 mod agent_cli;
+mod remote;
 mod config;
 mod desktop;
 mod nest;
@@ -35,6 +36,10 @@ fn main() {
     // `pleamar-wm agent …`: the agent's hands from a shell (see agent_cli.rs).
     if args.first().map(String::as_str) == Some("agent") {
         std::process::exit(agent_cli::run(&args[1..]));
+    }
+    // `pleamar-wm remote …`: this desktop from a browser elsewhere (see remote.rs).
+    if args.first().map(String::as_str) == Some("remote") {
+        std::process::exit(remote::run(&args[1..]));
     }
     // `pleamar-wm init`: ~/.config/pleamar with a starting point, never over
     // what is already there.

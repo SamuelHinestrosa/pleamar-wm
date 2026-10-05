@@ -1,0 +1,250 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex">
+<title>pleamar remote</title>
+<style>
+  :root { --bg: #0b1114; --panel: #12191d; --line: #23313a; --ink: #e6f1f0; --faint: #8aa0a6; --sea: #4fd1c5; --sea-ink: #062421; --bad: #ff8a80; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, "Segoe UI", sans-serif; overflow: hidden; }
+  #login { display: {{LOGIN}}; height: 100%; align-items: center; justify-content: center; padding: 16px; }
+  form.card { width: 100%; max-width: 340px; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 24px; display: grid; gap: 12px; }
+  .card h1 { margin: 0 0 4px; font-size: 18px; font-weight: 650; }
+  .card p { margin: 0; color: var(--faint); font-size: 13px; }
+  .card label { display: grid; gap: 4px; font-size: 12px; color: var(--faint); }
+  .card input { background: var(--bg); color: var(--ink); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; font: inherit; font-size: 15px; }
+  .card input:focus { outline: 2px solid var(--sea); outline-offset: -1px; }
+  .card button { background: var(--sea); color: var(--sea-ink); border: 0; border-radius: 8px; padding: 10px; font: inherit; font-weight: 650; cursor: pointer; }
+  .error { color: var(--bad); font-size: 13px; min-height: 1em; }
+  #app { display: {{APP}}; height: 100%; position: relative; }
+  #bar { position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 2; display: flex; gap: 6px; align-items: center; background: color-mix(in srgb, var(--panel) 92%, transparent); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 12px 12px; padding: 6px 8px; transition: transform .25s ease, opacity .25s ease; max-width: calc(100% - 16px); flex-wrap: wrap; justify-content: center; }
+  #bar.away { transform: translate(-50%, calc(-100% + 6px)); opacity: .55; }
+  #bar button { background: transparent; color: var(--ink); border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
+  #bar button:hover { border-color: var(--sea); }
+  #bar button.on { background: var(--sea); color: var(--sea-ink); border-color: var(--sea); }
+  #bar .sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 2px; }
+  #bar .status { color: var(--faint); font-size: 12px; padding: 0 4px; min-width: 70px; text-align: center; }
+  #stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  canvas { max-width: 100%; max-height: 100%; image-rendering: auto; cursor: default; outline: none; }
+  #keys { position: absolute; opacity: 0; width: 1px; height: 1px; left: -10px; top: -10px; }
+  #toast { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 3; }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<div id="login">
+  <form class="card" method="post" action="/login" autocomplete="off">
+    <h1>pleamar remote</h1>
+    <p>This desktop, from here.</p>
+    <label>Password <input name="password" type="password" autocomplete="current-password" required autofocus></label>
+    <label>Code from your authenticator <input name="code" inputmode="numeric" pattern="[0-9 ]{6,7}" maxlength="7" required></label>
+    <div class="error">{{ERROR}}</div>
+    <button type="submit">Sign in</button>
+  </form>
+</div>
+<div id="app">
+  <div id="bar">
+    <span id="monitors"></span>
+    <span class="sep"></span>
+    <button id="full" title="Full screen: Windows, Alt+Tab and the rest go home too">Full screen</button>
+    <button id="super" title="Tap the Super key at home">Super</button>
+    <button id="pastebtn" title="Your clipboard here into the one at home, then Ctrl+V">Paste here ↦</button>
+    <button id="copybtn" title="The clipboard at home into yours">Copy home ↤</button>
+    <span class="sep"></span>
+    <span class="status" id="status">connecting…</span>
+    <form method="post" action="/logout" style="margin:0"><button type="submit">Sign out</button></form>
+  </div>
+  <div id="stage"><canvas id="screen" tabindex="0"></canvas></div>
+  <textarea id="keys" aria-hidden="true"></textarea>
+  <div id="toast"></div>
+</div>
+<script>
+(() => {
+  if (document.getElementById('app').style.display === 'none' || getComputedStyle(document.getElementById('app')).display === 'none') return;
+  const canvas = document.getElementById('screen');
+  const ctx = canvas.getContext('2d');
+  const keys = document.getElementById('keys');
+  const statusEl = document.getElementById('status');
+  const bar = document.getElementById('bar');
+  const toastEl = document.getElementById('toast');
+  let ws, monitors = [], current = 0, pending = 0, frames = 0, lastFps = performance.now(), queue = Promise.resolve();
+
+  const toast = (t) => { toastEl.textContent = t; toastEl.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(() => toastEl.classList.remove('show'), 1800); };
+
+  // KeyboardEvent.code → Linux evdev key code: where the key is, not what it
+  // writes, so home's own layout makes the characters.
+  const CODES = {
+    Escape:1, Digit1:2, Digit2:3, Digit3:4, Digit4:5, Digit5:6, Digit6:7, Digit7:8, Digit8:9, Digit9:10, Digit0:11,
+    Minus:12, Equal:13, Backspace:14, Tab:15, KeyQ:16, KeyW:17, KeyE:18, KeyR:19, KeyT:20, KeyY:21, KeyU:22, KeyI:23,
+    KeyO:24, KeyP:25, BracketLeft:26, BracketRight:27, Enter:28, ControlLeft:29, KeyA:30, KeyS:31, KeyD:32, KeyF:33,
+    KeyG:34, KeyH:35, KeyJ:36, KeyK:37, KeyL:38, Semicolon:39, Quote:40, Backquote:41, ShiftLeft:42, Backslash:43,
+    KeyZ:44, KeyX:45, KeyC:46, KeyV:47, KeyB:48, KeyN:49, KeyM:50, Comma:51, Period:52, Slash:53, ShiftRight:54,
+    NumpadMultiply:55, AltLeft:56, Space:57, CapsLock:58, F1:59, F2:60, F3:61, F4:62, F5:63, F6:64, F7:65, F8:66,
+    F9:67, F10:68, NumLock:69, ScrollLock:70, Numpad7:71, Numpad8:72, Numpad9:73, NumpadSubtract:74, Numpad4:75,
+    Numpad5:76, Numpad6:77, NumpadAdd:78, Numpad1:79, Numpad2:80, Numpad3:81, Numpad0:82, NumpadDecimal:83,
+    IntlBackslash:86, F11:87, F12:88, NumpadEnter:96, ControlRight:97, NumpadDivide:98, PrintScreen:99, AltRight:100,
+    Home:102, ArrowUp:103, PageUp:104, ArrowLeft:105, ArrowRight:106, End:107, ArrowDown:108, PageDown:109,
+    Insert:110, Delete:111, AudioVolumeMute:113, AudioVolumeDown:114, AudioVolumeUp:115, Pause:119,
+    MetaLeft:125, MetaRight:126, ContextMenu:127, OSLeft:125, OSRight:126,
+  };
+
+  const send = (t) => { if (ws && ws.readyState === 1) ws.send(t); };
+
+  function connect() {
+    ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
+    ws.binaryType = 'arraybuffer';
+    ws.onopen = () => { statusEl.textContent = 'connected'; };
+    ws.onclose = () => { statusEl.textContent = 'reconnecting…'; setTimeout(connect, 1500); };
+    ws.onmessage = (e) => {
+      if (typeof e.data !== 'string') { tile(e.data); return; }
+      const [verb, ...rest] = e.data.split(' ');
+      const arg = e.data.slice(verb.length + 1);
+      if (verb === 'mons') {
+        monitors = rest.map((m) => { const [name, x, y, w, h] = m.split(','); return { name, x: +x, y: +y, w: +w, h: +h }; });
+        drawMonitors();
+        send('mon ' + current);
+      } else if (verb === 'size') {
+        const [, w, h] = rest.map(Number);
+        if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      } else if (verb === 'frame') {
+        // When everything sent has been painted, the next one.
+        queue = queue.then(() => { send('ack'); frames++; });
+      } else if (verb === 'clip') {
+        navigator.clipboard.writeText(arg).then(() => toast('Copied from home'), () => toast('The browser did not let it copy'));
+      } else if (verb === 'pasted') {
+        if (pasteThen) { pasteThen(); pasteThen = null; }
+      } else if (verb === 'nopaste') {
+        toast('Could not paste at home');
+      } else if (verb === 'error') {
+        statusEl.textContent = 'error';
+        toast(arg);
+      } else if (verb === 'bye') {
+        location.reload();
+      }
+    };
+  }
+
+  function tile(buf) {
+    const v = new DataView(buf);
+    const x = v.getUint16(0), y = v.getUint16(2);
+    const blob = new Blob([new Uint8Array(buf, 8)], { type: 'image/jpeg' });
+    const p = createImageBitmap(blob).then((img) => { ctx.drawImage(img, x, y); img.close(); });
+    queue = queue.then(() => p).catch(() => {});
+  }
+
+  setInterval(() => {
+    const now = performance.now();
+    const fps = Math.round(frames * 1000 / (now - lastFps));
+    if (ws && ws.readyState === 1) statusEl.textContent = fps > 0 ? fps + ' fps' : 'live · still';
+    frames = 0; lastFps = now;
+  }, 2000);
+
+  function drawMonitors() {
+    const box = document.getElementById('monitors');
+    box.innerHTML = '';
+    monitors.forEach((m, k) => {
+      const b = document.createElement('button');
+      b.textContent = (k + 1) + ' · ' + m.name;
+      b.className = k === current ? 'on' : '';
+      b.onclick = () => { current = k; drawMonitors(); send('mon ' + k); canvas.focus(); };
+      box.appendChild(b);
+    });
+  }
+
+  // The pointer: where it is over the picture, in the picture's pixels.
+  const at = (e) => {
+    const r = canvas.getBoundingClientRect();
+    return [Math.round((e.clientX - r.left) * canvas.width / r.width), Math.round((e.clientY - r.top) * canvas.height / r.height)];
+  };
+  let lastMove = 0, moveTimer = null, moveAt = null;
+  canvas.addEventListener('pointermove', (e) => {
+    moveAt = at(e);
+    const now = performance.now();
+    if (now - lastMove > 12) { lastMove = now; send('m ' + moveAt.join(' ')); }
+    else { clearTimeout(moveTimer); moveTimer = setTimeout(() => send('m ' + moveAt.join(' ')), 14); }
+  });
+  canvas.addEventListener('pointerdown', (e) => {
+    e.preventDefault(); keys.focus({ preventScroll: true });
+    canvas.setPointerCapture(e.pointerId);
+    send('m ' + at(e).join(' ')); send('b ' + e.button + ' 1');
+  });
+  canvas.addEventListener('pointerup', (e) => { e.preventDefault(); send('m ' + at(e).join(' ')); send('b ' + e.button + ' 0'); });
+  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+  canvas.addEventListener('auxclick', (e) => e.preventDefault());
+  canvas.addEventListener('wheel', (e) => {
+    e.preventDefault();
+    const unit = e.deltaMode === 1 ? 1 / 3 : e.deltaMode === 2 ? 3 : 1 / 100;
+    send('w ' + (e.deltaX * unit).toFixed(3) + ' ' + (e.deltaY * unit).toFixed(3));
+  }, { passive: false });
+
+  // The keys: all of them go home, except Ctrl+V, which first takes your
+  // clipboard along.
+  let pasteThen = null;
+  const down = new Set();
+  keys.addEventListener('keydown', (e) => {
+    const code = CODES[e.code];
+    if (!code) return;
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyV') return; // the paste event follows
+    e.preventDefault();
+    if (e.repeat) return;
+    down.add(code); send('k ' + code + ' 1');
+  });
+  keys.addEventListener('keyup', (e) => {
+    const code = CODES[e.code];
+    if (!code) return;
+    e.preventDefault();
+    if (!down.has(code)) return;
+    down.delete(code); send('k ' + code + ' 0');
+    // Copying at home: bring it here too.
+    if (e.ctrlKey && (e.code === 'KeyC' || e.code === 'KeyX')) setTimeout(() => send('copy'), 250);
+  });
+  keys.addEventListener('paste', (e) => {
+    e.preventDefault();
+    const text = e.clipboardData.getData('text/plain');
+    const tapV = () => { send('k 47 1'); send('k 47 0'); };
+    if (!text) { tapV(); return; }
+    pasteThen = tapV;
+    send('paste ' + text);
+  });
+  const releaseAll = () => { down.clear(); send('rel'); };
+  window.addEventListener('blur', releaseAll);
+  document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); else send('full'); });
+  canvas.addEventListener('focus', () => keys.focus({ preventScroll: true }));
+  document.addEventListener('pointerdown', (e) => { if (!bar.contains(e.target)) keys.focus({ preventScroll: true }); });
+
+  // The bar hides at the top; it comes back with the pointer near it.
+  let barTimer = setTimeout(() => bar.classList.add('away'), 3000);
+  document.addEventListener('pointermove', (e) => {
+    if (e.clientY < 48) { bar.classList.remove('away'); clearTimeout(barTimer); barTimer = setTimeout(() => bar.classList.add('away'), 2500); }
+  });
+
+  document.getElementById('full').onclick = async () => {
+    if (document.fullscreenElement) { await document.exitFullscreen(); return; }
+    await document.documentElement.requestFullscreen();
+    // Windows, Alt+Tab, Ctrl+W… home's, not this browser's.
+    if (navigator.keyboard && navigator.keyboard.lock) { try { await navigator.keyboard.lock(); } catch (_) {} }
+    keys.focus({ preventScroll: true });
+  };
+  document.addEventListener('fullscreenchange', () => {
+    document.getElementById('full').classList.toggle('on', !!document.fullscreenElement);
+    if (!document.fullscreenElement && navigator.keyboard && navigator.keyboard.unlock) navigator.keyboard.unlock();
+  });
+  document.getElementById('super').onclick = () => { send('k 125 1'); send('k 125 0'); keys.focus({ preventScroll: true }); };
+  document.getElementById('pastebtn').onclick = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      pasteThen = () => { send('k 29 1'); send('k 47 1'); send('k 47 0'); send('k 29 0'); };
+      send('paste ' + text);
+    } catch (_) { toast('The browser did not let it read your clipboard'); }
+    keys.focus({ preventScroll: true });
+  };
+  document.getElementById('copybtn').onclick = () => { send('copy'); keys.focus({ preventScroll: true }); };
+
+  keys.focus({ preventScroll: true });
+  connect();
+})();
+</script>
+</body>
+</html>

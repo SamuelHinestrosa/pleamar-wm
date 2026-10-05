@@ -47,6 +47,21 @@ fn socket() -> Option<String> {
     std::path::Path::new(&path).exists().then_some(path)
 }
 
+/// The monitors, as the session counts them: name, and box in units.
+pub(crate) fn monitors() -> Result<Vec<(String, f64, f64, f64, f64)>, String> {
+    let reply = Hands::open()?.say("o")?;
+    let list = reply.strip_prefix("monitors").ok_or(reply.clone())?;
+    let mut out = Vec::new();
+    for entry in list.split('|').map(str::trim).filter(|e| !e.is_empty()) {
+        let f: Vec<&str> = entry.split_whitespace().collect();
+        if let [_, x, y, w, h, name, ..] = f[..] {
+            let n = |v: &str| v.parse::<f64>().unwrap_or(0.0);
+            out.push((name.to_owned(), n(x), n(y), n(w), n(h)));
+        }
+    }
+    Ok(out)
+}
+
 struct Hands {
     reader: BufReader<UnixStream>,
     writer: UnixStream,
