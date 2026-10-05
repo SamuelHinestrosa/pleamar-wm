@@ -32,6 +32,10 @@ const TILE: usize = 64;
 /// How long a session lasts without being used, and at most.
 const IDLE: Duration = Duration::from_secs(8 * 3600);
 const LIFE: Duration = Duration::from_secs(24 * 3600);
+/// A page connected with no mouse or key from it for this long is signed
+/// out: a laptop closed with the page open (its browser kept it connected,
+/// and kept the picture coming) is not someone using this desktop.
+const UNUSED: Duration = Duration::from_secs(30 * 60);
 
 const HELP: &str = "pleamar-wm remote — this desktop from a browser elsewhere
 
@@ -370,7 +374,11 @@ fn connection(mut stream: TcpStream, gate: &Arc<Mutex<Gate>>, hands: &Arc<Mutex<
     let signed_in = token.as_deref().is_some_and(|t| gate.lock().unwrap().valid(t));
     let html = "text/html; charset=utf-8";
     match (req.method.as_str(), req.path.split('?').next().unwrap_or("/")) {
-        ("GET", "/") => respond(&mut stream, "200 OK", html, "", page(signed_in, "").as_bytes()),
+        ("GET", "/") => {
+            // Back at the door after a while unused: why.
+            let why = if !signed_in && req.path.ends_with("?unused") { "Signed out after half an hour without use." } else { "" };
+            respond(&mut stream, "200 OK", html, "", page(signed_in, why).as_bytes())
+        }
         ("POST", "/login") => {
             let who = who(&req, &stream);
             let form = form(&String::from_utf8_lossy(&req.body));
@@ -892,10 +900,20 @@ fn viewer(stream: TcpStream, token: String, from: String, gate: &Arc<Mutex<Gate>
     let mut hands_direct = false;
     let mut last_rate = Instant::now();
     let mut low_since: Option<Instant> = None;
+    let mut used = Instant::now();
+    // (`PLEAMAR_REMOTE_UNUSED`, in seconds: to check it without waiting.)
+    let unused = std::env::var("PLEAMAR_REMOTE_UNUSED").ok().and_then(|v| v.parse().ok()).map_or(UNUSED, Duration::from_secs);
     loop {
         // Sent away from this computer: at once.
         if gate.lock().unwrap().kicked != kicked {
             let _ = ws.send(Message::Text("bye".into()));
+            break;
+        }
+        // Nobody's hands for a long while: signed out (see UNUSED).
+        if used.elapsed() > unused {
+            gate.lock().unwrap().sign_out(&token);
+            println!("remote · signed out: half an hour without a mouse or a key from there");
+            let _ = ws.send(Message::Text("bye unused".into()));
             break;
         }
         // Every so often: the session is still good (not signed out elsewhere).
@@ -985,6 +1003,9 @@ fn viewer(stream: TcpStream, token: String, from: String, gate: &Arc<Mutex<Gate>
                     Some(h) if !view_only => h,
                     _ => idle.insert(Hands::none()),
                 };
+                if matches!(verb, "m" | "b" | "w" | "k" | "paste" | "copy" | "mon") {
+                    used = Instant::now();
+                }
                 match (verb, &n[..]) {
                     ("hello", _) => {
                         video_wanted = rest.trim() == "video";

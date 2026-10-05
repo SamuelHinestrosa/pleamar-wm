@@ -159,7 +159,10 @@
       startDirect();
     };
     ws.onclose = () => {
-      statusEl.textContent = 'reconnecting…'; showDirect(false); if (pc) { pc.close(); pc = null; }
+      showDirect(false); if (pc) { pc.close(); pc = null; }
+      // Let go on purpose while the tab is hidden: back when it is seen.
+      if (asleep) return;
+      statusEl.textContent = 'reconnecting…';
       // Not let in any more (signed out, or too long): back to the door.
       fetch('/', { cache: 'no-store' }).then((r) => r.text()).then((t) => {
         if (/#login \{ display: flex/.test(t)) location.reload(); else setTimeout(connect, 1500);
@@ -209,7 +212,7 @@
         statusEl.textContent = 'error';
         toast(arg);
       } else if (verb === 'bye') {
-        location.reload();
+        location.href = arg === 'unused' ? '/?unused' : '/';
       }
     };
   }
@@ -346,7 +349,29 @@
   });
   const releaseAll = () => { down.clear(); hand('rel'); };
   window.addEventListener('blur', releaseAll);
-  document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); else send('full'); });
+  // Hidden (another tab, minimized, a laptop closed): after a few seconds
+  // the page lets go of home —no picture coming, not counted as someone
+  // there— and takes it again when it is seen.
+  let asleep = false, sleepTimer = null;
+  const sleep = () => {
+    if (!document.hidden || asleep) return;
+    asleep = true;
+    toast('Paused while this tab is hidden');
+    statusEl.textContent = 'paused';
+    if (ws) ws.close();
+  };
+  const wake = () => {
+    clearTimeout(sleepTimer);
+    if (!asleep) { send('full'); return; }
+    asleep = false;
+    statusEl.textContent = 'connecting…';
+    connect();
+  };
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) { releaseAll(); clearTimeout(sleepTimer); sleepTimer = setTimeout(sleep, 10000); } else wake();
+  });
+  // The browser freezing the page (a laptop going to sleep): at once.
+  document.addEventListener('freeze', () => { if (document.hidden) sleep(); });
   canvas.addEventListener('focus', () => keys.focus({ preventScroll: true }));
   document.addEventListener('pointerdown', (e) => { if (!bar.contains(e.target)) keys.focus({ preventScroll: true }); });
 

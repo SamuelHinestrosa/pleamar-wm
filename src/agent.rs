@@ -57,6 +57,18 @@ use smithay::reexports::calloop::timer::{TimeoutAction, Timer};
 use std::os::unix::net::{UnixListener, UnixStream};
 
 const HELLO: &str = "cua-inject v1";
+/// How long after `agent open` a program's first windows are still its.
+const OPENING: Duration = Duration::from_secs(30);
+
+/// A program the agent opened: its process, the name it was started by (a
+/// program that was already running opens the window from its own process,
+/// Discord, Firefox: it is known by its name), and the monitor.
+struct Opening {
+    pid: u32,
+    name: String,
+    screen: usize,
+    until: Instant,
+}
 /// Cursors the agent may drive at once.
 const CURSORS: usize = 2;
 
@@ -79,6 +91,9 @@ pub struct Agent {
     /// Where your keyboard was when that was said: if it has been anywhere
     /// since (that window too), the program may have been told `leave`.
     kb_real: Option<WlSurface>,
+    /// Programs the agent opened (`agent open`): their windows go to the
+    /// monitor it works on, and none takes your keyboard.
+    opening: Vec<Opening>,
     /// Per cursor: how many things it has done, for the scene to know it moved.
     seen: [u32; CURSORS],
     /// And all of them, keys too: the scene knows the agent is at work.
@@ -158,7 +173,7 @@ pub fn start(state: &mut State) {
         return;
     }
     println!("agent · computer use: cua-inject v1 at {path}");
-    state.agent = Some(Agent { seats, raw_entered: [None, None], raw_real: [None, None], kb_entered: None, kb_real: None, seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None, remote: None });
+    state.agent = Some(Agent { seats, raw_entered: [None, None], raw_real: [None, None], kb_entered: None, kb_real: None, opening: Vec::new(), seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None, remote: None });
     // Whether it is at work, looked at every second: between one action and
     // the next an agent thinks, and that is still working.
     let timer = Timer::from_duration(Duration::from_secs(1));
@@ -264,7 +279,13 @@ impl State {
                 Ok("ok".to_owned())
             }
             // Looking stays possible; doing anything does not.
-            [verb, ..] if matches!(*verb, "f" | "m" | "b" | "a" | "t" | "k" | "h" | "d" | "v") && self.agent_stopped() => Err("stopped-by-user"),
+            [verb, ..] if matches!(*verb, "f" | "m" | "b" | "a" | "t" | "k" | "h" | "d" | "v" | "L") && self.agent_stopped() => Err("stopped-by-user"),
+            // A program opened by the agent, on a monitor (-1: the one it
+            // works on, or one you are not on): «opened PID MONITOR».
+            ["L", monitor, command] => match monitor.parse::<i64>() {
+                Ok(m) => unhex(command).and_then(|c| String::from_utf8(c).map_err(|_| "bad-utf8")).and_then(|c| self.agent_open(m, &c)),
+                Err(_) => Err("bad-args"),
+            },
             ["f", pid] => self.agent_activate(pid).map(|_| "ok".to_owned()),
             ["m", target, idx, x, y] => self.agent_target(target).and_then(|s| self.agent_motion(s, idx.parse().unwrap_or(99), num(x)?, num(y)?)).map(|_| "ok".into()),
             ["b", target, idx, button, pressed] => self.agent_target(target).and_then(|s| self.agent_button(s, idx.parse().unwrap_or(99), button.parse().map_err(|_| "bad-args")?, *pressed != "0")).map(|_| "ok".into()),
@@ -298,7 +319,7 @@ impl State {
         }
     }
 
-    fn pid_of(&self, slot: usize) -> u32 {
+    pub(super) fn pid_of(&self, slot: usize) -> u32 {
         let Some(Some(w)) = self.slots.get(slot) else { return 0 };
         if let Toplevel::X11(x) = &w.toplevel {
             if let Some(pid) = x.pid() {
@@ -489,6 +510,71 @@ impl State {
         let (root, screen) = agent.working?;
         let recent = agent.last.is_some_and(|t| t.elapsed() < Duration::from_secs(20));
         (recent && pid != 0 && in_family(pid, root)).then_some(screen)
+    }
+
+    /// A window just made: if it is of a program the agent opened, the
+    /// monitor it goes to (and it does not take your keyboard).
+    pub(super) fn agent_opened(&mut self, pid: u32, app: &str) -> Option<usize> {
+        let agent = self.agent.as_mut()?;
+        agent.opening.retain(|o| o.until > Instant::now());
+        if agent.opening.is_empty() {
+            return None;
+        }
+        // What the window is called: its app id (often not said yet), and
+        // its process's program, as it runs and by its file.
+        let mut names = words(app);
+        if pid != 0 {
+            names.extend(std::fs::read_to_string(format!("/proc/{pid}/comm")).map(|c| words(&c)).unwrap_or_default());
+            names.extend(std::fs::read_link(format!("/proc/{pid}/exe")).ok().and_then(|e| e.file_name().map(|f| words(&f.to_string_lossy()))).unwrap_or_default());
+        }
+        let o = agent.opening.iter().find(|o| (pid != 0 && in_family(pid, o.pid)) || words(&o.name).iter().any(|w| names.contains(w)))?;
+        let screen = o.screen;
+        // And what it opens next (a dialog, another window) with it.
+        agent.working = Some((pid, screen));
+        agent.last = Some(Instant::now());
+        Some(screen)
+    }
+
+    /// `agent open`: the monitor is lit first, so you see where it will
+    /// work, then the program starts there, without your keyboard. The
+    /// monitor: the one asked for; else the one it is working on; else one
+    /// your pointer is not on.
+    fn agent_open(&mut self, monitor: i64, command: &str) -> Result<String, &'static str> {
+        let n = self.outputs.len().max(1);
+        let agent = self.agent.as_ref().ok_or("off")?;
+        let screen = if monitor >= 0 && (monitor as usize) < n {
+            monitor as usize
+        } else if let Some((_, s)) = agent.working.filter(|_| agent.active && agent.last.is_some_and(|t| t.elapsed() < Duration::from_secs(90))) {
+            s.min(n - 1)
+        } else {
+            (0..n).find(|k| *k != self.on_screen).unwrap_or(0)
+        };
+        // Lit before anything opens.
+        if let Some(agent) = self.agent.as_mut() {
+            agent.working = Some((0, screen));
+            agent.last = Some(Instant::now());
+            agent.busy = agent.busy.wrapping_add(1);
+            let busy = agent.busy;
+            for (name, v) in [("agent.win", -1.0), ("agent.screen", screen as f64), ("agent.seen", busy as f64)] {
+                let _ = self.to_render.send(ToRender::Fact(pleamar::scene::intern(name), v as f32));
+            }
+        }
+        self.agent_still_working();
+        let pid = self.launch(command).ok_or("could-not-start")?;
+        // Known by the name it was started with: the first word that is not
+        // `env`, a variable or a wrapper, without its folder.
+        let name = command
+            .split_whitespace()
+            .find(|w| !w.contains('=') && !matches!(*w, "env" | "exec" | "setsid" | "nohup" | "--"))
+            .map(|w| w.rsplit('/').next().unwrap_or(w).to_lowercase())
+            .unwrap_or_default();
+        if let Some(agent) = self.agent.as_mut() {
+            agent.working = Some((pid, screen));
+            agent.opening.retain(|o| o.until > Instant::now());
+            agent.opening.push(Opening { pid, name, screen, until: Instant::now() + OPENING });
+        }
+        println!("agent · opened «{command}» on monitor {screen}");
+        Ok(format!("opened {pid} {screen}"))
     }
 
     /// The monitors, in the order `windows` numbers them.
@@ -1070,6 +1156,16 @@ fn unhex(hex: &str) -> Result<Vec<u8>, &'static str> {
 
 /// Whether `pid` is `root` or one of its children: a browser's windows may
 /// belong to a process it started.
+/// The words of a program's name that say which it is: «google-chrome-canary»
+/// and «chrome» share «chrome»; not the ones every program could have.
+fn words(name: &str) -> Vec<String> {
+    name.to_lowercase()
+        .split(|c: char| !c.is_alphanumeric())
+        .filter(|w| w.len() >= 3 && !matches!(*w, "bin" | "app" | "desktop" | "browser" | "electron" | "client" | "org" | "com" | "the"))
+        .map(str::to_owned)
+        .collect()
+}
+
 fn in_family(mut pid: u32, root: u32) -> bool {
     if pid == 0 || root == 0 {
         return false;
@@ -1241,4 +1337,27 @@ fn keymap_fd(text: &str) -> Option<(std::os::fd::OwnedFd, u32)> {
 /// Taken by the agent's seats out of what the session's seat does.
 pub fn is_agent_seat(seat: &Seat<State>) -> bool {
     seat.name().starts_with("cua-agent")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::words;
+
+    fn same(a: &str, b: &str) -> bool {
+        let b = words(b);
+        words(a).iter().any(|w| b.contains(w))
+    }
+
+    #[test]
+    fn a_program_known_by_its_name() {
+        // What the agent started it with, and what its window or process says.
+        assert!(same("google-chrome-canary", "chrome"));
+        assert!(same("discord", "Discord"));
+        assert!(same("zen-browser", "zen-bin"));
+        assert!(same("firefox", "org.mozilla.firefox"));
+        // Not by the words any program could have.
+        assert!(!same("zen-browser", "brave-browser"));
+        assert!(!same("code", "electron"));
+        assert!(!same("kitty", "foot"));
+    }
 }

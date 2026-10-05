@@ -10,7 +10,7 @@ compose applications. No WSL, Wayland server or Unix shell is required.
 Install the stable Rust x64 MSVC toolchain and Visual Studio Build Tools with
 Desktop development with C++ and the Windows SDK. Keep this checkout next to
 the matching `pleamar` Windows port (`../pleamar`). The current CI pins pleamar
-commit `953b4401d43918c2b15d710fe4f17b8b1bfaff94` from the Windows PR; upstream
+commit `fba25a9189d51a6137ac633358cf21400c82e174` from the Windows PR; upstream
 pleamar alone does not yet include that backend.
 
 ```powershell
@@ -224,6 +224,7 @@ remain work for the full port.
 | Rain, snow, ride, dock, animated window transitions | Pending native equivalents |
 | Per-monitor tide pools and overview | Pending; Windows virtual desktops are not the same model |
 | Independent agent pointer/keyboard, glow and stop UI | Pending; Marea currently uses guarded shared Windows input |
+| Agent program launch on another monitor without taking the keyboard | Pending native implementation; the upstream 0.2.19 behavior is still Linux-only |
 | Remote desktop/WebRTC and sharing integration | Pending native capture/input/encoder adapters |
 | DRM, libinput, PipeWire, Wayland protocols and login session | Linux components; Windows owns the corresponding system facilities |
 

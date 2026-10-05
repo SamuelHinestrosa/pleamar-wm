@@ -25,6 +25,9 @@ const HELP: &str = "pleamar-wm agent — use the desktop with the agent's own po
   type PID TEXT                   text (accents, ñ, emoji too), typed into the window without taking the keyboard
   key PID NAME                    enter tab escape backspace space up down left right delete home end pageup pagedown f1…f12
   hotkey PID MODS+KEY             ctrl+l, ctrl+shift+t, alt+f4 …
+  open [--monitor N] COMMAND…      start a program for the agent: the monitor it works on lights
+                                  first, and the window opens there without taking your keyboard
+                                  (the monitor: N, or the one it works on, or one you are not on)
   focus PID                       give that window your keyboard (and show its workspace)
   send PID MONITOR                that window to another monitor (`monitors` numbers them)
   done                            finished: the light on the monitor goes out now (by itself it
@@ -251,6 +254,27 @@ fn go(args: &[String]) -> Result<(), String> {
                     continue;
                 }
                 println!("{}  {}  {}x{} at {},{}", f[0], f[5], f[3], f[4], f[1], f[2]);
+            }
+        }
+        "open" => {
+            let mut rest: Vec<String> = args[1..].to_vec();
+            let mut monitor = -1i64;
+            if rest.first().map(String::as_str) == Some("--monitor") {
+                monitor = rest.get(1).and_then(|m| m.parse().ok()).ok_or("which monitor: its number (pleamar-wm agent monitors)")?;
+                rest.drain(..2);
+            }
+            if rest.first().map(String::as_str) == Some("--") {
+                rest.remove(0);
+            }
+            let command = rest.join(" ");
+            if command.trim().is_empty() {
+                return Err("what to open: pleamar-wm agent open firefox".into());
+            }
+            let reply = Hands::open()?.say(&format!("L {monitor} {}", hex(&command)))?;
+            let f: Vec<&str> = reply.split_whitespace().collect();
+            match f.as_slice() {
+                ["opened", pid, screen] => println!("opened on monitor {screen} (process {pid}): its window opens there, without the user's keyboard. Find it with `pleamar-wm agent windows`."),
+                _ => return Err(format!("open: {reply}")),
             }
         }
         "send" => {
