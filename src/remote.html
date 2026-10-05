@@ -25,9 +25,10 @@
   #bar button:hover { border-color: var(--sea); }
   #bar button.on { background: var(--sea); color: var(--sea-ink); border-color: var(--sea); }
   #bar .sep { width: 1px; align-self: stretch; background: var(--line); margin: 2px 2px; }
-  #bar .status { color: var(--faint); font-size: 12px; padding: 0 4px; min-width: 150px; text-align: center; }
+  #bar .status { color: var(--faint); font-size: 12px; padding: 0 4px; min-width: 190px; text-align: center; }
   #stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
-  canvas { max-width: 100%; max-height: 100%; image-rendering: auto; cursor: default; outline: none; }
+  canvas, video { max-width: 100%; max-height: 100%; image-rendering: auto; cursor: default; outline: none; }
+  video { width: 100%; height: 100%; object-fit: contain; display: none; }
   #keys { position: absolute; opacity: 0; width: 1px; height: 1px; left: -10px; top: -10px; }
   #toast { position: absolute; bottom: 16px; left: 50%; transform: translateX(-50%); background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 8px 14px; font-size: 13px; opacity: 0; transition: opacity .2s; pointer-events: none; z-index: 3; }
   #toast.show { opacity: 1; }
@@ -56,7 +57,7 @@
     <span class="status" id="status">connecting…</span>
     <form method="post" action="/logout" style="margin:0"><button type="submit">Sign out</button></form>
   </div>
-  <div id="stage"><canvas id="screen" tabindex="0"></canvas></div>
+  <div id="stage"><canvas id="screen" tabindex="0"></canvas><video id="direct" autoplay muted playsinline disablepictureinpicture></video></div>
   <textarea id="keys" aria-hidden="true"></textarea>
   <div id="toast"></div>
 </div>
@@ -67,6 +68,8 @@
   // Painted straight to the screen, not a frame later with the rest of the page.
   const ctx = canvas.getContext('2d', { desynchronized: true, alpha: false });
   const keys = document.getElementById('keys');
+  const stage = document.getElementById('stage');
+  const videoEl = document.getElementById('direct');
   const statusEl = document.getElementById('status');
   const bar = document.getElementById('bar');
   const toastEl = document.getElementById('toast');
@@ -95,6 +98,51 @@
   };
 
   const send = (t) => { if (ws && ws.readyState === 1) ws.send(t); };
+  // The hands by the direct way when it is open (they go straight home).
+  let dc = null, pc = null, isDirect = false;
+  const hand = (t) => { if (isDirect && dc && dc.readyState === 'open') dc.send(t); else send(t); };
+
+  // The direct way: WebRTC, offered by the socket; the picture and the hands
+  // go straight between the two computers if the networks let them.
+  async function startDirect() {
+    if (!('RTCPeerConnection' in window)) return;
+    try {
+      if (pc) pc.close();
+      pc = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun.cloudflare.com:3478' }] });
+      pc.addTransceiver('video', { direction: 'recvonly' });
+      dc = pc.createDataChannel('input', { ordered: true });
+      pc.ontrack = (e) => {
+        // No waiting to smooth it out: each frame as soon as it is whole.
+        try { e.receiver.jitterBufferTarget = 0; } catch (_) {}
+        try { e.receiver.playoutDelayHint = 0; } catch (_) {}
+        videoEl.srcObject = e.streams[0] || new MediaStream([e.track]);
+      };
+      pc.onconnectionstatechange = () => { if (pc && (pc.connectionState === 'failed' || pc.connectionState === 'closed')) showDirect(false); };
+      await pc.setLocalDescription(await pc.createOffer());
+      // All the ways this computer can be reached, before offering.
+      await new Promise((done) => {
+        if (pc.iceGatheringState === 'complete') return done();
+        pc.addEventListener('icegatheringstatechange', () => { if (pc.iceGatheringState === 'complete') done(); });
+        setTimeout(done, 2000);
+      });
+      send('rtc ' + pc.localDescription.sdp);
+    } catch (e) { console.warn('direct way', e); }
+  }
+  function showDirect(on) {
+    isDirect = on;
+    videoEl.style.display = on ? 'block' : 'none';
+    canvas.style.display = on ? 'none' : '';
+    if (on && 'requestVideoFrameCallback' in videoEl) {
+      const count = () => { frames++; if (isDirect) videoEl.requestVideoFrameCallback(count); };
+      videoEl.requestVideoFrameCallback(count);
+    }
+  }
+  // The direct way's own round trip.
+  setInterval(async () => {
+    if (!isDirect || !pc) return;
+    const stats = await pc.getStats();
+    stats.forEach((r) => { if (r.type === 'candidate-pair' && r.nominated && r.currentRoundTripTime) net = Math.round(r.currentRoundTripTime * 1000); });
+  }, 2000);
 
   function connect() {
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
@@ -103,8 +151,15 @@
       statusEl.textContent = 'connected';
       // Video if this browser decodes it (Chrome, Edge…); squares of JPEG if not.
       send('hello ' + ('VideoDecoder' in window ? 'video' : 'jpeg'));
+      startDirect();
     };
-    ws.onclose = () => { statusEl.textContent = 'reconnecting…'; setTimeout(connect, 1500); };
+    ws.onclose = () => {
+      statusEl.textContent = 'reconnecting…'; showDirect(false); if (pc) { pc.close(); pc = null; }
+      // Not let in any more (signed out, or too long): back to the door.
+      fetch('/', { cache: 'no-store' }).then((r) => r.text()).then((t) => {
+        if (/#login \{ display: flex/.test(t)) location.reload(); else setTimeout(connect, 1500);
+      }, () => setTimeout(connect, 1500));
+    };
     ws.onmessage = (e) => {
       if (typeof e.data !== 'string') {
         const kind = new Uint8Array(e.data, 0, 1)[0];
@@ -120,7 +175,14 @@
       } else if (verb === 'size') {
         const [, w, h] = rest.map(Number);
         if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      } else if (verb === 'rtcanswer') {
+        if (pc) pc.setRemoteDescription({ type: 'answer', sdp: arg }).catch((e) => console.warn('direct way', e));
+      } else if (verb === 'direct') {
+        showDirect(true);
+      } else if (verb === 'indirect') {
+        showDirect(false);
       } else if (verb === 'pong') {
+        if (isDirect) return;
         const ms = performance.now() - Number(arg);
         net = net ? Math.round(net * 0.7 + ms * 0.3) : Math.round(ms);
       } else if (verb === 'stats') {
@@ -198,7 +260,7 @@
   setInterval(() => {
     const now = performance.now();
     const fps = Math.round(frames * 1000 / (now - lastFps));
-    const way = rtt ? ' · ' + (net ? 'net ' + net + ' · ' : '') + rtt + ' ms · ' + (kbps / 1000).toFixed(1) + ' Mb/s' + (rate && rate < 60 ? ' · ' + rate + ' max' : '') : '';
+    const way = isDirect ? ' · direct' + (net ? ' ' + net + ' ms' : '') + (kbps ? ' · ' + (kbps / 1000).toFixed(1) + ' Mb/s' : '') : rtt ? ' · via Funnel · ' + (net ? 'net ' + net + ' · ' : '') + rtt + ' ms · ' + (kbps / 1000).toFixed(1) + ' Mb/s' + (rate && rate < 60 ? ' · ' + rate + ' max' : '') : '';
     if (ws && ws.readyState === 1) statusEl.textContent = (fps > 0 ? fps + ' fps' : 'still') + way;
     frames = 0; lastFps = now;
   }, 2000);
@@ -217,28 +279,35 @@
 
   // The pointer: where it is over the picture, as a fraction of it.
   const at = (e) => {
-    const r = canvas.getBoundingClientRect();
+    let r = canvas.getBoundingClientRect();
+    if (isDirect && videoEl.videoWidth) {
+      // The picture inside the video's box (fitted, with bands around).
+      const box = videoEl.getBoundingClientRect();
+      const k = Math.min(box.width / videoEl.videoWidth, box.height / videoEl.videoHeight);
+      const w = videoEl.videoWidth * k, h = videoEl.videoHeight * k;
+      r = { left: box.left + (box.width - w) / 2, top: box.top + (box.height - h) / 2, width: w, height: h };
+    }
     return [((e.clientX - r.left) / r.width).toFixed(5), ((e.clientY - r.top) / r.height).toFixed(5)];
   };
   let lastMove = 0, moveTimer = null, moveAt = null;
-  canvas.addEventListener('pointermove', (e) => {
+  stage.addEventListener('pointermove', (e) => {
     moveAt = at(e);
     const now = performance.now();
-    if (now - lastMove > 12) { lastMove = now; send('m ' + moveAt.join(' ')); }
-    else { clearTimeout(moveTimer); moveTimer = setTimeout(() => send('m ' + moveAt.join(' ')), 14); }
+    if (now - lastMove > 12) { lastMove = now; hand('m ' + moveAt.join(' ')); }
+    else { clearTimeout(moveTimer); moveTimer = setTimeout(() => hand('m ' + moveAt.join(' ')), 14); }
   });
-  canvas.addEventListener('pointerdown', (e) => {
+  stage.addEventListener('pointerdown', (e) => {
     e.preventDefault(); keys.focus({ preventScroll: true });
-    canvas.setPointerCapture(e.pointerId);
-    send('m ' + at(e).join(' ')); send('b ' + e.button + ' 1');
+    stage.setPointerCapture(e.pointerId);
+    hand('m ' + at(e).join(' ')); hand('b ' + e.button + ' 1');
   });
-  canvas.addEventListener('pointerup', (e) => { e.preventDefault(); send('m ' + at(e).join(' ')); send('b ' + e.button + ' 0'); });
-  canvas.addEventListener('contextmenu', (e) => e.preventDefault());
-  canvas.addEventListener('auxclick', (e) => e.preventDefault());
-  canvas.addEventListener('wheel', (e) => {
+  stage.addEventListener('pointerup', (e) => { e.preventDefault(); hand('m ' + at(e).join(' ')); hand('b ' + e.button + ' 0'); });
+  stage.addEventListener('contextmenu', (e) => e.preventDefault());
+  stage.addEventListener('auxclick', (e) => e.preventDefault());
+  stage.addEventListener('wheel', (e) => {
     e.preventDefault();
     const unit = e.deltaMode === 1 ? 1 / 3 : e.deltaMode === 2 ? 3 : 1 / 100;
-    send('w ' + (e.deltaX * unit).toFixed(3) + ' ' + (e.deltaY * unit).toFixed(3));
+    hand('w ' + (e.deltaX * unit).toFixed(3) + ' ' + (e.deltaY * unit).toFixed(3));
   }, { passive: false });
 
   // The keys: all of them go home, except Ctrl+V, which first takes your
@@ -251,26 +320,26 @@
     if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyV') return; // the paste event follows
     e.preventDefault();
     if (e.repeat) return;
-    down.add(code); send('k ' + code + ' 1');
+    down.add(code); hand('k ' + code + ' 1');
   });
   keys.addEventListener('keyup', (e) => {
     const code = CODES[e.code];
     if (!code) return;
     e.preventDefault();
     if (!down.has(code)) return;
-    down.delete(code); send('k ' + code + ' 0');
+    down.delete(code); hand('k ' + code + ' 0');
     // Copying at home: bring it here too.
     if (e.ctrlKey && (e.code === 'KeyC' || e.code === 'KeyX')) setTimeout(() => send('copy'), 250);
   });
   keys.addEventListener('paste', (e) => {
     e.preventDefault();
     const text = e.clipboardData.getData('text/plain');
-    const tapV = () => { send('k 47 1'); send('k 47 0'); };
+    const tapV = () => { hand('k 47 1'); hand('k 47 0'); };
     if (!text) { tapV(); return; }
     pasteThen = tapV;
     send('paste ' + text);
   });
-  const releaseAll = () => { down.clear(); send('rel'); };
+  const releaseAll = () => { down.clear(); hand('rel'); };
   window.addEventListener('blur', releaseAll);
   document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); else send('full'); });
   canvas.addEventListener('focus', () => keys.focus({ preventScroll: true }));
@@ -293,11 +362,11 @@
     document.getElementById('full').classList.toggle('on', !!document.fullscreenElement);
     if (!document.fullscreenElement && navigator.keyboard && navigator.keyboard.unlock) navigator.keyboard.unlock();
   });
-  document.getElementById('super').onclick = () => { send('k 125 1'); send('k 125 0'); keys.focus({ preventScroll: true }); };
+  document.getElementById('super').onclick = () => { hand('k 125 1'); hand('k 125 0'); keys.focus({ preventScroll: true }); };
   document.getElementById('pastebtn').onclick = async () => {
     try {
       const text = await navigator.clipboard.readText();
-      pasteThen = () => { send('k 29 1'); send('k 47 1'); send('k 47 0'); send('k 29 0'); };
+      pasteThen = () => { hand('k 29 1'); hand('k 47 1'); hand('k 47 0'); hand('k 29 0'); };
       send('paste ' + text);
     } catch (_) { toast('The browser did not let it read your clipboard'); }
     keys.focus({ preventScroll: true });

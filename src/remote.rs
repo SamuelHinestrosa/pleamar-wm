@@ -136,8 +136,11 @@ fn setup() -> Result<(), String> {
 
 struct Gate {
     config: Config,
-    /// Session cookies: when they began and when they were last used.
-    sessions: HashMap<String, (Instant, Instant)>,
+    /// Sessions, by their cookie's hash: when they began and when they were
+    /// last used (seconds since 1970). Kept in a file, so that starting the
+    /// server again does not sign anyone out.
+    sessions: HashMap<String, (u64, u64)>,
+    saved: u64,
     /// Failed sign-ins, by address and all together.
     failures: HashMap<String, Vec<Instant>>,
     all_failures: Vec<Instant>,
@@ -147,14 +150,64 @@ struct Gate {
 
 impl Gate {
     fn valid(&mut self, token: &str) -> bool {
-        let now = Instant::now();
-        self.sessions.retain(|_, (born, used)| now.duration_since(*used) < IDLE && now.duration_since(*born) < LIFE);
-        match self.sessions.get_mut(token) {
+        let now = now_secs();
+        let before = self.sessions.len();
+        self.sessions.retain(|_, (born, used)| now.saturating_sub(*used) < IDLE.as_secs() && now.saturating_sub(*born) < LIFE.as_secs());
+        let found = match self.sessions.get_mut(&hex(&sha2::Sha256::digest(token.as_bytes()))) {
             Some((_, used)) => {
                 *used = now;
                 true
             }
             None => false,
+        };
+        if self.sessions.len() != before || now.saturating_sub(self.saved) > 60 {
+            self.save();
+        }
+        found
+    }
+
+    fn sign_out(&mut self, token: &str) {
+        self.sessions.remove(&hex(&sha2::Sha256::digest(token.as_bytes())));
+        self.save();
+    }
+
+    fn sessions_path() -> String {
+        let base = std::env::var("XDG_STATE_HOME").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| format!("{}/.local/state", std::env::var("HOME").unwrap_or_default()));
+        format!("{base}/pleamar/remote-sessions")
+    }
+
+    /// The sessions as the file has them (only hashes: the file does not let anyone in).
+    fn restore(&mut self) {
+        let Ok(text) = std::fs::read_to_string(Self::sessions_path()) else { return };
+        for line in text.lines() {
+            let f: Vec<&str> = line.split_whitespace().collect();
+            match f[..] {
+                ["step", n] => self.last_step = n.parse().unwrap_or(0),
+                [hash, born, used] => {
+                    if let (Ok(b), Ok(u)) = (born.parse(), used.parse()) {
+                        self.sessions.insert(hash.to_owned(), (b, u));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn save(&mut self) {
+        use std::os::unix::fs::OpenOptionsExt;
+        self.saved = now_secs();
+        let mut text = format!("step {}\n", self.last_step);
+        for (hash, (born, used)) in &self.sessions {
+            text.push_str(&format!("{hash} {born} {used}\n"));
+        }
+        let path = Self::sessions_path();
+        if let Some(dir) = std::path::Path::new(&path).parent() {
+            let _ = std::fs::create_dir_all(dir);
+        }
+        let new = format!("{path}.new");
+        let written = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&new).and_then(|mut f| f.write_all(text.as_bytes()));
+        if written.is_ok() {
+            let _ = std::fs::rename(&new, &path);
         }
     }
 
@@ -182,8 +235,9 @@ impl Gate {
             (true, Some(s)) => {
                 self.last_step = s;
                 let token = hex(&random(32));
-                let now = Instant::now();
-                self.sessions.insert(token.clone(), (now, now));
+                let now = now_secs();
+                self.sessions.insert(hex(&sha2::Sha256::digest(token.as_bytes())), (now, now));
+                self.save();
                 Some(token)
             }
             _ => {
@@ -198,7 +252,9 @@ impl Gate {
 fn serve(view_only: bool) -> Result<(), String> {
     let config = load()?;
     let port = config.port;
-    let gate = Arc::new(Mutex::new(Gate { config, sessions: HashMap::new(), failures: HashMap::new(), all_failures: Vec::new(), last_step: 0 }));
+    let mut gate = Gate { config, sessions: HashMap::new(), saved: 0, failures: HashMap::new(), all_failures: Vec::new(), last_step: 0 };
+    gate.restore();
+    let gate = Arc::new(Mutex::new(gate));
     let hands = Arc::new(Mutex::new(None::<Hands>));
     let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("127.0.0.1:{port}: {e}"))?;
     println!("pleamar-wm remote · on http://127.0.0.1:{port}{}", if view_only { " · only to watch" } else { "" });
@@ -310,7 +366,7 @@ fn connection(mut stream: TcpStream, gate: &Arc<Mutex<Gate>>, hands: &Arc<Mutex<
         }
         ("POST", "/logout") => {
             if let Some(t) = token {
-                gate.lock().unwrap().sessions.remove(&t);
+                gate.lock().unwrap().sign_out(&t);
             }
             respond(&mut stream, "303 See Other", html, "Set-Cookie: pleamar_remote=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0\r\nLocation: /\r\n", b"")
         }
@@ -702,6 +758,11 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
     let mut pending: Option<bool> = None;
     let mut last_ask = Instant::now() - Duration::from_secs(1);
     let mut checked = Instant::now();
+    // The direct way (WebRTC), once the page has offered it and it opened.
+    let mut peer: Option<crate::remote_rtc::Peer> = None;
+    let mut direct = false;
+    let mut hands_direct = false;
+    let mut last_rate = Instant::now();
     loop {
         // Every so often: the session is still good (not signed out elsewhere).
         if checked.elapsed() > Duration::from_secs(30) {
@@ -711,9 +772,62 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
                 break;
             }
         }
+        // What the page says, by its socket or by the direct way.
+        let mut lines: Vec<String> = Vec::new();
         match ws.read() {
-            Ok(Message::Text(t)) => {
-                let t = t.to_string();
+            Ok(Message::Text(t)) => lines.push(t.to_string()),
+            Ok(Message::Close(_)) => break,
+            Ok(_) => {}
+            Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
+            Err(_) => break,
+        }
+        let mut gone = false;
+        while let Some(event) = peer.as_ref().and_then(|p| p.events.try_recv().ok()) {
+            use crate::remote_rtc::PeerEvent;
+            match event {
+                PeerEvent::Line(l) => {
+                    if !hands_direct {
+                        hands_direct = true;
+                        println!("remote · the hands come by the direct way");
+                    }
+                    lines.push(l);
+                }
+                PeerEvent::Connected => {
+                    // The picture goes this way now, from a whole frame.
+                    direct = true;
+                    restart = true;
+                    println!("remote · the direct way is open");
+                    let _ = ws.send(Message::Text("direct".into()));
+                }
+                PeerEvent::WholeFrame => restart = true,
+                PeerEvent::Estimate(k) if direct => {
+                    // What the way takes: less at once, more only now and then.
+                    let k = k.clamp(KBPS_MIN, KBPS_MAX);
+                    let lower = k < flow.kbps * 7 / 10;
+                    let higher = k > flow.kbps * 13 / 10 && last_rate.elapsed() > Duration::from_secs(15);
+                    if lower || higher {
+                        flow.kbps = (k * 9 / 10).max(KBPS_MIN);
+                        flow.fps = if flow.kbps < 4000 { 30 } else { 60 };
+                        last_rate = Instant::now();
+                        restart = true;
+                    }
+                }
+                PeerEvent::Estimate(_) => {}
+                PeerEvent::Gone => gone = true,
+            }
+        }
+        if gone {
+            // Back by the socket.
+            peer = None;
+            if direct {
+                direct = false;
+                restart = true;
+                println!("remote · the direct way closed: by the socket again");
+                let _ = ws.send(Message::Text("indirect".into()));
+            }
+        }
+        for t in lines {
+            {
                 let mut f = t.splitn(2, ' ');
                 let (verb, rest) = (f.next().unwrap_or(""), f.next().unwrap_or(""));
                 let n: Vec<f64> = rest.split_whitespace().filter_map(|v| v.parse().ok()).collect();
@@ -734,6 +848,19 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
                         }
                     }
                     ("got", [seq]) => flow.got(*seq as u32),
+                    ("rtc", _) => {
+                        // The page offers the direct way: the answer, by the socket.
+                        match crate::remote_rtc::answer(rest, flow.kbps) {
+                            Ok((sdp, p)) => {
+                                peer = Some(p);
+                                let _ = ws.send(Message::Text(format!("rtcanswer {sdp}").into()));
+                            }
+                            Err(e) => {
+                                println!("remote · no direct way: {e}");
+                                let _ = ws.send(Message::Text("rtcno".into()));
+                            }
+                        }
+                    }
                     ("ping", _) => {
                         let _ = ws.send(Message::Text(format!("pong {rest}").into()));
                     }
@@ -784,10 +911,6 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
                     _ => {}
                 }
             }
-            Ok(Message::Close(_)) => break,
-            Ok(_) => {}
-            Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
-            Err(_) => break,
         }
 
         // As video: frames as they come; fallen behind, from a whole one again.
@@ -797,14 +920,16 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
             }
             // The way there filling up (a slower moment of the network, the
             // buffers of whoever is in between): stop sending until it has
-            // emptied, and go on with less.
-            match flow.state() {
-                Pace::Go => {}
-                Pace::Wait => {
-                    while let Some(Ok(_)) = video.as_ref().map(|v| v.frames.try_recv()) {}
-                    continue;
+            // emptied, and go on with less. (The direct way measures itself.)
+            if !direct {
+                match flow.state() {
+                    Pace::Go => {}
+                    Pace::Wait => {
+                        while let Some(Ok(_)) = video.as_ref().map(|v| v.frames.try_recv()) {}
+                        continue;
+                    }
+                    Pace::Again => restart = true,
                 }
-                Pace::Again => restart = true,
             }
             if flow.stats_due() {
                 let _ = ws.send(Message::Text(format!("stats {} {} {}", flow.rtt.round(), flow.kbps, flow.fps).into()));
@@ -828,6 +953,15 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
             }
             let mut sent = false;
             while let Some(Ok((key, data))) = video.as_ref().map(|v| v.frames.try_recv()) {
+                if direct {
+                    if let Some(p) = &peer {
+                        if !p.send(key, data) {
+                            // The way is full: from a whole frame again.
+                            restart = true;
+                        }
+                    }
+                    continue;
+                }
                 let seq = flow.sent(data.len());
                 let mut message = Vec::with_capacity(data.len() + 6);
                 message.extend_from_slice(&[2, key as u8]);
