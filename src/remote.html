@@ -95,10 +95,18 @@
   function connect() {
     ws = new WebSocket((location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host + '/ws');
     ws.binaryType = 'arraybuffer';
-    ws.onopen = () => { statusEl.textContent = 'connected'; };
+    ws.onopen = () => {
+      statusEl.textContent = 'connected';
+      // Video if this browser decodes it (Chrome, Edge…); squares of JPEG if not.
+      send('hello ' + ('VideoDecoder' in window ? 'video' : 'jpeg'));
+    };
     ws.onclose = () => { statusEl.textContent = 'reconnecting…'; setTimeout(connect, 1500); };
     ws.onmessage = (e) => {
-      if (typeof e.data !== 'string') { tile(e.data); return; }
+      if (typeof e.data !== 'string') {
+        const kind = new Uint8Array(e.data, 0, 1)[0];
+        if (kind === 2) video(e.data); else tile(e.data);
+        return;
+      }
       const [verb, ...rest] = e.data.split(' ');
       const arg = e.data.slice(verb.length + 1);
       if (verb === 'mons') {
@@ -108,6 +116,10 @@
       } else if (verb === 'size') {
         const [, w, h] = rest.map(Number);
         if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
+      } else if (verb === 'video') {
+        newDecoder();
+      } else if (verb === 'novideo') {
+        toast('No video at home (' + arg + '): pictures instead');
       } else if (verb === 'frame') {
         // When everything sent has been painted, the next one.
         queue = queue.then(() => { send('ack'); frames++; });
@@ -126,10 +138,48 @@
     };
   }
 
+  // The video: H.264 frames as they come, decoded by the browser (the card's
+  // decoder where there is one), each painted as soon as it is out.
+  let decoder = null, configured = false, needKey = true, stamp = 0;
+  function newDecoder() {
+    if (decoder) { try { decoder.close(); } catch (_) {} }
+    configured = false; needKey = true;
+    decoder = new VideoDecoder({
+      output: (f) => {
+        if (canvas.width !== f.displayWidth || canvas.height !== f.displayHeight) { canvas.width = f.displayWidth; canvas.height = f.displayHeight; }
+        ctx.drawImage(f, 0, 0); f.close(); frames++;
+      },
+      error: (e) => { toast('Video: ' + e.message); newDecoder(); send('full'); },
+    });
+  }
+  // avc1.PPCCLL from the stream's own parameters (its SPS).
+  function codecOf(d) {
+    for (let k = 0; k + 7 < d.length; k++) {
+      if (d[k] === 0 && d[k + 1] === 0 && d[k + 2] === 1 && (d[k + 3] & 0x1f) === 7) {
+        return 'avc1.' + [d[k + 4], d[k + 5], d[k + 6]].map((b) => b.toString(16).padStart(2, '0')).join('');
+      }
+    }
+    return null;
+  }
+  function video(buf) {
+    if (!decoder) newDecoder();
+    const all = new Uint8Array(buf);
+    const key = all[1] === 1, data = all.subarray(2);
+    if (needKey && !key) return;
+    if (!configured) {
+      decoder.configure({ codec: codecOf(data) || 'avc1.640028', optimizeForLatency: true });
+      configured = true;
+    }
+    // Fallen behind (a slow moment): skip to a whole frame, newer.
+    if (!key && decoder.decodeQueueSize > 6) { needKey = true; send('full'); return; }
+    needKey = false;
+    decoder.decode(new EncodedVideoChunk({ type: key ? 'key' : 'delta', timestamp: (stamp += 33333), data }));
+  }
+
   function tile(buf) {
-    const v = new DataView(buf);
+    const v = new DataView(buf, 1);
     const x = v.getUint16(0), y = v.getUint16(2);
-    const blob = new Blob([new Uint8Array(buf, 8)], { type: 'image/jpeg' });
+    const blob = new Blob([new Uint8Array(buf, 9)], { type: 'image/jpeg' });
     const p = createImageBitmap(blob).then((img) => { ctx.drawImage(img, x, y); img.close(); });
     queue = queue.then(() => p).catch(() => {});
   }
@@ -153,10 +203,10 @@
     });
   }
 
-  // The pointer: where it is over the picture, in the picture's pixels.
+  // The pointer: where it is over the picture, as a fraction of it.
   const at = (e) => {
     const r = canvas.getBoundingClientRect();
-    return [Math.round((e.clientX - r.left) * canvas.width / r.width), Math.round((e.clientY - r.top) * canvas.height / r.height)];
+    return [((e.clientX - r.left) / r.width).toFixed(5), ((e.clientY - r.top) / r.height).toFixed(5)];
   };
   let lastMove = 0, moveTimer = null, moveAt = null;
   canvas.addEventListener('pointermove', (e) => {

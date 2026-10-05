@@ -375,10 +375,141 @@ enum Want {
     Frame { monitor: usize, whole: bool },
 }
 
-/// One connected page: what it says goes to the hands; the pictures come
-/// from a thread of their own, one batch each time the page has painted.
+/// The encoders tried, in order: the card's (NVIDIA, then VAAPI: AMD,
+/// Intel), and the processor's. Each with what makes it answer at once:
+/// no frames held back to compare with later ones.
+const ENCODERS: &[(&str, &[&str])] = &[
+    ("h264_nvenc", &["preset=p1", "tune=ull", "zerolatency=1", "bf=0", "g=900", "rc=vbr", "b=8M", "maxrate=14M"]),
+    ("libx264", &["preset=ultrafast", "tune=zerolatency", "bf=0", "g=900", "crf=24"]),
+];
+
+/// A monitor as video: wf-recorder taking it 30 times a second (the
+/// compositor's own copies) into H.264, cut here into frames.
+struct Video {
+    child: std::process::Child,
+    frames: mpsc::Receiver<(bool, Vec<u8>)>,
+    /// The page fell behind and frames were dropped: start again from a whole one.
+    behind: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for Video {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Video {
+    fn start(monitor: &str) -> Result<Video, String> {
+        use std::os::fd::AsRawFd;
+        let mut why = String::new();
+        for (codec, params) in ENCODERS {
+            let mut args: Vec<String> = ["-D", "--no-dmabuf", "-o", monitor, "-r", "30", "-c", codec].iter().map(|v| v.to_string()).collect();
+            for p in *params {
+                args.push("-p".into());
+                args.push(p.to_string());
+            }
+            args.extend(["-m", "h264", "-f", "pipe:1"].iter().map(|v| v.to_string()));
+            let mut child = match std::process::Command::new("wf-recorder").args(&args).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).spawn() {
+                Ok(c) => c,
+                Err(e) => return Err(format!("wf-recorder: {e} (install wf-recorder)")),
+            };
+            let out = child.stdout.take().ok_or("no output")?;
+            // The first frame within a few seconds, or the next encoder.
+            let mut poll = libc::pollfd { fd: out.as_raw_fd(), events: libc::POLLIN, revents: 0 };
+            let ready = unsafe { libc::poll(&mut poll, 1, 4000) } > 0 && poll.revents & libc::POLLIN != 0;
+            if !ready || child.try_wait().ok().flatten().is_some() {
+                let _ = child.kill();
+                let _ = child.wait();
+                why.push_str(&format!("{codec} did not start; "));
+                continue;
+            }
+            println!("remote · {monitor} as video with {codec}");
+            let (tx, rx) = mpsc::sync_channel(24);
+            let behind = Arc::new(std::sync::atomic::AtomicBool::new(false));
+            let late = behind.clone();
+            std::thread::spawn(move || cut_frames(out, tx, late));
+            return Ok(Video { child, frames: rx, behind });
+        }
+        Err(format!("no encoder worked: {why}"))
+    }
+}
+
+/// The stream, read as it comes: when it stops for a moment, what came is
+/// whole frames (the encoder writes one at a time), each sent on.
+fn cut_frames(out: std::process::ChildStdout, tx: mpsc::SyncSender<(bool, Vec<u8>)>, behind: Arc<std::sync::atomic::AtomicBool>) {
+    use std::os::fd::AsRawFd;
+    let fd = out.as_raw_fd();
+    let mut buf: Vec<u8> = Vec::with_capacity(1 << 20);
+    let mut chunk = vec![0u8; 1 << 18];
+    loop {
+        let mut poll = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+        let wait = if buf.is_empty() { 2000 } else { 3 };
+        let n = unsafe { libc::poll(&mut poll, 1, wait) };
+        if n > 0 {
+            let got = unsafe { libc::read(fd, chunk.as_mut_ptr() as *mut libc::c_void, chunk.len()) };
+            if got <= 0 {
+                break;
+            }
+            buf.extend_from_slice(&chunk[..got as usize]);
+            continue;
+        }
+        if buf.is_empty() {
+            continue;
+        }
+        for frame in access_units(&buf) {
+            match tx.try_send(frame) {
+                Ok(()) => {}
+                Err(mpsc::TrySendError::Full(_)) => behind.store(true, std::sync::atomic::Ordering::Relaxed),
+                Err(mpsc::TrySendError::Disconnected(_)) => return,
+            }
+        }
+        buf.clear();
+    }
+    drop(out);
+}
+
+/// H.264 (Annex B) cut into frames: a frame is the parameters and notes
+/// before a picture, and the picture. Whether it is a whole one (key).
+fn access_units(data: &[u8]) -> Vec<(bool, Vec<u8>)> {
+    // Where each unit starts (after its 00 00 01) and its start code's start.
+    let mut starts = Vec::new();
+    let mut k = 0;
+    while k + 3 <= data.len() {
+        if data[k] == 0 && data[k + 1] == 0 && data[k + 2] == 1 {
+            let code = if k > 0 && data[k - 1] == 0 { k - 1 } else { k };
+            starts.push((code, k + 3));
+            k += 3;
+        } else {
+            k += 1;
+        }
+    }
+    let mut out: Vec<(bool, Vec<u8>)> = Vec::new();
+    let mut current: Option<(usize, bool, bool)> = None; // from, has a picture, key
+    for (n, (code, body)) in starts.iter().enumerate() {
+        let kind = data.get(*body).map_or(0, |b| b & 0x1f);
+        let picture = kind == 1 || kind == 5;
+        if let Some((from, has, key)) = current {
+            if has && (picture || matches!(kind, 6 | 7 | 8 | 9)) {
+                out.push((key, data[from..*code].to_vec()));
+                current = None;
+            }
+        }
+        let c = current.get_or_insert((*code, false, false));
+        c.1 |= picture;
+        c.2 |= kind == 5;
+        if n + 1 == starts.len() {
+            out.push((c.2, data[c.0..].to_vec()));
+        }
+    }
+    out
+}
+
+/// One connected page: what it says goes to the hands; the picture comes
+/// as video (or, for a browser without a video decoder, as squares of JPEG
+/// each time the page has painted the last ones).
 fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc<Mutex<Option<Hands>>>, view_only: bool) -> Result<(), String> {
-    stream.set_read_timeout(Some(Duration::from_millis(8))).map_err(|e| e.to_string())?;
+    stream.set_read_timeout(Some(Duration::from_millis(4))).map_err(|e| e.to_string())?;
     let _ = stream.set_nodelay(true);
     let mut ws = WebSocket::from_raw_socket(stream, Role::Server, None);
     if !view_only {
@@ -400,9 +531,12 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
     std::thread::spawn(move || pictures(names, want_rx, frame_tx));
 
     let mut monitor = 0usize;
+    let mut video_wanted = false;
+    let mut video: Option<Video> = None;
+    let mut restart = false;
     let mut size = (1u32, 1u32);
     let mut waiting = false;
-    let mut pending = Some(true);
+    let mut pending: Option<bool> = None;
     let mut last_ask = Instant::now() - Duration::from_secs(1);
     let mut checked = Instant::now();
     loop {
@@ -428,6 +562,14 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
                     _ => idle.insert(Hands::none()),
                 };
                 match (verb, &n[..]) {
+                    ("hello", _) => {
+                        video_wanted = rest.trim() == "video";
+                        if video_wanted {
+                            restart = true;
+                        } else {
+                            pending = Some(true);
+                        }
+                    }
                     ("ack", _) => {
                         waiting = false;
                         if pending.is_none() {
@@ -435,20 +577,28 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
                         }
                     }
                     ("mon", [k]) if (*k as usize) < monitors.len() => {
+                        let same = monitor == *k as usize && (video.is_some() || restart);
                         monitor = *k as usize;
-                        pending = Some(true);
-                        waiting = false;
+                        if video_wanted {
+                            // The same one, already coming: nothing to start again.
+                            restart |= !same;
+                        } else {
+                            pending = Some(true);
+                            waiting = false;
+                        }
                     }
                     ("full", _) => {
-                        pending = Some(true);
-                        waiting = false;
+                        if video_wanted {
+                            restart = true;
+                        } else {
+                            pending = Some(true);
+                            waiting = false;
+                        }
                     }
-                    ("m", [x, y]) => {
+                    ("m", [fx, fy]) => {
+                        // A point of the monitor shown, as a fraction of it.
                         let m = &monitors[monitor];
-                        // From the picture's pixels to the desktop's units.
-                        let ux = m.1 + x * m.3 / size.0 as f64;
-                        let uy = m.2 + y * m.4 / size.1 as f64;
-                        h.point(&monitors, ux, uy);
+                        h.point(&monitors, m.1 + fx.clamp(0.0, 1.0) * m.3, m.2 + fy.clamp(0.0, 1.0) * m.4);
                     }
                     ("b", [b, d]) => h.button(*b as u32, *d != 0.0),
                     ("w", [dx, dy]) => h.wheel(*dx, *dy),
@@ -472,7 +622,43 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
             Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
             Err(_) => break,
         }
-        // A new batch when the page painted the last one, at most ~15 a second.
+
+        // As video: frames as they come; fallen behind, from a whole one again.
+        if video_wanted {
+            if video.as_ref().is_some_and(|v| v.behind.load(std::sync::atomic::Ordering::Relaxed)) {
+                restart = true;
+            }
+            if restart {
+                restart = false;
+                video = None;
+                match Video::start(&monitors[monitor].0) {
+                    Ok(v) => {
+                        video = Some(v);
+                        let _ = ws.send(Message::Text(format!("video {monitor}").into()));
+                    }
+                    Err(e) => {
+                        // No video here: squares of JPEG, as for an old browser.
+                        let _ = ws.send(Message::Text(format!("novideo {e}").into()));
+                        video_wanted = false;
+                        pending = Some(true);
+                    }
+                }
+            }
+            let mut sent = false;
+            while let Some(Ok((key, data))) = video.as_ref().map(|v| v.frames.try_recv()) {
+                let mut message = Vec::with_capacity(data.len() + 2);
+                message.extend_from_slice(&[2, key as u8]);
+                message.extend_from_slice(&data);
+                ws.write(Message::Binary(message.into())).map_err(|e| e.to_string())?;
+                sent = true;
+            }
+            if sent {
+                ws.flush().map_err(|e| e.to_string())?;
+            }
+            continue;
+        }
+
+        // As squares: a new batch when the page painted the last one, at most ~15 a second.
         if !waiting && pending.is_some() && last_ask.elapsed() > Duration::from_millis(66) {
             let whole = pending.take().unwrap_or(false);
             let _ = want_tx.send(Want::Frame { monitor, whole });
@@ -615,6 +801,7 @@ fn jpeg(w: usize, rgb: &[u8], x: usize, y: usize, cw: usize, ch: usize) -> Optio
         cut.extend_from_slice(&rgb[at..at + cw * 3]);
     }
     let mut out = Vec::with_capacity(16 + cw * ch / 4);
+    out.push(1);
     for v in [x, y, cw, ch] {
         out.extend_from_slice(&(v as u16).to_be_bytes());
     }
@@ -969,6 +1156,18 @@ mod tests {
     }
 
     #[test]
+    fn frames_of_a_stream() {
+        // SPS, PPS, IDR · a picture · AUD, a picture.
+        let stream = [0, 0, 0, 1, 0x67, 1, 0, 0, 0, 1, 0x68, 2, 0, 0, 1, 0x65, 3, 3, 0, 0, 0, 1, 0x41, 4, 0, 0, 0, 1, 0x09, 5, 0, 0, 1, 0x41, 6];
+        let f = access_units(&stream);
+        assert_eq!(f.len(), 3);
+        assert!(f[0].0 && !f[1].0 && !f[2].0);
+        assert_eq!(f[0].1, &stream[..18]);
+        assert_eq!(f[1].1, [0, 0, 0, 1, 0x41, 4]);
+        assert_eq!(f[2].1, [0, 0, 0, 1, 0x09, 5, 0, 0, 1, 0x41, 6]);
+    }
+
+    #[test]
     fn squares_that_changed() {
         let (w, h) = (130usize, 70usize);
         let a = vec![0u8; w * h * 3];
@@ -977,7 +1176,7 @@ mod tests {
         b[(10 * w + 100) * 3] = 255;
         let t = changed(w, h, &b, Some(&a));
         assert_eq!(t.len(), 1);
-        assert_eq!(&t[0][..8], &[0, 64, 0, 0, 0, 64, 0, 64]);
+        assert_eq!(&t[0][..9], &[1, 0, 64, 0, 0, 0, 64, 0, 64]);
         // All of it: two rows of three squares, joined along each row.
         assert_eq!(changed(w, h, &a, None).len(), 2);
     }
