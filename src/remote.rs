@@ -513,15 +513,24 @@ fn access_units(data: &[u8]) -> Vec<(bool, Vec<u8>)> {
 
 /// How the video is doing on the way: each frame the page says it has
 /// shown (so a computer slow to decode counts as much as a slow network),
-/// how long that took, and how much is still on the way.
+/// how long that took against how long it usually takes there and back,
+/// and how much actually arrives each second.
 struct Flow {
     seq: u32,
-    on_the_way: std::collections::VecDeque<(u32, Instant)>,
-    /// Round trip, smoothed (ms).
+    on_the_way: std::collections::VecDeque<(u32, Instant, usize)>,
+    /// Round trip, smoothed, and the usual one of this way (the least of
+    /// late), in ms: above that, frames are waiting in line somewhere.
     rtt: f64,
+    base: f64,
+    base_at: Instant,
+    /// What arrives, in kb/s (smoothed), and the bytes counted for it.
+    arriving: f64,
+    arrived: usize,
     kbps: u32,
     fps: u32,
     waiting: bool,
+    /// A new start sends a whole frame (big): its time on the way is not trouble.
+    grace: Instant,
     last_trouble: Instant,
     last_raise: Instant,
     last_stats: Instant,
@@ -531,71 +540,108 @@ enum Pace {
     Go,
     /// Too much on the way: send nothing until it arrives.
     Wait,
-    /// It arrived: start again (a whole frame), with less.
+    /// Start again (a whole frame): lighter after trouble, or richer after calm.
     Again,
 }
 
 const KBPS_START: u32 = 8000;
 const KBPS_MIN: u32 = 1500;
-const KBPS_MAX: u32 = 16000;
+const KBPS_MAX: u32 = 20000;
 
 impl Flow {
     fn new() -> Flow {
         let now = Instant::now();
-        Flow { seq: 0, on_the_way: Default::default(), rtt: 0.0, kbps: KBPS_START, fps: 60, waiting: false, last_trouble: now, last_raise: now, last_stats: now }
+        Flow {
+            seq: 0,
+            on_the_way: Default::default(),
+            rtt: 0.0,
+            base: 0.0,
+            base_at: now,
+            arriving: 0.0,
+            arrived: 0,
+            kbps: KBPS_START,
+            fps: 60,
+            waiting: false,
+            grace: now,
+            last_trouble: now,
+            last_raise: now,
+            last_stats: now,
+        }
     }
 
-    fn sent(&mut self) -> u32 {
+    fn sent(&mut self, bytes: usize) -> u32 {
         self.seq = self.seq.wrapping_add(1);
-        self.on_the_way.push_back((self.seq, Instant::now()));
+        self.on_the_way.push_back((self.seq, Instant::now(), bytes));
         self.seq
     }
 
     fn got(&mut self, seq: u32) {
-        while let Some((s, at)) = self.on_the_way.front().copied() {
+        while let Some((s, at, bytes)) = self.on_the_way.front().copied() {
             if s > seq {
                 break;
             }
             self.on_the_way.pop_front();
+            self.arrived += bytes;
             if s == seq {
                 let ms = at.elapsed().as_secs_f64() * 1000.0;
                 self.rtt = if self.rtt == 0.0 { ms } else { self.rtt * 0.85 + ms * 0.15 };
+                if self.base == 0.0 || ms < self.base {
+                    self.base = ms;
+                    self.base_at = Instant::now();
+                }
             }
+        }
+        // The way may have become longer for good: what is usual follows, slowly.
+        if self.base_at.elapsed() > Duration::from_secs(20) {
+            self.base = (self.base * 1.2).min(self.rtt.max(self.base));
+            self.base_at = Instant::now();
         }
     }
 
     fn state(&mut self) -> Pace {
-        let oldest = self.on_the_way.front().map_or(Duration::ZERO, |(_, at)| at.elapsed());
+        let now = Instant::now();
+        let oldest = self.on_the_way.front().map_or(Duration::ZERO, |(_, at, _)| at.elapsed());
         if self.waiting {
-            // Arrived (or lost for good): again, with less.
+            // Arrived (or lost for good): again, at what actually arrives.
             if self.on_the_way.is_empty() || oldest > Duration::from_secs(4) {
                 self.waiting = false;
-                // Fewer frames first (half the work for both ends), then fewer bits.
-                if self.fps > 30 {
+                // What arrived says what fits only if the way was full: a
+                // still screen sends little, and that is no measure of it.
+                let full = self.arriving > self.kbps as f64 * 0.5;
+                let fits = if full { (self.arriving * 0.85) as u32 } else { self.kbps };
+                self.kbps = fits.min(self.kbps * 85 / 100).max(KBPS_MIN);
+                // Little room: fewer frames, each sharper.
+                if self.kbps < 4000 {
                     self.fps = 30;
-                    self.kbps = (self.kbps * 8 / 10).max(KBPS_MIN);
-                } else {
-                    self.kbps = (self.kbps * 6 / 10).max(KBPS_MIN);
                 }
                 return Pace::Again;
             }
             return Pace::Wait;
         }
-        if oldest > Duration::from_millis(300) {
+        let limit = Duration::from_millis((self.base * 2.0 + 250.0).max(400.0) as u64);
+        if now > self.grace && oldest > limit {
+            println!(
+                "remote · {} ms on the way (usually {:.0}, now {:.0}), {} frames, arriving {:.0} kb/s of {}: lighter",
+                oldest.as_millis(),
+                self.base,
+                self.rtt,
+                self.on_the_way.len(),
+                self.arriving,
+                self.kbps
+            );
             self.waiting = true;
-            self.last_trouble = Instant::now();
+            self.last_trouble = now;
             return Pace::Wait;
         }
-        // A good while calm and quick: a little more.
-        let calm = Duration::from_secs(40);
-        if (self.kbps < KBPS_MAX || self.fps < 60) && self.last_trouble.elapsed() > calm && self.last_raise.elapsed() > calm && self.rtt > 0.0 && self.rtt < 150.0 {
-            self.last_raise = Instant::now();
-            if self.kbps < KBPS_START {
-                self.kbps = (self.kbps * 13 / 10).min(KBPS_MAX);
-            } else if self.fps < 60 {
+        // A while with nothing waiting in line: a little more.
+        let calm = Duration::from_secs(20);
+        let free = self.rtt > 0.0 && self.rtt < self.base * 1.5 + 60.0;
+        if (self.kbps < KBPS_MAX || self.fps < 60) && free && self.last_trouble.elapsed() > calm && self.last_raise.elapsed() > calm {
+            self.last_raise = now;
+            if self.fps < 60 && self.kbps >= 4000 {
                 self.fps = 60;
             } else {
-                self.kbps = (self.kbps * 13 / 10).min(KBPS_MAX);
+                self.kbps = (self.kbps * 5 / 4).min(KBPS_MAX);
             }
             return Pace::Again;
         }
@@ -604,14 +650,20 @@ impl Flow {
 
     fn restarted(&mut self) {
         self.on_the_way.clear();
+        self.grace = Instant::now() + Duration::from_millis(2500);
     }
 
+    /// Once a second: what arrived in it, and time to tell the page.
     fn stats_due(&mut self) -> bool {
-        let due = self.last_stats.elapsed() > Duration::from_secs(1);
-        if due {
-            self.last_stats = Instant::now();
+        let elapsed = self.last_stats.elapsed();
+        if elapsed < Duration::from_secs(1) {
+            return false;
         }
-        due
+        let kbps = self.arrived as f64 * 8.0 / 1000.0 / elapsed.as_secs_f64();
+        self.arriving = if self.arriving == 0.0 { kbps } else { self.arriving * 0.7 + kbps * 0.3 };
+        self.arrived = 0;
+        self.last_stats = Instant::now();
+        true
     }
 }
 
@@ -773,7 +825,7 @@ fn viewer(stream: TcpStream, token: String, gate: &Arc<Mutex<Gate>>, hands: &Arc
             }
             let mut sent = false;
             while let Some(Ok((key, data))) = video.as_ref().map(|v| v.frames.try_recv()) {
-                let seq = flow.sent();
+                let seq = flow.sent(data.len());
                 let mut message = Vec::with_capacity(data.len() + 6);
                 message.extend_from_slice(&[2, key as u8]);
                 message.extend_from_slice(&seq.to_be_bytes());
