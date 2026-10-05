@@ -718,9 +718,15 @@ impl State {
         let table = if yours { Some(self.your_keymap(|k| char_table(k))) } else { None };
         let mut presses = Vec::with_capacity(text.len());
         for &c in text {
-            let (code, shift) = match &table {
-                Some(t) => t.get(c as usize).copied().flatten().ok_or("unknown-char")?,
-                None => us_key(c).ok_or("unknown-char")?,
+            let key = match &table {
+                Some(t) => t.get(c as usize).copied().flatten(),
+                None => us_key(c),
+            };
+            // One the layout has no plain key for (a backtick is a dead key
+            // in Spanish): the whole text with a keymap made for it.
+            let Some((code, shift)) = key else {
+                let text = std::str::from_utf8(text).map_err(|_| "bad-utf8")?;
+                return self.agent_type_any(slot, text);
             };
             presses.push((if shift { vec![42] } else { vec![] }, code));
         }
@@ -729,22 +735,58 @@ impl State {
 
     /// Any text: a keymap with a key of its own for each character in it
     /// (alone on the key, no modifier needed), handed to the program for
-    /// the while, and the usual one back after. In pieces of up to 200
-    /// different characters, which is what fits in a keymap.
+    /// the while, and the usual one back after. The keys are ones that only
+    /// write: a browser takes what a key is from where it sits, and a
+    /// character put on Escape, Backspace or Control was lost or erased the
+    /// one before. So in pieces of as many different characters as there are
+    /// such keys.
     fn agent_type_any(&mut self, slot: usize, text: &str) -> Result<(), &'static str> {
+        // Chromium (a browser, Discord, any Electron program) cuts what a key
+        // writes to 16 bits: an emoji came out as a blank. It takes those
+        // the way a person types them by number, Ctrl+Shift+U, the number
+        // and a space.
+        let chromium = is_chromium(self.pid_of(slot));
+        let mut run = String::new();
+        for c in text.chars() {
+            if chromium && c as u32 > 0xFFFF {
+                if !run.is_empty() {
+                    self.agent_type_keys(slot, &run)?;
+                    run.clear();
+                }
+                self.agent_press(slot, &[(vec![29, 42], 22)])?;
+                self.agent_type(slot, format!("{:x} ", c as u32).as_bytes())?;
+            } else {
+                run.push(c);
+            }
+        }
+        if run.is_empty() { Ok(()) } else { self.agent_type_keys(slot, &run) }
+    }
+
+    fn agent_type_keys(&mut self, slot: usize, text: &str) -> Result<(), &'static str> {
         let chars: Vec<char> = text.chars().collect();
         let mut at = 0;
         while at < chars.len() {
-            let mut keys: Vec<char> = Vec::new();
+            let mut keys: Vec<(char, u32)> = Vec::new();
+            let mut free = WRITING_KEYS.iter();
             let mut end = at;
-            while end < chars.len() && (keys.contains(&chars[end]) || keys.len() < 200) {
-                if !keys.contains(&chars[end]) {
-                    keys.push(chars[end]);
+            while end < chars.len() {
+                let c = chars[end];
+                if !keys.iter().any(|(k, _)| *k == c) {
+                    let code = match c {
+                        ' ' => 57,
+                        '\n' => 28,
+                        '\t' => 15,
+                        _ => match free.next() {
+                            Some(code) => *code,
+                            None => break,
+                        },
+                    };
+                    keys.push((c, code));
                 }
                 end += 1;
             }
             let keymap = text_keymap(&keys).ok_or("no-keymap")?;
-            let presses: Vec<(Vec<u32>, u32)> = chars[at..end].iter().map(|c| (Vec::new(), keys.iter().position(|k| k == c).unwrap_or(0) as u32 + 1)).collect();
+            let presses: Vec<(Vec<u32>, u32)> = chars[at..end].iter().map(|c| (Vec::new(), keys.iter().find(|(k, _)| k == c).map_or(57, |(_, code)| *code))).collect();
             self.agent_press_with(slot, &presses, Some(&keymap))?;
             at = end;
         }
@@ -1021,12 +1063,27 @@ fn us_keymap_string() -> String {
         .unwrap_or_default()
 }
 
-/// A keymap with a key for each of these characters, alone on it: key
-/// number k (evdev k + 1) types the k-th. Checked by compiling it.
-fn text_keymap(chars: &[char]) -> Option<String> {
+/// Whether that process is Chromium or an Electron program: its folder has
+/// Chromium's own files.
+fn is_chromium(pid: u32) -> bool {
+    let Ok(exe) = std::fs::read_link(format!("/proc/{pid}/exe")) else { return false };
+    let Some(dir) = exe.parent() else { return false };
+    ["v8_context_snapshot.bin", "snapshot_blob.bin", "chrome_100_percent.pak"].iter().any(|f| dir.join(f).exists())
+}
+
+/// The keys that only write, in evdev codes: the rows of a keyboard's
+/// letters, figures and signs.
+const WRITING_KEYS: [u32; 47] = [
+    2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40,
+    41, 43, 44, 45, 46, 47, 48, 49, 50, 51, 52, 53,
+];
+
+/// A keymap with a key for each of these characters, alone on it (on its
+/// evdev key). Checked by compiling it.
+fn text_keymap(chars: &[(char, u32)]) -> Option<String> {
     let mut codes = String::new();
     let mut symbols = String::new();
-    for (k, c) in chars.iter().enumerate() {
+    for (c, code) in chars {
         let name = match c {
             '\n' => "Return".to_owned(),
             '\t' => "Tab".to_owned(),
@@ -1036,8 +1093,8 @@ fn text_keymap(chars: &[char]) -> Option<String> {
         if name.is_empty() || name == "NoSymbol" {
             return None;
         }
-        codes.push_str(&format!("        <K{k}> = {};\n", k + 9));
-        symbols.push_str(&format!("        key <K{k}> {{ [ {name} ] }};\n"));
+        codes.push_str(&format!("        <K{code}> = {};\n", code + 8));
+        symbols.push_str(&format!("        key <K{code}> {{ [ {name} ] }};\n"));
     }
     let text = format!(
         "xkb_keymap {{\n    xkb_keycodes \"agent\" {{\n        minimum = 8;\n        maximum = 255;\n{codes}    }};\n    xkb_types \"agent\" {{ include \"complete\" }};\n    xkb_compatibility \"agent\" {{ include \"complete\" }};\n    xkb_symbols \"agent\" {{\n{symbols}    }};\n}};\n"
