@@ -52,6 +52,9 @@ jobs:
       - name: Check the overview scene
         working-directory: pleamar-wm
         run: cargo run --locked -- --check examples/windows-overview.plm
+      - name: Check the native sizes scene
+        working-directory: pleamar-wm
+        run: cargo run --locked -- --check examples/windows-resize.plm
       - name: Build the Windows background host
         if: runner.os == 'Windows'
         working-directory: pleamar-wm
@@ -65,7 +68,7 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $caps.platform -ne 'windows' -or !$caps.explicit_layouts) {
             throw 'Native capability query failed'
           }
-          if ($caps.preview_redirected_input -or ($caps.preview_window_actions -join ',') -ne 'focus,close,minimize,restore') {
+          if ($caps.preview_redirected_input -or ($caps.preview_window_actions -join ',') -ne 'focus,close,minimize,restore,configure') {
             throw 'Incorrect native preview action capabilities'
           }
           & ./target/debug/pleamar-wm.exe remote

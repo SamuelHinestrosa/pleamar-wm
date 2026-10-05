@@ -6,8 +6,17 @@ use std::{os::windows::process::CommandExt, process::{Child, Command, Stdio}};
 use std::sync::atomic::{AtomicBool,Ordering};
 
 static REFUSE_CLOSE:AtomicBool=AtomicBool::new(true);
+static REFUSE_SIZE:AtomicBool=AtomicBool::new(false);
 unsafe extern "system" fn action_fixture(hwnd:HWND,message:u32,w:WPARAM,l:LPARAM) -> LRESULT {
     if message==WM_CLOSE && REFUSE_CLOSE.load(Ordering::Relaxed) { return LRESULT(0); }
+    unsafe { super::capture_tests::paint_fixture(hwnd,message,w,l) }
+}
+
+unsafe extern "system" fn size_fixture(hwnd:HWND,message:u32,w:WPARAM,l:LPARAM) -> LRESULT {
+    if message==WM_WINDOWPOSCHANGING && REFUSE_SIZE.load(Ordering::Relaxed) {
+        let position=unsafe { &mut *(l.0 as *mut WINDOWPOS) };
+        if !position.flags.contains(SWP_NOSIZE) { position.cx=400; }
+    }
     unsafe { super::capture_tests::paint_fixture(hwnd,message,w,l) }
 }
 
@@ -187,6 +196,138 @@ fn picture(capture:&mut capture::Capture, scene:&mut Scene,color:[u8;4],present:
         if start.elapsed()>Duration::from_secs(10) { return Err("native preview did not repaint its actual source pixels".into()); }
         std::thread::sleep(Duration::from_millis(15));
     }
+}
+
+#[test]
+#[ignore = "real scene size requests to owned DISPLAY2 windows without activation or input"]
+fn native_window_scene_sizes() -> Result<()> {
+    let requested=std::env::var("PLEAMAR_WM_TEST_MONITOR")?;
+    let binary=std::fs::canonicalize(std::env::var_os("PLEAMAR_WM_TEST_BINARY").ok_or("set PLEAMAR_WM_TEST_BINARY")?)?;
+    let dpi=unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+    assert!(!dpi.0.is_null());let _dpi=ThreadDpi(dpi);
+    let monitor=select_monitor(&requested)?;assert!(!monitor.primary);
+    let watch=super::session_tests::FocusWatch::new()?;
+    let foreground=unsafe { GetForegroundWindow() };
+    let module=unsafe { windows::Win32::System::LibraryLoader::GetModuleHandleW(None) }?;
+    let class=WNDCLASSW {lpfnWndProc:Some(size_fixture),hInstance:module.into(),
+        lpszClassName:w!("pleamar-wm-preview-sizes"),..Default::default()};
+    assert_ne!(unsafe { RegisterClassW(&class) },0);
+    let mut owned=OwnWindows(Vec::new());let mut ids=Vec::new();
+    for i in 0..2 {
+        let title:Vec<_>=format!("Owned size ñ {i}").encode_utf16().chain([0]).collect();
+        let hwnd=unsafe { CreateWindowExW(WS_EX_APPWINDOW,class.lpszClassName,PCWSTR(title.as_ptr()),WS_OVERLAPPEDWINDOW,
+            monitor.work.x+monitor.work.width-440,monitor.work.y+50+i*310,400,280,None,None,Some(module.into()),None) }?;
+        owned.0.push(hwnd);
+        unsafe { SetWindowLongPtrW(hwnd,GWLP_USERDATA,0x0020c060);let _=ShowWindow(hwnd,SW_SHOWNOACTIVATE); }
+        pump();let window=inspect(hwnd).unwrap();assert!(monitor.work.contains(&window.bounds));ids.push(window.id);
+    }
+    let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
+    let directory=std::env::var_os("PLEAMAR_WM_TEST_OUTPUT").map(std::path::PathBuf::from)
+        .unwrap_or_else(||std::env::temp_dir().join(format!("wm sizes ñ {nonce}")));
+    std::fs::create_dir(&directory)?;
+    let path=directory.join("native-sizes.plm");
+    let example=include_str!("../examples/windows-resize.plm");
+    let surface="surface { size: 960, 560; kind: window; title: \"pleamar · native sizes\" }";
+    assert!(example.contains(surface));
+    let mut source=example.replace(surface,"surface { size: 960, 560; anchor: center; keyboard: none; reserve: 0 }");
+    source.truncate(source.rfind('}').unwrap());
+    for i in 0..2 {
+        for (label,w,h) in [("height",0,320),("tiny",1,1),("oversize",20000,20000),("rejected",500,300),("deferred",560,350)] {
+            source.push_str(&format!("\nevent {label}.{i}\non {label}.{i} {{ width.{i}: {w} ~0ms; height.{i}: {h} ~0ms }}\n"));
+        }
+    }
+    source.push_str("}\n");std::fs::write(&path,source)?;
+    let settle=|ms:u64| { let until=Instant::now()+Duration::from_millis(ms);
+        while Instant::now()<until { pump();std::thread::sleep(Duration::from_millis(10)); }
+    };
+    let sized=|id:&str,w:i32,h:i32| -> Result<()> {
+        let start=Instant::now();
+        loop {
+            pump();let (_,window)=target(id)?;assert!(monitor.work.contains(&window.bounds));
+            if window.bounds.width==w && window.bounds.height==h { return Ok(()); }
+            if start.elapsed()>Duration::from_secs(5) { return Err(format!("size {w}x{h} not observed: {:?}",window.bounds).into()); }
+            std::thread::sleep(Duration::from_millis(15));
+        }
+    };
+    let mut child_pids=Vec::new();let mut stages=Vec::new();let mut repaint_ms=None;
+    for actions in [false,true] {
+        let namespace=format!("wm-sizes-{nonce}-{actions}");
+        let log_path=directory.join(format!("scene-{actions}.log"));
+        let log=std::fs::File::create(&log_path)?;
+        let mut command=Command::new(&binary);
+        command.arg("--scene").arg(&path).args(["--screen",&requested,"--preview-monitor",&requested,
+            "--preview-process",&std::process::id().to_string(),"--no-hud","--stall","0","--seconds","90"]);
+        if actions { command.arg("--window-actions"); }
+        let mut scene=Scene(command.env("PLEAMAR_SOCKET_DIR",&namespace).env("PLEAMAR_TEST_WINDOWS","1")
+            .env("PLEAMAR_NO_RELAUNCH","1").stdout(log.try_clone()?).stderr(Stdio::from(log))
+            .creation_flags(0x08000000|0x00004000).spawn()?);
+        child_pids.push(scene.0.id());
+        let query=|line:&str|ask(&binary,&path,&namespace,line);
+        let until=Instant::now()+Duration::from_secs(15);
+        while !query("get win.count").is_ok_and(|v|v=="2") {
+            pump();assert!(Instant::now()<until);std::thread::sleep(Duration::from_millis(30));
+        }
+        let a=if query("get win.0.title")?=="Owned size ñ 0" {0} else {1};
+        let hwnd=canvas(scene.0.id(),&monitor)?.ok_or("sizes canvas missing")?;
+        let mut capture=capture::Capture::new(capture::Device::new(None)?,hwnd,16_777_216)?;
+        picture(&mut capture,&mut scene,[0x20,0xc0,0x60,255],true)?;
+        let before=target(&ids[0])?.1.bounds;
+        query(&format!("emit large.{a}"))?;
+        if !actions {
+            settle(350);assert_eq!(target(&ids[0])?.1.bounds,before);
+            assert!(std::fs::read_to_string(&log_path)?.contains("resizing requires --window-actions"));
+            stages.push("view-only-size-rejected");
+        } else {
+            let px=|n:i32| (n as f64*monitor.scale).round() as i32;
+            sized(&ids[0],px(640),px(400))?;
+            assert!(target(&ids[0])?.1.bounds.x<before.x,"growth must stay inside this monitor");
+            query(&format!("emit height.{a}"))?;sized(&ids[0],px(640),px(320))?;
+            let before=target(&ids[0])?.1.bounds;
+            query(&format!("emit tiny.{a}"))?;settle(200);assert_eq!(target(&ids[0])?.1.bounds,before);
+            query(&format!("emit oversize.{a}"))?;settle(200);assert_eq!(target(&ids[0])?.1.bounds,before);
+            query(&format!("emit own.{a}"))?;settle(100);
+            let free=Bounds {width:500,height:300,..before};place(&ids[0],&free)?;
+            settle(200);assert_eq!(target(&ids[0])?.1.bounds,free);
+            query(&format!("emit compact.{a}"))?;sized(&ids[0],px(320),px(240))?;
+            REFUSE_SIZE.store(true,Ordering::Relaxed);
+            query(&format!("emit rejected.{a}"))?;settle(50);
+            let changed=Instant::now();
+            unsafe { SetWindowLongPtrW(owned.0[1],GWLP_USERDATA,0x00d03080);let _=InvalidateRect(Some(owned.0[1]),None,false); }
+            let frame=picture(&mut capture,&mut scene,[0xd0,0x30,0x80,255],true)?;
+            repaint_ms=Some(changed.elapsed().as_millis());
+            assert!(changed.elapsed()<Duration::from_millis(950),"a refused resize blocked the other preview");
+            std::fs::write(directory.join("sizes.bgra"),frame.pixels)?;
+            std::fs::write(directory.join("sizes-size.json"),serde_json::to_string(&frame.size)?)?;
+            settle(1200);
+            assert_eq!(std::fs::read_to_string(&log_path)?.matches("did not accept the requested scene size").count(),1);
+            settle(200);REFUSE_SIZE.store(false,Ordering::Relaxed);
+            query(&format!("emit large.{a}"))?;sized(&ids[0],px(640),px(400))?;
+            state(&ids[0],true)?;
+            query(&format!("emit deferred.{a}"))?;settle(200);assert!(target(&ids[0])?.1.minimized);
+            query(&format!("emit own.{a}"))?;settle(100);
+            state(&ids[0],false)?;settle(200);sized(&ids[0],px(640),px(400))?;
+            state(&ids[0],true)?;
+            query(&format!("emit deferred.{a}"))?;settle(200);assert!(target(&ids[0])?.1.minimized);
+            state(&ids[0],false)?;sized(&ids[0],px(560),px(350))?;
+            unsafe { SetWindowLongPtrW(owned.0[0],GWLP_USERDATA,0x003080e0);let _=InvalidateRect(Some(owned.0[0]),None,false); }
+            picture(&mut capture,&mut scene,[0x30,0x80,0xe0,255],true)?;
+            stages.extend(["dpi-scaled-size","growth-keeps-monitor","zero-axis-preserved","tiny-and-oversize-rejected",
+                "app-size-releases-control","rejected-size-reported-once","other-preview-continues-during-refusal",
+                "later-request-recovers","released-deferred-size-cancelled","minimized-size-deferred","restored-size-and-real-pixels"]);
+        }
+        drop(capture);query("quit")?;
+        let until=Instant::now()+Duration::from_secs(10);
+        while scene.0.try_wait()?.is_none() && Instant::now()<until { settle(15); }
+        assert_eq!(scene.0.try_wait()?.and_then(|s|s.code()),Some(0));
+    }
+    let events=watch.events();
+    let activated=events.iter().any(|pid|*pid==std::process::id()||child_pids.contains(pid));
+    let report=json!({"passed":!activated,"monitor":requested,"scale":monitor.scale,"stages":stages,
+        "repaint_during_refusal_ms":repaint_ms,"physical_input":false,"own_process_activated":activated,
+        "foreground_events":events,"focus_unchanged":unsafe { GetForegroundWindow() }==foreground,"actual_wgc_to_d3d12":true});
+    std::fs::write(directory.join("report.json"),serde_json::to_vec_pretty(&report)?)?;
+    println!("{report}");assert!(!activated);
+    drop(owned);unsafe { UnregisterClassW(class.lpszClassName,Some(module.into())) }?;Ok(())
 }
 
 #[test]

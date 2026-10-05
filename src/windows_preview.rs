@@ -5,6 +5,9 @@ use pleamar::scene::{NestEvent, PieceContent, ToNest, ToRender, WindowPiece};
 use std::{cell::Cell, sync::{OnceLock, mpsc::{self, Sender, TryRecvError}}};
 use windows::Win32::UI::Accessibility::*;
 
+#[path = "windows_configure.rs"]
+mod configure;
+
 #[derive(Clone)]
 struct Scope { monitor:String, process:Option<u32>, actions:bool }
 impl Scope {
@@ -74,12 +77,14 @@ fn start(max:usize,to_render:Sender<ToRender>) -> Option<pleamar::NestSender> {
     }
 }
 
-struct Slot { window:Window, capture:Option<capture::Capture>, received:bool, pixels:u64, born:Instant, next_frame:Instant }
+struct Slot { window:Window, capture:Option<capture::Capture>, received:bool, pixels:u64, born:Instant, next_frame:Instant,
+    configure:configure::Configure }
 impl Slot {
     // A minimized window still has its last texture in the renderer. It must
     // count towards the same bound even after its capture resources are freed.
     fn pixels(&self) -> u64 {
-        self.pixels.max(self.capture.as_ref().and_then(|c|c.size().ok()).map_or(0,|(w,h)|w as u64*h as u64))
+        self.pixels.max(self.configure.pixels())
+            .max(self.capture.as_ref().and_then(|c|c.size().ok()).map_or(0,|(w,h)|w as u64*h as u64))
     }
 }
 struct Preview {
@@ -159,6 +164,7 @@ impl Preview {
                 let minimized=window.minimized;
                 if minimized { slot.capture=None; }
                 slot.window=window;
+                slot.configure.wake();
                 if title { self.tell(NestEvent::Title(i,self.slots[i].as_ref().unwrap().window.title.clone()))?; }
                 if app { self.tell(NestEvent::App(i,self.slots[i].as_ref().unwrap().window.app.clone()))?; }
                 if state {
@@ -170,7 +176,8 @@ impl Preview {
             let Some(i)=self.slots.iter().position(Option::is_none) else { break; };
             self.tell(NestEvent::Opened {slot:i,title:window.title.clone(),app:window.app.clone(),screen:0})?;
             self.tell(NestEvent::Minimized(i,window.minimized))?;
-            self.slots[i]=Some(Slot {window,capture:None,received:false,pixels:0,born:Instant::now(),next_frame:Instant::now()});
+            self.slots[i]=Some(Slot {window,capture:None,received:false,pixels:0,born:Instant::now(),next_frame:Instant::now(),
+                configure:configure::Configure::default()});
             self.capture(i);
         }
         self.order()?;
@@ -227,6 +234,14 @@ impl Preview {
                     Err(TryRecvError::Empty) => break,
                     Ok(ToNest::FrameDone) => {},
                     Ok(ToNest::Size(..)|ToNest::Shown {..}|ToNest::OnScreen(..)|ToNest::Gpu {..}|ToNest::Released(..)|ToNest::PointerOut|ToNest::HostFocus(..)) => {},
+                    Ok(ToNest::Configure {slot,w,h}) => {
+                        if !self.scope.actions && (w,h)==(0,0) { continue; }
+                        let result=if !self.scope.actions { Err("scene resizing requires --window-actions; this scene is view-only".into()) }
+                            else { self.slots.get_mut(slot).and_then(Option::as_mut)
+                                .ok_or_else(||Box::<dyn std::error::Error>::from("window slot is no longer open"))
+                                .and_then(|slot|slot.configure.ask(w,h)) };
+                        if let Err(error)=result { eprintln!("windows preview: {error}"); }
+                    },
                     Ok(message @ (ToNest::Focus(_)|ToNest::Close(_)|ToNest::Minimize(..))) => {
                         if let Err(error)=self.action(message) { eprintln!("windows preview: {error}"); }
                         CATALOG_DIRTY.set(true);
@@ -243,6 +258,16 @@ impl Preview {
             if CATALOG_DIRTY.replace(false)||topology.elapsed()>=Duration::from_secs(2) {
                 self.refresh()?;topology=Instant::now();
             }
+            for i in 0..self.slots.len() {
+                if !self.slots[i].as_ref().is_some_and(|s|s.configure.wait(Instant::now()).is_some_and(|d|d.is_zero())) { continue; }
+                let others:u64=self.slots.iter().enumerate().filter(|(k,_)|*k!=i).filter_map(|(_,s)|s.as_ref())
+                    .map(Slot::pixels).sum();
+                if let Some(slot)=self.slots[i].as_mut() {
+                    if let Err(error)=slot.configure.tick(&self.scope,self.created,&slot.window.id,16_777_216u64.saturating_sub(others)) {
+                        eprintln!("windows preview: {error}");
+                    }
+                }
+            }
             if let Some(consumed)=&self.consumed {
                 match consumed.try_recv() {
                     Ok(_) => self.consumed=None,
@@ -253,6 +278,9 @@ impl Preview {
             if self.consumed.is_none() { self.frames()?; }
             let now=Instant::now();
             let mut wait=(topology+Duration::from_secs(2)).saturating_duration_since(now);
+            for slot in self.slots.iter().flatten() {
+                if let Some(resize)=slot.configure.wait(now) { wait=wait.min(resize); }
+            }
             if self.consumed.is_some() { wait=wait.min(Duration::from_millis(2)); }
             else {
                 for slot in self.slots.iter().flatten() {
@@ -321,7 +349,8 @@ mod tests {
         assert!(!scope.allows(&window,Some(256)));
         window.process=13;assert!(!scope.allows(&window,Some(255)));
         window.process=12;window.monitor="primary".into();assert!(!scope.allows(&window,Some(255)));
-        let slot=Slot {window,capture:None,received:true,pixels:1_000_000,born:Instant::now(),next_frame:Instant::now()};
+        let slot=Slot {window,capture:None,received:true,pixels:1_000_000,born:Instant::now(),next_frame:Instant::now(),
+            configure:configure::Configure::default()};
         assert_eq!(slot.pixels(),1_000_000,"suspended capture must retain its renderer memory budget");
     }
 }

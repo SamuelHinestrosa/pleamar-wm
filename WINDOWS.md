@@ -193,11 +193,35 @@ capture is retried on its next minimize/restore cycle.
 respects Windows' foreground restrictions and reports a rejected activation to
 stderr; no injected key or input-queue attachment bypasses them. The scene's
 focus facts follow observed native focus. Pointer/keyboard forwarding through
-the picture, resizing, launch and other scene actions remain unavailable.
+the picture, launch and other scene actions remain unavailable.
 Restore alone does not request keyboard focus. This does not replace the native
 layout session or enable Marea's pending effects.
 Capture can be denied by an application or unavailable on a Windows installation;
 errors are reported and no synthetic picture is substituted.
+
+With `--window-actions`, a window's `ask:` also requests a real native resize.
+`examples/windows-resize.plm` demonstrates compact, large and app-selected
+sizes. The dimensions are logical pixels of the **outer native window**,
+including its frame, scaled for its source monitor. This differs from a Linux
+client's content size. A zero dimension retains that dimension; `ask: 0, 0`
+leaves size selection to the application, and `ask: -1, -1` remains picture-only.
+No original size is restored when the scene exits.
+
+Resizing preserves Z order and does not activate the window. Growth shifts it
+only as much as necessary to stay in its current work area. Straddling windows,
+oversize requests and requests exceeding the shared capture budget are rejected.
+Minimized/maximized windows are left in that state; the latest request waits
+until they return to normal. Use a free/floating window when another layout
+manager is active, since two managers can request conflicting geometry.
+
+Each slot retains only its latest size and one outstanding native request, with
+at most 30 requests per second. Completion is checked without blocking capture
+or other slots. A constrained or unresponsive application is reported to stderr
+after one second; it is not continuously retried or reported as resized. Its
+actual native size/picture remains authoritative. Small transient animation
+sizes below 32 logical pixels are ignored, as on Linux. Windows may still process
+an already posted asynchronous resize after the timeout or a subsequent
+`ask: 0, 0`; the API cannot retract a posted request.
 
 The initial transport uses CPU readback, capped at 30 updates per window per second.
 A render acknowledgement bounds queued batches; capture dimensions are bounded
@@ -219,7 +243,7 @@ remain work for the full port.
 | Automatic per-monitor session | Native creation/closure, minimize, failure rollback, shutdown and crash recovery verified on DISPLAY2 |
 | Window rules | Native app/title, float, initial size and monitor rules; DISPLAY2 lifecycle tests passed; transfers between physical displays still need acceptance |
 | Live scene layouts; private/workspace rules | Pending |
-| Live window previews | Experimental native capture/render transport; explicit source monitor, optional native focus/close/minimize/restore actions |
+| Live window previews | Experimental native capture/render transport; explicit source monitor, optional native focus/close/minimize/restore and bounded scene size requests |
 | Marea menu/finder bridge | Module tested with real Luau, IPC and owned Windows windows; complete Marea UI acceptance pending; package lifecycle tested separately |
 | Rain, snow, ride, dock, animated window transitions | Pending native equivalents |
 | Per-monitor tide pools and overview | Pending; Windows virtual desktops are not the same model |
@@ -251,6 +275,7 @@ cargo test --release --locked native_window_rules -- --ignored --nocapture --tes
 cargo test --release --locked native_persistent_window_capture -- --ignored --nocapture --test-threads=1
 cargo test --release --locked native_window_preview_repaints -- --ignored --nocapture --test-threads=1
 cargo test --release --locked native_window_preview_actions -- --ignored --nocapture --test-threads=1
+cargo test --release --locked native_window_scene_sizes -- --ignored --nocapture --test-threads=1
 ```
 
 [Windows and Ubuntu CI](https://github.com/SamuelHinestrosa/pleamar-wm/actions/runs/37337638887)
@@ -288,6 +313,16 @@ repaint that image, and closing the source must remove it. Both tests run only
 on an explicit non-primary display, send no input, and check foreground focus.
 Separate local captures also verified Luau callbacks and scene reload with two
 live source windows. These checks do not prove interactive window composition.
+
+The scene-size implementation passes 18 ordinary Windows tests. Its separate
+native test uses the actual size example and two owned windows on DISPLAY2 at
+125% scale: view-only rejection, scaled resizing near the monitor edge, a zero
+dimension, tiny/oversize rejection, releasing size control, a refused size,
+recovery with a later request, and deferred sizing while minimized. The other
+window's real picture continues updating during the refusal. The tested canvas
+uses no keyboard and no physical input is sent; foreground-event observation
+checks that neither test process activates. This does not establish button-click
+acceptance, mixed-DPI transitions, maximized-state behavior or arbitrary apps.
 
 The rule addition passes 14 ordinary Windows unit tests and the separate native
 rule test on DISPLAY2. That test covers executable/title selection, DPI-scaled
