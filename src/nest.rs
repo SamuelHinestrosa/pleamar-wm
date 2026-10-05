@@ -474,6 +474,10 @@ struct State {
     /// The size the scene wants for each slot, to answer a new window with it.
     asked: Vec<Option<(i32, i32)>>,
     focus: Option<usize>,
+    /// The last new window given your keyboard, the one that had it before,
+    /// and when: a dialog that says only afterwards whose it is (a portal's)
+    /// gives it back if it is of the program the agent works with.
+    focus_given: Option<(usize, Option<usize>, Instant)>,
     /// The monitor the pointer is on: where a new window opens.
     on_screen: usize,
     /// Whether pleamar's own window has the keyboard: without it, no program does.
@@ -738,6 +742,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         next_slot: 0,
         asked: vec![None; max],
         focus: None,
+        focus_given: None,
         on_screen: 0,
         host_focus: true,
         pointer_on: None,
@@ -2133,8 +2138,13 @@ impl State {
         }
         // X11 says whose it is before it is shown (Wayland, later: `parent_changed`).
         self.beside_parent(slot);
-        if opened.is_none() {
+        // Not one the agent opened, nor one of the program it is working with
+        // while your keyboard is in another (a dialog its click opened).
+        let parent_pid = self.parent_slot(slot).map_or(0, |p| self.pid_of(p));
+        if opened.is_none() && !self.agent_keeps_your_keyboard(pid) && !self.agent_keeps_your_keyboard(parent_pid) {
+            let before = self.focus;
             self.set_focus(Some(slot));
+            self.focus_given = Some((slot, before, Instant::now()));
         }
     }
 
@@ -2957,6 +2967,16 @@ impl XdgShellHandler for State {
     fn parent_changed(&mut self, surface: ToplevelSurface) {
         if let Some(slot) = self.window_of(surface.wl_surface()) {
             self.beside_parent(slot);
+            // A dialog given your keyboard as it opened turns out to be of the
+            // program the agent is working with (a portal's «Open files» that
+            // its keys asked for): your keyboard goes back.
+            let parent_pid = self.parent_slot(slot).map_or(0, |p| self.pid_of(p));
+            if let Some((given, before, at)) = self.focus_given {
+                if given == slot && self.focus == Some(slot) && at.elapsed() < Duration::from_secs(3) && self.agent_keeps_your_keyboard_for(parent_pid, before) {
+                    self.focus_given = None;
+                    self.set_focus(before.filter(|b| self.slots.get(*b).is_some_and(Option::is_some)));
+                }
+            }
         }
     }
 
@@ -3482,6 +3502,13 @@ impl XdgActivationHandler for State {
         // new window; Discord, already running, shown again): to the
         // agent's monitor, and your keyboard stays where it is.
         if let Some(slot) = self.window_of(&surface) {
+            // The program the agent is working with, asking because of what
+            // the agent did (a click of its): your keyboard stays where it is.
+            let parent_pid = self.parent_slot(slot).map_or(0, |p| self.pid_of(p));
+            if self.agent_keeps_your_keyboard(self.pid_of(slot)) || self.agent_keeps_your_keyboard(parent_pid) {
+                self.activation.remove_token(&token);
+                return;
+            }
             let app = self.slots[slot].as_ref().map(|w| w.app.clone()).unwrap_or_default();
             if let Some(screen) = self.agent_opened(self.pid_of(slot), &app) {
                 if self.slots[slot].as_ref().is_some_and(|w| w.screen != screen) {
