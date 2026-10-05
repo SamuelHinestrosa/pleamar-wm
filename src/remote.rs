@@ -260,6 +260,9 @@ impl Gate {
 fn serve(view_only: bool) -> Result<(), String> {
     let config = load()?;
     let port = config.port;
+    // One left from before (a session that ended, one started by hand) goes:
+    // this is the one the session started now.
+    take_over(port);
     let mut gate = Gate { config, sessions: HashMap::new(), saved: 0, failures: HashMap::new(), all_failures: Vec::new(), last_step: 0, present: HashMap::new(), next_page: 0, kicked: 0 };
     gate.restore();
     let gate = Arc::new(Mutex::new(gate));
@@ -270,7 +273,18 @@ fn serve(view_only: bool) -> Result<(), String> {
     let door = gate.clone();
     std::thread::spawn(move || control(door));
     let hands = Arc::new(Mutex::new(None::<Hands>));
-    let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("127.0.0.1:{port}: {e}"))?;
+    let mut tries = 0;
+    let listener = loop {
+        match TcpListener::bind(("127.0.0.1", port)) {
+            Ok(l) => break l,
+            // The one before still letting go of it.
+            Err(e) if e.kind() == std::io::ErrorKind::AddrInUse && tries < 20 => {
+                tries += 1;
+                std::thread::sleep(Duration::from_millis(250));
+            }
+            Err(e) => return Err(format!("127.0.0.1:{port}: {e}")),
+        }
+    };
     println!("pleamar-wm remote · on http://127.0.0.1:{port}{}", if view_only { " · only to watch" } else { "" });
     for stream in listener.incoming() {
         let Ok(stream) = stream else { continue };
@@ -491,7 +505,24 @@ fn control(gate: Arc<Mutex<Gate>>) {
             drop(g);
             notify(&format!("Remote desktop: sent away ({pages} connected), and every session ended"));
             let _ = (&stream).write_all(b"ok\n");
+        } else if line.trim() == "leave" {
+            // A newer one takes the port: the pages it has come back to it
+            // (their sessions are kept on disk), the hands go with this process.
+            println!("remote · a newer one takes over");
+            let _ = (&stream).write_all(b"ok\n");
+            std::process::exit(0);
         }
+    }
+}
+
+/// Asks a `pleamar-wm remote` already serving this port to leave.
+fn take_over(port: u16) {
+    let Ok(mut stream) = std::os::unix::net::UnixStream::connect(control_path(port)) else { return };
+    let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+    if stream.write_all(b"leave\n").is_ok() {
+        let mut reply = String::new();
+        let _ = BufReader::new(&stream).read_line(&mut reply);
+        println!("remote · the one before was told to leave");
     }
 }
 

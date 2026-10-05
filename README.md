@@ -142,13 +142,16 @@ With pleamar and Marea, in your home, from one line:
 curl -fsSL https://raw.githubusercontent.com/k4ditano/pleamar/main/install.sh | sh
 pleamar-update --session     # and «pleamar-wm» in your login screen
 pleamar-update --agent       # and AI agents may use your windows (computer use)
+pleamar-update --remote      # and this desktop from a browser elsewhere
 ```
 
 Then log out and choose **pleamar-wm**, or from a TTY of its own (Ctrl+Alt+F3,
 log in there): `pleamar-session`. `pleamar-update` keeps it up to date.
 
 To use it from another computer, with only a browser there (it needs
-`wf-recorder` and `grim`, and `wl-clipboard` for the clipboard):
+`wf-recorder` and `grim`, `wl-clipboard` for the clipboard and `/dev/uinput`
+writable by you): `pleamar-update --remote` checks all that, makes the
+password and the codes and starts it with the session. By hand:
 
 ```sh
 pleamar-wm remote setup      # a password, and a key for your authenticator app
