@@ -310,9 +310,20 @@ impl State {
             Some((p, n)) => (p.parse::<u32>().map_err(|_| "bad-root-pid")?, Some(n.parse::<usize>().map_err(|_| "bad-window")?)),
             None => (spec.parse::<u32>().map_err(|_| "bad-root-pid")?, None),
         };
-        let family: Vec<usize> = match one {
-            Some(slot) => self.slots_open().filter(|s| *s == slot && in_family(self.pid_of(*s), pid)).collect(),
-            None => self.slots_open().filter(|s| in_family(self.pid_of(*s), pid)).collect(),
+        // That process's own windows; those of the processes it started only
+        // if it has none (a launcher's): a browser Discord opened a link in
+        // is not Discord.
+        let mine = |s: &usize| self.pid_of(*s) == pid;
+        let kin = |s: &usize| in_family(self.pid_of(*s), pid);
+        let of = |test: &dyn Fn(&usize) -> bool| -> Vec<usize> {
+            match one {
+                Some(slot) => self.slots_open().filter(|s| *s == slot && test(s)).collect(),
+                None => self.slots_open().filter(|s| test(s)).collect(),
+            }
+        };
+        let family = match of(&mine) {
+            own if !own.is_empty() => own,
+            _ => of(&kin),
         };
         if family.is_empty() {
             return Err("unknown-root-pid");
