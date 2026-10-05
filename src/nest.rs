@@ -1448,9 +1448,12 @@ impl State {
     fn set_focus(&mut self, slot: Option<usize>) {
         let before = self.focus;
         self.focus = slot.filter(|s| self.slots.get(*s).is_some_and(Option::is_some));
+        // Active: the one with your keyboard, and the one the agent types in
+        // (agent.rs, `kb_slot`).
+        let agent_typing = self.agent.as_ref().and_then(|a| a.kb_slot);
         for (k, w) in self.slots.iter().enumerate() {
             let Some(w) = w else { continue };
-            w.toplevel.set_activated(Some(k) == self.focus);
+            w.toplevel.set_activated(Some(k) == self.focus || Some(k) == agent_typing);
         }
         // An X11 one with the keyboard goes over the other X11 ones: its menus
         // and dialogs are found above it.

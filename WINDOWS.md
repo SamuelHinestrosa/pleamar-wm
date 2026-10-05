@@ -5,6 +5,11 @@ checkout starts the native desktop companion; it does **not** yet provide a
 complete Windows equivalent of the Linux compositor session. DWM continues to
 compose applications. No WSL, Wayland server or Unix shell is required.
 
+Upstream through `0f396ca` (0.2.20) is merged, including its workspace-wave
+animation fix and active-window state while the Linux agent types. Those
+compositor/independent-seat paths still need their native Windows equivalents;
+merging them does not enable them in the capability report below.
+
 ## Build and run from PowerShell
 
 Install the stable Rust x64 MSVC toolchain and Visual Studio Build Tools with

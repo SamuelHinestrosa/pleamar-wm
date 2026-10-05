@@ -276,14 +276,24 @@ scene Session {
         // rolling crest on each side that melts into it, and its own rim of
         // light, as Marea's edge has.
         let wv = tide.$s
+        //  Its back edge leaves before the spring's slow end (by 0.88): the
+        //  spring already eases it out, and the two easings together had it
+        //  crawling the last stretch.
         let lead = smooth(0, 0.5, wv)
-        let trail = smooth(0.5, 1, wv)
-        let top = if(dir.$s > 0, H * (1 - lead), H * trail)
-        let bot = if(dir.$s > 0, H * (1 - trail), H * lead)
+        let trail = smooth(0.5, 0.88, wv)
+        //  Both edges go all the way across, from past one side to past the
+        //  other (`reach`: what its crests, its blend and its shadow stick
+        //  out): it leaves the monitor whole while still moving, and the
+        //  slow end of the spring happens out of sight. It ran up to the edge
+        //  instead, and shrank there, a strip of crests standing still until
+        //  `show` took it away.
+        let reach = 160
+        let top = if(dir.$s > 0, H + reach - (H + 2 * reach) * lead, (H + 2 * reach) * trail - reach)
+        let bot = if(dir.$s > 0, H + reach - (H + 2 * reach) * trail, (H + 2 * reach) * lead - reach)
         let crest = W / 7
         group {
             z: 99980
-            show: wv < 0.999 and screen.index == s and bot - top > 0.5
+            show: wv < 0.999 and screen.index == s and bot - top > 0.5 and bot > -reach and top < H + reach
             body {
                 gradient: 0, top to 0, bot, #121517, #0c0e10 35%, #0a0b0d
                 rim: 14%

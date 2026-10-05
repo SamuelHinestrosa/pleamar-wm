@@ -88,6 +88,11 @@ pub struct Agent {
     /// command made a program think it lost focus between the agent's
     /// Ctrl+K and its letters, and Discord's search box got none of them.
     kb_entered: Option<WlSurface>,
+    /// And its slot, shown as active (`activated`) for that while, as a
+    /// window you type in is. A Chromium program takes a character typed by
+    /// number (Ctrl+Shift+U, an emoji) only in an active window: in one that
+    /// was not, Discord took Ctrl+Shift+U as its «upload a file».
+    pub(super) kb_slot: Option<usize>,
     /// Where your keyboard was when that was said: if it has been anywhere
     /// since (that window too), the program may have been told `leave`.
     kb_real: Option<WlSurface>,
@@ -173,7 +178,7 @@ pub fn start(state: &mut State) {
         return;
     }
     println!("agent · computer use: cua-inject v1 at {path}");
-    state.agent = Some(Agent { seats, raw_entered: [None, None], raw_real: [None, None], kb_entered: None, kb_real: None, opening: Vec::new(), seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None, remote: None });
+    state.agent = Some(Agent { seats, raw_entered: [None, None], raw_real: [None, None], kb_entered: None, kb_slot: None, kb_real: None, opening: Vec::new(), seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None, remote: None });
     // Whether it is at work, looked at every second: between one action and
     // the next an agent thinks, and that is still working.
     let timer = Timer::from_duration(Duration::from_secs(1));
@@ -658,6 +663,14 @@ impl State {
     /// The window its keys went to is left (unless it is yours now: then
     /// its focus is your keyboard's).
     fn agent_keyboard_leave(&mut self) {
+        // Not active any more, unless it is the window you are in.
+        if let Some(slot) = self.agent.as_mut().and_then(|a| a.kb_slot.take()) {
+            if self.focus != Some(slot) {
+                if let Some(w) = self.slots.get(slot).and_then(Option::as_ref) {
+                    w.toplevel.set_activated(false);
+                }
+            }
+        }
         let Some(old) = self.agent.as_mut().and_then(|a| a.kb_entered.take()) else { return };
         if !old.is_alive() || self.keyboard.current_focus().as_ref() == Some(&old) {
             return;
@@ -1067,6 +1080,12 @@ impl State {
             self.agent_keyboard_leave();
         }
         let still = !mine && entered.as_ref() == Some(&root) && self.agent.as_ref().is_some_and(|a| a.kb_real == real);
+        // Active while the agent types in it, said before the keys.
+        if !mine {
+            if let Some(w) = self.slots.get(slot).and_then(Option::as_ref) {
+                w.toplevel.set_activated(true);
+            }
+        }
         let keymap = self.your_keymap(|k| k.get_as_string(xkb::KEYMAP_FORMAT_TEXT_V1));
         let us_keymap = special.map_or_else(us_keymap_string, str::to_owned);
         let us = keymap_fd(&us_keymap).ok_or("no-keymap")?;
@@ -1101,6 +1120,7 @@ impl State {
         }
         if let Some(a) = self.agent.as_mut() {
             a.kb_entered = (!mine).then(|| root.clone());
+            a.kb_slot = (!mine).then_some(slot);
             a.kb_real = real;
         }
         Ok(())
