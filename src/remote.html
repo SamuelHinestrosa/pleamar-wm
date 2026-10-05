@@ -20,7 +20,11 @@
   .error { color: var(--bad); font-size: 13px; min-height: 1em; }
   #app { display: {{APP}}; height: 100%; position: relative; }
   #bar { position: absolute; top: 0; left: 50%; transform: translateX(-50%); z-index: 2; display: flex; gap: 6px; align-items: center; background: color-mix(in srgb, var(--panel) 92%, transparent); border: 1px solid var(--line); border-top: 0; border-radius: 0 0 12px 12px; padding: 6px 8px; transition: transform .25s ease, opacity .25s ease; max-width: calc(100% - 16px); flex-wrap: wrap; justify-content: center; }
-  #bar.away { transform: translate(-50%, calc(-100% + 6px)); opacity: .55; }
+  #bar.away { transform: translate(-50%, -110%); opacity: 0; pointer-events: none; }
+  /* The way back to the bar: a small button in the bottom left corner, seen
+     only when the pointer rests there (a quick click at home there goes through). */
+  #handle { position: absolute; left: 8px; bottom: 8px; z-index: 2; width: 30px; height: 30px; border-radius: 15px; border: 1px solid var(--line); background: color-mix(in srgb, var(--panel) 92%, transparent); color: var(--ink); font: 16px/28px system-ui, sans-serif; text-align: center; cursor: pointer; opacity: 0; pointer-events: none; transition: opacity .2s; padding: 0; }
+  #handle.on { opacity: 1; pointer-events: auto; }
   #bar button { background: transparent; color: var(--ink); border: 1px solid var(--line); border-radius: 7px; padding: 5px 9px; font: inherit; font-size: 12.5px; cursor: pointer; white-space: nowrap; }
   #bar button:hover { border-color: var(--sea); }
   #bar button.on { background: var(--sea); color: var(--sea-ink); border-color: var(--sea); }
@@ -57,6 +61,7 @@
     <span class="status" id="status">connecting…</span>
     <form method="post" action="/logout" style="margin:0"><button type="submit">Sign out</button></form>
   </div>
+  <button id="handle" title="The bar">≡</button>
   <div id="stage"><canvas id="screen" tabindex="0"></canvas><video id="direct" autoplay muted playsinline disablepictureinpicture></video></div>
   <textarea id="keys" aria-hidden="true"></textarea>
   <div id="toast"></div>
@@ -345,11 +350,27 @@
   canvas.addEventListener('focus', () => keys.focus({ preventScroll: true }));
   document.addEventListener('pointerdown', (e) => { if (!bar.contains(e.target)) keys.focus({ preventScroll: true }); });
 
-  // The bar hides at the top; it comes back with the pointer near it.
-  let barTimer = setTimeout(() => bar.classList.add('away'), 3000);
+  // The bar hides away whole (the top of the screen is home's: Marea is
+  // there). It comes back from a button in the bottom left corner, which
+  // shows when the pointer rests in that corner for a moment.
+  const handle = document.getElementById('handle');
+  let barTimer = null, cornerTimer = null;
+  const hideBar = () => { clearTimeout(barTimer); barTimer = setTimeout(() => { if (!bar.matches(':hover')) bar.classList.add('away'); else hideBar(); }, 2500); };
+  const showBar = () => { bar.classList.remove('away'); handle.classList.remove('on'); hideBar(); };
+  hideBar();
+  setTimeout(() => toast('The bar: rest the pointer in the bottom left corner'), 3200);
   document.addEventListener('pointermove', (e) => {
-    if (e.clientY < 48) { bar.classList.remove('away'); clearTimeout(barTimer); barTimer = setTimeout(() => bar.classList.add('away'), 2500); }
+    const corner = e.clientX < 70 && e.clientY > window.innerHeight - 70;
+    if (corner && !handle.classList.contains('on') && !cornerTimer) {
+      cornerTimer = setTimeout(() => { handle.classList.add('on'); cornerTimer = null; }, 600);
+    } else if (!corner) {
+      clearTimeout(cornerTimer); cornerTimer = null;
+      if (!handle.matches(':hover')) handle.classList.remove('on');
+    }
   });
+  handle.addEventListener('pointerdown', (e) => e.stopPropagation());
+  handle.addEventListener('click', (e) => { e.stopPropagation(); showBar(); keys.focus({ preventScroll: true }); });
+  bar.addEventListener('pointerleave', hideBar);
 
   document.getElementById('full').onclick = async () => {
     if (document.fullscreenElement) { await document.exitFullscreen(); return; }
