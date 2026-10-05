@@ -429,6 +429,8 @@ struct State {
     shm: ShmState,
     seats: SeatState<State>,
     data_device: DataDeviceState,
+    /// What is copied now, as far as giving it back after the agent pastes needs.
+    pub(super) clipboard: Clipboard,
     popups: PopupManager,
     seat: Seat<State>,
     keyboard: KeyboardHandle<State>,
@@ -688,6 +690,7 @@ fn run(max: usize, to_render: Sender<ToRender>, rx: Channel<ToNest>, ready: std:
         _cursor_shapes: CursorShapeManagerState::new::<State>(&dh),
         shm: ShmState::new::<State>(&dh, vec![]),
         data_device: DataDeviceState::new::<State>(&dh),
+        clipboard: Clipboard::Nothing,
         popups: PopupManager::default(),
         activation: XdgActivationState::new::<State>(&dh),
         _wlr_data_control: WlrDataControlState::new::<State, _>(&dh, Some(&primary), |_| true),
@@ -3115,16 +3118,120 @@ impl SeatHandler for State {
     }
 }
 
+/// What the compositor itself offers as copied: what an X11 program copied
+/// (XWayland serves it), or something kept here —what the agent pastes, and
+/// what was copied before it, given back after—.
+#[derive(Clone)]
+pub enum Copied {
+    X11,
+    Kept(Arc<Kept>),
+}
+
+/// Something copied that is kept here, in each of its kinds, and whether
+/// anyone has read it yet.
+pub struct Kept {
+    pub data: Vec<(String, Vec<u8>)>,
+    pub read: std::sync::atomic::AtomicBool,
+}
+
+impl Kept {
+    pub fn new(data: Vec<(String, Vec<u8>)>) -> Arc<Kept> {
+        Arc::new(Kept { data, read: std::sync::atomic::AtomicBool::new(false) })
+    }
+
+    pub fn kinds(&self) -> Vec<String> {
+        self.data.iter().map(|(k, _)| k.clone()).collect()
+    }
+}
+
+/// What is copied now: nothing, a Wayland program's (in these kinds), an
+/// X11 program's, or something kept here.
+pub enum Clipboard {
+    Nothing,
+    Program(Vec<String>),
+    X11,
+    Kept(Arc<Kept>),
+}
+
 impl SelectionHandler for State {
-    type SelectionUserData = ();
+    type SelectionUserData = Copied;
 
     fn new_selection(&mut self, ty: smithay::wayland::selection::SelectionTarget, source: Option<smithay::wayland::selection::SelectionSource>, _: Seat<Self>) {
+        if matches!(ty, smithay::wayland::selection::SelectionTarget::Clipboard) {
+            self.clipboard = source.as_ref().map_or(Clipboard::Nothing, |s| Clipboard::Program(s.mime_types()));
+        }
         x11::wayland_copied(self, ty, source.map(|s| s.mime_types()));
     }
 
-    fn send_selection(&mut self, ty: smithay::wayland::selection::SelectionTarget, mime_type: String, fd: std::os::fd::OwnedFd, _: Seat<Self>, _: &()) {
-        x11::wayland_pastes(self, ty, mime_type, fd);
+    fn send_selection(&mut self, ty: smithay::wayland::selection::SelectionTarget, mime_type: String, fd: std::os::fd::OwnedFd, _: Seat<Self>, copied: &Copied) {
+        match copied {
+            Copied::X11 => x11::wayland_pastes(self, ty, mime_type, fd),
+            Copied::Kept(kept) => serve_kept(kept, &mime_type, fd),
+        }
     }
+}
+
+/// Something kept here, to whoever pastes it: written on a thread of its
+/// own, a program reads when it can.
+fn serve_kept(kept: &Arc<Kept>, mime_type: &str, fd: std::os::fd::OwnedFd) {
+    use std::io::Write;
+    let Some(k) = kept.data.iter().position(|(t, _)| t == mime_type) else { return };
+    kept.read.store(true, std::sync::atomic::Ordering::Relaxed);
+    let kept = kept.clone();
+    std::thread::spawn(move || {
+        let _ = std::fs::File::from(fd).write_all(&kept.data[k].1);
+    });
+}
+
+/// What a Wayland program copied, read here and now in each of these kinds
+/// (one picture kind only: a program makes every picture kind it offers on
+/// the spot, and a big one in all of them takes long). Waits for it up to a
+/// second, with the clients told first: the program writes it on its own,
+/// without the compositor. None if it did not arrive whole in time.
+fn read_copied(state: &mut State, kinds: &[String]) -> Option<Vec<(String, Vec<u8>)>> {
+    use std::io::Read;
+    use std::os::fd::FromRawFd;
+    let picture = ["image/png", "image/jpeg"].iter().find(|p| kinds.iter().any(|k| k == *p)).map(|p| p.to_string()).or_else(|| kinds.iter().find(|k| k.starts_with("image/")).cloned());
+    let wanted: Vec<&String> = kinds.iter().filter(|k| !k.starts_with("image/") || Some(*k) == picture.as_ref()).collect();
+    let seat = state.seat.clone();
+    let mut reads: Vec<(String, std::fs::File, Vec<u8>, bool)> = Vec::new();
+    for kind in wanted {
+        let mut fds = [0i32; 2];
+        // SAFETY: a pipe into two fds that are ours from here on.
+        if unsafe { libc::pipe2(fds.as_mut_ptr(), libc::O_CLOEXEC | libc::O_NONBLOCK) } != 0 {
+            return None;
+        }
+        // SAFETY: both were just made by pipe2 and are owned by nothing else.
+        let (reading, writing) = unsafe { (std::fs::File::from(std::os::fd::OwnedFd::from_raw_fd(fds[0])), std::os::fd::OwnedFd::from_raw_fd(fds[1])) };
+        smithay::wayland::selection::data_device::request_data_device_client_selection(&seat, kind.clone(), writing).ok()?;
+        reads.push((kind.clone(), reading, Vec::new(), false));
+    }
+    state.dh.flush_clients().ok()?;
+    let until = Instant::now() + Duration::from_secs(1);
+    let mut chunk = vec![0u8; 64 * 1024];
+    let mut total = 0usize;
+    while reads.iter().any(|r| !r.3) {
+        let mut moved = false;
+        for r in reads.iter_mut().filter(|r| !r.3) {
+            match r.1.read(&mut chunk) {
+                Ok(0) => r.3 = true,
+                Ok(n) => {
+                    r.2.extend_from_slice(&chunk[..n]);
+                    total += n;
+                    moved = true;
+                }
+                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
+                Err(_) => return None,
+            }
+        }
+        if total > 64 << 20 || Instant::now() > until {
+            return None;
+        }
+        if !moved {
+            std::thread::sleep(Duration::from_millis(2));
+        }
+    }
+    Some(reads.into_iter().map(|r| (r.0, r.2)).collect())
 }
 
 impl DataDeviceHandler for State {
