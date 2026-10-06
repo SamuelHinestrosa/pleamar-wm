@@ -43,7 +43,7 @@ The matching Marea profile includes a paged **Window overview** on its selected
 monitor. The session advertises `window_overview`; `capabilities` advertises
 `visible_window_capture`. The renderer sends demand independently of input
 placement, including before a window's first image. Hidden pages stop native
-capture and clear retained CPU pictures, while keeping window identities and
+capture and clear retained pictures, while keeping window identities and
 titles. The GPU atlas may retain its capacity for reuse. The Linux compositor
 ignores this resource-demand message and keeps its existing client-buffer and
 input-placement behavior.
@@ -247,15 +247,38 @@ sizes below 32 logical pixels are ignored, as on Linux. Windows may still proces
 an already posted asynchronous resize after the timeout or a subsequent
 `ask: 0, 0`; the API cannot retract a posted request.
 
-The initial transport uses CPU readback, capped at 30 updates per window per second.
-A render acknowledgement bounds queued batches; capture dimensions are bounded
-to 8192 per edge and 16 megapixels in aggregate, with at most 64 slots. Retained
-minimized pictures count towards that bound. The GPU
-device and readback textures are reused. Capture callbacks and native waitable
-timers wake the preview worker; it does not change the system timer period.
-This is not a zero-copy path or a claim
-of sustained desktop performance; GPU resource sharing and further profiling
-remain work for the full port.
+The D3D12 renderer offers its actual device to the provider. On a compatible
+adapter, WGC frames are copied into shared images on the GPU, then copied into
+the renderer's window array. Each capture reuses at most two shared images.
+Producer fences and consumer GPU-completion guards prevent an image from being
+overwritten while it is displayed or being copied. There is no CPU pixel
+readback or upload on this transport; it still performs two GPU copies.
+
+The existing CPU transport is retained if sharing is unavailable or fails.
+The process log reports the selected transport and failures. For a driver
+diagnostic or an A/B comparison, set `$env:PLEAMAR_WM_CAPTURE_CPU = '1'` before
+launching the scene; remove that environment variable to restore automatic
+negotiation.
+
+Both transports are capped at 30 updates per window per second. A render
+acknowledgement bounds queued batches; capture dimensions are bounded to 8192
+per edge and 16,777,216 source pixels in aggregate, with at most 64 slots.
+Retained minimized pictures count towards that bound. This is not a total GPU
+memory cap: WGC, shared images, pending copies and the padded renderer array
+also need storage. Capture callbacks and native waitable timers wake the worker;
+it does not change the system timer period. Full-product sustained performance
+and compositor-effect parity remain separate work.
+
+With matching engine `d4c50a4`, the default-Luau release build and 18 ordinary
+WM tests pass on Windows x64/MSVC. An owned DISPLAY2 fixture checks pixels,
+resize, Luau, watched reload and closure with both transports. The actual Marea
+overview also passes pages 0/1/0/1 with six owned windows, hidden capture demand
+and fresh pixels when returning to a page. No physical input or focus change
+was involved. A same-executable 32-second comparison used 1.52 CPU seconds
+with shared images versus 3.64 with CPU readback, and about 33 MiB less private
+commit. Resident memory had an unexplained outlier in an earlier run, so no
+consistent RSS saving is claimed. [Commands, hashes, captures and all measurements](https://github.com/SamuelHinestrosa/pleamar/blob/d4c50a40b11ad41bb5d31aa38ee7c31591f974fa/docs/windows-shared-capture.md)
+are retained; these short tests do not establish full desktop parity.
 
 ## Status and remaining parity work
 

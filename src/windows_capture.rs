@@ -1,6 +1,7 @@
 //! Persistent WGC sessions share one D3D11 device. A consumer requests a frame
 //! only after the preceding frame has been consumed; the capture pool is bounded.
-use std::{marker::PhantomData, rc::Rc, time::{Duration,Instant}, sync::{Arc, atomic::{AtomicBool, Ordering}}};
+use pleamar::windows_texture::{SharedDevice, SharedTexture};
+use std::{cell::Cell, marker::PhantomData, rc::Rc, time::{Duration,Instant}, sync::{Arc, atomic::{AtomicBool, Ordering}}};
 use windows::{core::{Interface, Result}, Foundation::TypedEventHandler,
     Graphics::{Capture::*, DirectX::{Direct3D11::IDirect3DDevice, DirectXPixelFormat}, SizeInt32},
     Win32::{Foundation::*, Graphics::{Direct3D::*, Direct3D11::*, Dxgi::{IDXGIDevice, Common::*}},
@@ -34,10 +35,17 @@ pub(super) struct Device {
     context: ID3D11DeviceContext,
     runtime: IDirect3DDevice,
     wake: Option<Arc<super::wait::Wake>>,
+    shared: Option<SharedDevice>,
+    fence: Option<ID3D11Fence>,
+    context4: Option<ID3D11DeviceContext4>,
+    sequence: Cell<u64>,
     _apartment: Apartment,
 }
 impl Device {
-    pub fn new(wake:Option<Arc<super::wait::Wake>>) -> Result<Rc<Self>> { unsafe {
+    pub fn new(wake:Option<Arc<super::wait::Wake>>) -> Result<Rc<Self>> { Self::create(wake,None) }
+    pub fn with_renderer(&self, shared:Option<SharedDevice>) -> Result<Rc<Self>> { Self::create(self.wake.clone(),shared) }
+    pub fn shared(&self) -> bool { self.shared.is_some() }
+    fn create(wake:Option<Arc<super::wait::Wake>>, shared:Option<SharedDevice>) -> Result<Rc<Self>> { unsafe {
         RoInitialize(RO_INIT_MULTITHREADED)?;
         let apartment = Apartment(PhantomData);
         // Avoid the generated global factory cache surviving its COM apartment.
@@ -47,13 +55,22 @@ impl Device {
         (factory.vtable().IsSupported)(factory.as_raw(), &mut supported).ok()?;
         if !supported { return Err(E_NOTIMPL.into()); }
         let (mut device, mut context) = (None, None);
-        D3D11CreateDevice(None, D3D_DRIVER_TYPE_HARDWARE, HMODULE::default(), D3D11_CREATE_DEVICE_BGRA_SUPPORT,
+        let adapter = shared.as_ref().map(|shared| {
+            let factory:windows::Win32::Graphics::Dxgi::IDXGIFactory4 = windows::Win32::Graphics::Dxgi::CreateDXGIFactory1()?;
+            factory.EnumAdapterByLuid::<windows::Win32::Graphics::Dxgi::IDXGIAdapter>(shared.adapter())
+        }).transpose()?;
+        D3D11CreateDevice(adapter.as_ref(), if adapter.is_some() { D3D_DRIVER_TYPE_UNKNOWN } else { D3D_DRIVER_TYPE_HARDWARE }, HMODULE::default(), D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             None, D3D11_SDK_VERSION, Some(&mut device), None, Some(&mut context))?;
         let device = device.ok_or(E_POINTER)?;
         let context = context.ok_or(E_POINTER)?;
         let _ = context.cast::<ID3D11Multithread>()?.SetMultithreadProtected(true);
         let runtime = CreateDirect3D11DeviceFromDXGIDevice(&device.cast::<IDXGIDevice>()?)?.cast()?;
-        Ok(Rc::new(Self { device, context, runtime, wake, _apartment:apartment }))
+        let (mut fence,mut context4) = (None,None);
+        if shared.is_some() {
+            device.cast::<ID3D11Device5>()?.CreateFence(0,D3D11_FENCE_FLAG_NONE,&mut fence)?;
+            context4=Some(context.cast()?);
+        }
+        Ok(Rc::new(Self { device, context, runtime, wake, shared, fence, context4, sequence:Cell::new(0), _apartment:apartment }))
     } }
 }
 
@@ -63,7 +80,8 @@ fn bounded(size:SizeInt32) -> Result<(u32,u32)> {
     Ok((size.Width as u32,size.Height as u32))
 }
 
-pub(super) struct Picture { pub size:(u32,u32), pub pixels:Vec<u8> }
+pub(super) struct Picture { pub size:(u32,u32), pub pixels:Vec<u8>, pub shared:Option<Arc<SharedTexture>> }
+struct SharedBuffer { image:Arc<SharedTexture>, texture:ID3D11Texture2D }
 struct Frame(Direct3D11CaptureFrame);
 impl Drop for Frame { fn drop(&mut self) { let _ = self.0.Close(); } }
 struct Mapped<'a>(&'a ID3D11DeviceContext,&'a ID3D11Texture2D);
@@ -81,6 +99,10 @@ pub(super) struct Capture {
     pending: bool,
     pending_since: Instant,
     staging: Option<ID3D11Texture2D>,
+    shared: Vec<SharedBuffer>,
+    gpu_pending: Option<(usize,u64)>,
+    waiting_buffer: bool,
+    cpu_fallback: bool,
     size: SizeInt32,
     device: Rc<Device>,
 }
@@ -109,7 +131,7 @@ impl Capture {
         };
         let mut capture = Self { item, session, pool, closed_token:0, frame_token:0,
             closed:Arc::new(AtomicBool::new(false)), dirty:Arc::new(AtomicBool::new(true)),
-            pending:false, pending_since:Instant::now(), staging:None, size, device };
+            pending:false, pending_since:Instant::now(), staging:None, shared:Vec::new(), gpu_pending:None, waiting_buffer:false, cpu_fallback:false, size, device };
         let closed = capture.closed.clone();
         let wake = capture.device.wake.clone();
         capture.closed_token = capture.item.Closed(&TypedEventHandler::new(move |_,_| {
@@ -127,18 +149,11 @@ impl Capture {
 
     pub fn size(&self) -> Result<(u32,u32)> { bounded(self.size) }
     pub fn closed(&self) -> bool { self.closed.load(Ordering::Acquire) }
-    pub fn pending(&self) -> bool { self.pending }
-    pub fn ready(&self) -> bool { self.pending || self.closed() || self.dirty.load(Ordering::Acquire) }
+    pub fn pending(&self) -> bool { self.pending || self.gpu_pending.is_some() || self.waiting_buffer }
+    pub fn ready(&self) -> bool { self.pending() || self.closed() || self.dirty.load(Ordering::Acquire) }
 
-    /// No blocking readback: a busy GPU is retried on the next consumer tick.
-    /// One WGC buffer, one staging texture and one CPU result per window.
-    pub fn next(&mut self, budget:u64) -> Result<Option<Picture>> { unsafe {
-        if self.closed() { return Err(RO_E_CLOSED.into()); }
-        if self.size.Width as u64 * self.size.Height as u64 > budget {
-            return Err(windows::core::Error::new(E_OUTOFMEMORY,"aggregate window capture budget exceeded"));
-        }
-        if !self.pending {
-            if !self.dirty.swap(false,Ordering::AcqRel) { return Ok(None); }
+    fn acquire(&mut self, budget:u64) -> Result<Option<Frame>> {
+        if !self.dirty.swap(false,Ordering::AcqRel) { return Ok(None); }
             let frame = match self.pool.TryGetNextFrame() {
                 Ok(frame) => Frame(frame),
                 Err(e) if e.code() == E_POINTER || e.code() == S_OK => return Ok(None),
@@ -160,6 +175,66 @@ impl Capture {
                 *self=Self::from_item(self.device.clone(),self.item.clone(),content)?;
                 return Ok(None);
             }
+        Ok(Some(frame))
+    }
+
+    fn next_shared(&mut self, budget:u64) -> Result<Option<Picture>> { unsafe {
+        if self.closed() { return Err(RO_E_CLOSED.into()); }
+        let size=bounded(self.size)?;
+        if size.0 as u64 * size.1 as u64 > budget { return Err(E_OUTOFMEMORY.into()); }
+        if self.gpu_pending.is_none() {
+            // Two immutable images: the displayed image and the next capture.
+            // GPU submissions also hold an Arc; a CPU acknowledgement alone is
+            // never permission to overwrite a texture still being copied.
+            let index = if let Some(i)=self.shared.iter().position(|b|Arc::strong_count(&b.image)==1) { i }
+            else if self.shared.len()<2 {
+                let image=self.device.shared.as_ref().ok_or(E_POINTER)?.texture(size)?;
+                let texture=image.open(&self.device.device)?;
+                self.shared.push(SharedBuffer {image,texture});self.shared.len()-1
+            } else { self.waiting_buffer=true;return Ok(None); };
+            self.waiting_buffer=false;
+            let Some(frame)=self.acquire(budget)? else { return Ok(None); };
+            let source:ID3D11Texture2D=frame.0.Surface()?.cast::<IDirect3DDxgiInterfaceAccess>()?.GetInterface()?;
+            self.device.context.CopyResource(&self.shared[index].texture,&source);
+            let value=self.device.sequence.get().checked_add(1).ok_or(E_FAIL)?;
+            self.device.sequence.set(value);
+            self.device.context4.as_ref().ok_or(E_POINTER)?.Signal(self.device.fence.as_ref().ok_or(E_POINTER)?,value)?;
+            self.device.context.Flush();
+            drop(frame);
+            self.gpu_pending=Some((index,value));self.pending_since=Instant::now();
+        }
+        let (index,value)=self.gpu_pending.ok_or(E_POINTER)?;
+        let completed=self.device.fence.as_ref().ok_or(E_POINTER)?.GetCompletedValue();
+        if completed==u64::MAX { return Err(windows::Win32::Graphics::Dxgi::DXGI_ERROR_DEVICE_REMOVED.into()); }
+        if completed<value {
+            if self.pending_since.elapsed()>Duration::from_secs(5) {
+                return Err(windows::core::Error::new(E_FAIL,"window capture GPU copy timed out"));
+            }
+            return Ok(None);
+        }
+        self.gpu_pending=None;
+        Ok(Some(Picture {size, pixels:Vec::new(), shared:Some(self.shared[index].image.clone())}))
+    } }
+
+    /// No blocking readback: a busy GPU is retried on the next consumer tick.
+    /// One WGC buffer, one staging texture and one CPU result per window.
+    pub fn next(&mut self, budget:u64) -> Result<Option<Picture>> { unsafe {
+        if self.device.shared() && !self.cpu_fallback {
+            match self.next_shared(budget) {
+                Ok(picture) => return Ok(picture),
+                Err(error) => {
+                    eprintln!("windows capture: GPU sharing failed, using CPU readback: {error}");
+                    self.shared.clear();self.gpu_pending=None;self.waiting_buffer=false;
+                    self.cpu_fallback=true;self.dirty.store(true,Ordering::Release);
+                },
+            }
+        }
+        if self.closed() { return Err(RO_E_CLOSED.into()); }
+        if self.size.Width as u64 * self.size.Height as u64 > budget {
+            return Err(windows::core::Error::new(E_OUTOFMEMORY,"aggregate window capture budget exceeded"));
+        }
+        if !self.pending {
+            let Some(frame) = self.acquire(budget)? else { return Ok(None); };
             let (width,height) = bounded(self.size)?;
             if self.staging.is_none() {
                 self.device.device.CreateTexture2D(&D3D11_TEXTURE2D_DESC {
@@ -201,7 +276,7 @@ impl Capture {
         }
         drop(mapping);
         self.pending = false;
-        Ok(Some(Picture { size:(width,height),pixels }))
+        Ok(Some(Picture { size:(width,height),pixels,shared:None }))
     } }
 }
 impl Drop for Capture {

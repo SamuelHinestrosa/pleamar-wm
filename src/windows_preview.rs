@@ -204,7 +204,7 @@ impl Preview {
                     let (w,h)=picture.size;
                     let size=((w as f64/scale).round().max(1.0) as u32,(h as f64/scale).round().max(1.0) as u32);
                     self.tell(NestEvent::Frame {slot:i,geometry:[0,0,size.0 as i32,size.1 as i32],pieces:vec![WindowPiece {
-                        id:i as u64+1,at:(0,0),size,px:(w,h),src:[0.0,0.0,w as f32,h as f32],content:PieceContent::Pixels(picture.pixels)
+                        id:i as u64+1,at:(0,0),size,px:(w,h),src:[0.0,0.0,w as f32,h as f32],content:picture.shared.map(PieceContent::Windows).unwrap_or_else(||PieceContent::Pixels(picture.pixels))
                     }]})?;
                     sent=true;
                 },
@@ -242,6 +242,24 @@ impl Preview {
         }
         Ok(())
     }
+    fn gpu(&mut self, shared:Option<pleamar::windows_texture::SharedDevice>) {
+        // A diagnostic override for driver problems and comparisons using the
+        // same executable, scene and capture workload.
+        if shared.is_some() && std::env::var("PLEAMAR_WM_CAPTURE_CPU").as_deref()==Ok("1") {
+            eprintln!("windows preview: capture transport = CPU readback (requested)");
+            return;
+        }
+        if shared.is_none() && !self.device.shared() { return; }
+        match self.device.with_renderer(shared) {
+            Ok(device) => {
+                self.device=device;
+                eprintln!("windows preview: capture transport = {}",if self.device.shared() {"shared GPU textures"} else {"CPU readback"});
+                for slot in self.slots.iter_mut().flatten() { slot.capture=None; }
+                for i in 0..self.slots.len() { self.capture(i); }
+            },
+            Err(error) => eprintln!("windows preview: retaining current capture transport: {error}"),
+        }
+    }
     fn run(&mut self,commands:mpsc::Receiver<ToNest>) -> Result<()> {
         let mut topology=Instant::now();
         loop {
@@ -251,6 +269,7 @@ impl Preview {
                     Ok(ToNest::Quit)|Err(TryRecvError::Disconnected) => return Ok(()),
                     Err(TryRecvError::Empty) => break,
                     Ok(ToNest::FrameDone) => {},
+                    Ok(ToNest::WindowsGpu(shared)) => self.gpu(shared),
                     Ok(ToNest::Visible(slots)) => self.visible(slots)?,
                     Ok(ToNest::Size(..)|ToNest::Shown {..}|ToNest::OnScreen(..)|ToNest::Gpu {..}|ToNest::Released(..)|ToNest::PointerOut|ToNest::HostFocus(..)) => {},
                     Ok(ToNest::Configure {slot,w,h}) => {
