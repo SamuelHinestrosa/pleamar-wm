@@ -94,6 +94,12 @@ fn main() {
             unsafe { std::env::set_var("PLEAMAR_SOCKETS", &dir) };
             dir
         });
+        // A test desktop never tells the user's dbus and systemd where the desktop
+        // is: run from a terminal of a real session it inherits that session's
+        // `PLEAMAR_WM_EXPORT`, and its portals ended up pointed at a display
+        // that was gone seconds later.
+        // SAFETY: before any thread is started.
+        unsafe { std::env::remove_var("PLEAMAR_WM_EXPORT") };
         let _ = std::fs::create_dir_all(&own);
         println!("headless · its scene listens in {own}");
         pleamar::provide_before_quit(Box::new(move || {

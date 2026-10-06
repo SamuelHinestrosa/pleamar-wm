@@ -1029,7 +1029,16 @@ impl State {
                 let k = self.keyboard.clone();
                 k.set_focus(self, target, serial);
             }
-            ToNest::Focus(slot) => self.set_focus(Some(slot)),
+            // The scene gives the keyboard to the window the pointer is over. A
+            // window of the program the agent is working with this moment, while
+            // your keyboard is in another, does not take it that way: it opened
+            // under your pointer, or the agent's work moved it there; it was not
+            // gone to. A click of yours gives it (`Button`, above).
+            ToNest::Focus(slot) => {
+                if !self.agent_keeps_your_keyboard(self.pid_of(slot)) {
+                    self.set_focus(Some(slot));
+                }
+            }
             ToNest::Close(slot) => {
                 if let Some(Some(w)) = self.slots.get(slot) {
                     w.toplevel.send_close();
