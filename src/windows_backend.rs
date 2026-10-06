@@ -24,9 +24,13 @@ mod wait;
 #[path = "windows_preview.rs"]
 mod preview;
 
+#[path = "windows_agent.rs"]
+mod agent;
+
 const HELP: &str = "pleamar-wm — experimental native Windows desktop companion
 
   capabilities                     machine-readable support status
+  agent help                       inspect and use pleamar scenes by name
   monitors                         connected displays and physical work areas (JSON)
   windows                          ordinary application windows (JSON)
   session --monitor NAME|all       start in free mode; --state FILE selects its recovery journal
@@ -310,7 +314,9 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
             "preview_window_actions": ["focus", "close", "minimize", "restore", "configure"], "preview_redirected_input": false,
             "window_rules": ["app", "title", "float", "size", "monitor"], "private_window_rules": false, "workspace_window_rules": false,
             "window_scene_provider": false, "automatic_session": true, "rain": false, "snow": false,
-            "ride": false, "dock": false, "pools": false, "remote": false, "independent_agent_seat": false}))),
+            "ride": false, "dock": false, "pools": false, "remote": false, "independent_agent_seat": false,
+            "agent_scene_commands": ["scenes", "tree", "press", "wait", "watch", "say"]}))),
+        ["agent", rest @ ..] => agent::execute(rest),
         ["monitors"] => Ok(Some(serde_json::to_value(monitors()?)?)),
         ["windows"] => Ok(Some(serde_json::to_value(windows()?)?)),
         ["session", rest @ ..] => session::run(&rest.iter().map(|s|(*s).to_owned()).collect::<Vec<_>>()).map(Some),
