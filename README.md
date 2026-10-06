@@ -382,8 +382,11 @@ inherits), on the card's cursor plane, with the shape whoever has the pointer
 asks for. Other programs' bars keep their room (exclusive zones: the scene
 reads `win.reserved.$s.top`…). Screenshots work (`wlr-screencopy`: grim, a
 recorder, Marea's lens), and `pleamar-wm hyprctl monitors|activewindow` says
-the desktop the way Hyprland does, for what used to ask it. Monitors can be
-plugged in and out while it runs.
+the desktop the way Hyprland does, for what used to ask it. Where the mouse
+is on the whole desktop is said, as it moves, on the `cursor.sock` next to
+the session's other sockets (`PLEAMAR_SOCKETS`): a pleamar scene that reads
+`cursor.x` gets it from there, so Marea's eyes follow the mouse anywhere and
+moving it wakes her. Monitors can be plugged in and out while it runs.
 
 # What programs find
 

@@ -13,6 +13,8 @@ mod window_rules;
 #[cfg(target_os = "linux")]
 mod config;
 #[cfg(target_os = "linux")]
+mod cursor;
+#[cfg(target_os = "linux")]
 mod desktop;
 #[cfg(target_os = "linux")]
 mod nest;

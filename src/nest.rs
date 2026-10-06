@@ -1414,6 +1414,8 @@ impl State {
                 let scenes = std::env::var("PLEAMAR_SOCKETS").ok().filter(|d| !d.is_empty()).unwrap_or_else(|| format!("{dir}/pleamar"));
                 let _ = std::os::unix::fs::symlink(format!("{scenes}/{scene}.sock"), &link);
             }
+            // And where the mouse is on the whole desktop, for whoever asks.
+            crate::cursor::serve(&own);
             c.env("PLEAMAR_SOCKETS", own);
         }
         // pleamar-wm itself by its name (`pleamar-wm hyprctl`, what Marea asks instead).

@@ -5,8 +5,10 @@ checkout starts the native desktop companion; it does **not** yet provide a
 complete Windows equivalent of the Linux compositor session. DWM continues to
 compose applications. No WSL, Wayland server or Unix shell is required.
 
-Upstream through `adac846` (0.2.22) is merged, including its workspace-wave
-fix, independent Linux agent keyboard and Chromium emoji/clipboard handling.
+Upstream through `9889e9c` (0.2.24) is merged, including its workspace-wave
+fix, independent Linux agent keyboard, Chromium emoji/clipboard handling and
+desktop cursor socket. The socket remains Linux-only; Windows reports global
+cursor positions through pleamar's native event loop and does not need it.
 Windows already emits UTF-16 keyboard input through the matching pleamar
 backend; it does not adopt the Linux Ctrl+Shift+U/clipboard workaround.
 Chromium/Discord typing acceptance is still pending. These merges do not
@@ -18,7 +20,7 @@ report below.
 Install the stable Rust x64 MSVC toolchain and Visual Studio Build Tools with
 Desktop development with C++ and the Windows SDK. Keep this checkout next to
 the matching `pleamar` Windows port (`../pleamar`). The current CI pins pleamar
-commit `7f77d2dc0ff085de5026f59e6888cbac00bb855f` from the Windows PR; upstream
+commit `2e0d27ce0ab49b1252784fc16112041359bf71c4` from the Windows PR; upstream
 pleamar alone does not yet include that backend.
 
 ```powershell
