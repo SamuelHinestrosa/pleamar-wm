@@ -41,7 +41,7 @@ A window made with pleamar (`windows` says «pleamar scene NAME») is asked and 
   tree PID [json]                 what is on it: every button, slider, field, list, item and text,
                                   with its name, what it says, its state and its box
   press PID NAME [right|middle] [COUNT]
-                                  the cursor glides to it and it is pressed; the answer is what
+                                  your cursor goes to it and it is pressed; the answer is what
                                   happened (events, facts, texts, what opened)
   wait PID CONDITION [TIMEOUT]    answers as soon as it holds: status == \"Saved\", dirty == false 3s
   watch PID [SECONDS]             a line for each thing that happens on it
@@ -147,37 +147,6 @@ fn scenes() -> std::collections::HashMap<u32, (String, std::path::PathBuf)> {
 fn scene_of(pid: &str) -> Result<(String, std::path::PathBuf), String> {
     let n: u32 = pid.split('.').next().and_then(|p| p.parse().ok()).ok_or("which window: its number")?;
     scenes().remove(&n).ok_or_else(|| format!("{pid} is not a pleamar window, or it does not answer: use look and click"))
-}
-
-/// Where a thing of a pleamar window is, in the pixels of `look`: the centre
-/// of its box, as `tree json` gives it, times the surface's scale.
-fn place_of(tree: &str, name: &str) -> Option<(f64, f64)> {
-    type Found<'a> = (&'a serde_json::Value, Option<&'a serde_json::Value>);
-    // The thing, and the list it hangs from.
-    fn find<'a>(nodes: &'a [serde_json::Value], name: &str, list: Option<&'a serde_json::Value>) -> Option<Found<'a>> {
-        nodes.iter().find_map(|n| if n["name"] == name { Some((n, list)) } else { n["children"].as_array().and_then(|c| find(c, name, Some(n))) })
-    }
-    let boxed = |n: &serde_json::Value| -> Option<[f64; 4]> {
-        let b: Vec<f64> = n["box"].as_array()?.iter().filter_map(|v| v.as_f64()).collect();
-        (b.len() == 4).then(|| [b[0], b[1], b[2], b[3]])
-    };
-    let parts: serde_json::Value = serde_json::from_str(tree).ok()?;
-    parts.as_array()?.iter().find_map(|p| {
-        let (n, list) = find(p["nodes"].as_array()?, name, None)?;
-        let b = boxed(n)?;
-        let (mut x, mut y) = (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0);
-        // Scrolled out of its list, it comes in at the edge it is past: the
-        // cursor waits for it there, not where it is hidden.
-        if n["off_view"] == true
-            && let Some(w) = list.and_then(boxed)
-        {
-            let into = |v: f64, from: f64, size: f64, half: f64| v.clamp(from + half + 4.0, (from + size - half - 4.0).max(from + half + 4.0));
-            x = into(x, w[0], w[2], b[2] / 2.0);
-            y = into(y, w[1], w[3], b[3] / 2.0);
-        }
-        let scale = p["scale"].as_f64().unwrap_or(1.0);
-        Some((x * scale, y * scale))
-    })
 }
 
 /// The monitors, as the session counts them: name, and box in units.
@@ -529,11 +498,9 @@ fn go(args: &[String]) -> Result<(), String> {
             let p = pid()?;
             let name = args.get(2).ok_or("press what: its name, as `tree` gives it")?;
             let (_, sock) = scene_of(&p)?;
-            // The agent's cursor glides there first, so whoever watches sees what it
-            // presses; the press itself is the scene's own, by name.
-            if let Some((x, y)) = place_of(&ask(&sock, "describe json")?, name) {
-                Hands::open()?.arrive(&p, x, y)?;
-            }
+            // The scene presses it by name, and before that takes the agent's
+            // cursor there itself: it is never behind the press.
+            let _ = name;
             print!("{}", ask(&sock, &format!("press {}", args[2..].join(" ")))?);
         }
         "wait" | "watch" | "say" => {

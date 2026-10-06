@@ -2115,7 +2115,6 @@ dependencies = [
  "libc",
  "pipewire",
  "pleamar",
- "serde_json",
  "sha1",
  "sha2",
  "smithay",

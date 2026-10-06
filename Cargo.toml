@@ -8,8 +8,6 @@ repository = "https://github.com/k4ditano/pleamar-wm"
 
 [dependencies]
 pleamar = { path = "../pleamar" }
-# Reading what a pleamar window says it holds (`agent tree … json`).
-serde_json = "1.0"
 libc = "0.2"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg"] }
 # `pleamar-wm remote`: the page's socket, its sign-in (a password's hash, six-digit codes).
