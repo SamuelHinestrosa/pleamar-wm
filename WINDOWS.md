@@ -389,3 +389,16 @@ Closing through the scene's exported Luau event ended the process successfully.
 The existing native action regression also passed after this change. Neither
 test injected input or activated its windows. Successful click-to-focus remains
 unverified; unit tests cover the denied-focus and failed-close logic.
+
+
+### Upstream 0.2.25 compatibility (2026-10-06)
+
+The 0.2.25 upstream release is merged. Both native CLI and console-free host
+build with default Luau and locked dependencies against pleamar `a8d641a`
+(0.2.24). Eighteen distinct ordinary tests pass in each binary's test target;
+nine native helpers remain opt-in. All three Windows example scenes pass
+`--check`. The native preview repaint test also passed on non-primary DISPLAY2:
+actual WGC pixels changed when its owned source repainted, source closure was
+reflected, the scene exited normally and foreground remained unchanged. No
+physical input was sent. This rerun does not replace the outstanding interactive
+or hardware acceptance listed above.
