@@ -7,6 +7,7 @@ mod agent_cli;
 mod remote;
 mod remote_rtc;
 mod config;
+mod cursor;
 mod desktop;
 mod nest;
 mod portal;
