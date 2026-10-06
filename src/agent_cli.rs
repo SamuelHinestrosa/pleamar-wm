@@ -37,7 +37,18 @@ const HELP: &str = "pleamar-wm agent — use the desktop with the agent's own po
                                   until it says `done` (or for a minute)
   raw LINE…                       protocol lines, as they are (cua-inject v1)
 
-Look before each click: a page moves under you.";
+A window made with pleamar (`windows` says «pleamar scene NAME») is asked and used by name:
+  tree PID [json]                 what is on it: every button, slider, field, list, item and text,
+                                  with its name, what it says, its state and its box
+  press PID NAME [right|middle] [COUNT]
+                                  the cursor glides to it and it is pressed; the answer is what
+                                  happened (events, facts, texts, what opened)
+  wait PID CONDITION [TIMEOUT]    answers as soon as it holds: status == \"Saved\", dirty == false 3s
+  watch PID [SECONDS]             a line for each thing that happens on it
+  say PID ORDER…                  any other order to the scene: type query words, drag knob 0 -40,
+                                  hold card, wheel list -3, key escape
+
+Look before each click: a page moves under you. A pleamar window does not need it: ask it.";
 
 /// Where the session's socket is.
 fn socket() -> Option<String> {
@@ -66,6 +77,107 @@ pub(crate) fn tell(line: &str) -> Result<String, String> {
         reader.read_line(&mut reply).map_err(|e| e.to_string())?;
     }
     Ok(reply.trim_end().to_owned())
+}
+
+// ── pleamar windows: asked and used by name ──────────────────────
+
+/// Where the session's pleamar programs listen: what the session told them
+/// (`PLEAMAR_SOCKETS`), or the folder it gives them.
+fn scene_sockets() -> Option<std::path::PathBuf> {
+    if let Some(d) = std::env::var("PLEAMAR_SOCKETS").ok().filter(|d| !d.is_empty()) {
+        return Some(d.into());
+    }
+    let (run, display) = (std::env::var("XDG_RUNTIME_DIR").ok()?, std::env::var("WAYLAND_DISPLAY").ok()?);
+    Some(format!("{run}/pleamar-{display}").into())
+}
+
+/// One order to a scene's socket, and its answer as it comes; `each` gets
+/// every line (a `watch` goes on talking).
+fn order(sock: &std::path::Path, line: &str, each: &mut dyn FnMut(&str)) -> Result<(), String> {
+    order_within(sock, line, if line.starts_with("watch") { None } else { Some(std::time::Duration::from_secs(65)) }, each)
+}
+
+fn order_within(sock: &std::path::Path, line: &str, patience: Option<std::time::Duration>, each: &mut dyn FnMut(&str)) -> Result<(), String> {
+    let mut s = UnixStream::connect(sock).map_err(|e| format!("{}: {e}", sock.display()))?;
+    writeln!(s, "{line}").map_err(|e| e.to_string())?;
+    let _ = s.shutdown(std::net::Shutdown::Write);
+    let _ = s.set_read_timeout(patience);
+    for l in BufReader::new(s).lines().map_while(Result::ok) {
+        each(&l);
+    }
+    Ok(())
+}
+
+fn ask(sock: &std::path::Path, line: &str) -> Result<String, String> {
+    let mut out = String::new();
+    order(sock, line, &mut |l| {
+        out.push_str(l);
+        out.push('\n');
+    })?;
+    Ok(out)
+}
+
+/// Every pleamar program of the session that answers, by its process: its
+/// scene's name and its socket. They are asked who they are (`hello`).
+fn scenes() -> std::collections::HashMap<u32, (String, std::path::PathBuf)> {
+    let mut found = std::collections::HashMap::new();
+    let Some(dir) = scene_sockets() else { return found };
+    let Ok(entries) = std::fs::read_dir(&dir) else { return found };
+    for e in entries.filter_map(Result::ok) {
+        let path = e.path();
+        // The cursor's and the hands' own sockets live there too, and are no scene's.
+        if path.extension().is_none_or(|x| x != "sock") || path.file_stem().is_some_and(|n| n == "cursor" || n == "cua-inject") {
+            continue;
+        }
+        // `pleamar 0.2.25 · scene notes · pid 4521 · language 0.2`. Briefly: some
+        // sockets there are not a scene's (the cursor's) and never answer.
+        let mut hello = String::new();
+        if order_within(&path, "hello", Some(std::time::Duration::from_millis(300)), &mut |l| hello.push_str(l)).is_err() {
+            continue;
+        }
+        let field = |k: &str| hello.split(" · ").find_map(|f| f.strip_prefix(k)).map(|v| v.trim().to_owned());
+        if let (Some(scene), Some(pid)) = (field("scene "), field("pid ").and_then(|p| p.parse::<u32>().ok())) {
+            found.insert(pid, (scene, path));
+        }
+    }
+    found
+}
+
+/// The scene of a window, named as `windows` names it (`4521`, `4521.2`).
+fn scene_of(pid: &str) -> Result<(String, std::path::PathBuf), String> {
+    let n: u32 = pid.split('.').next().and_then(|p| p.parse().ok()).ok_or("which window: its number")?;
+    scenes().remove(&n).ok_or_else(|| format!("{pid} is not a pleamar window, or it does not answer: use look and click"))
+}
+
+/// Where a thing of a pleamar window is, in the pixels of `look`: the centre
+/// of its box, as `tree json` gives it, times the surface's scale.
+fn place_of(tree: &str, name: &str) -> Option<(f64, f64)> {
+    type Found<'a> = (&'a serde_json::Value, Option<&'a serde_json::Value>);
+    // The thing, and the list it hangs from.
+    fn find<'a>(nodes: &'a [serde_json::Value], name: &str, list: Option<&'a serde_json::Value>) -> Option<Found<'a>> {
+        nodes.iter().find_map(|n| if n["name"] == name { Some((n, list)) } else { n["children"].as_array().and_then(|c| find(c, name, Some(n))) })
+    }
+    let boxed = |n: &serde_json::Value| -> Option<[f64; 4]> {
+        let b: Vec<f64> = n["box"].as_array()?.iter().filter_map(|v| v.as_f64()).collect();
+        (b.len() == 4).then(|| [b[0], b[1], b[2], b[3]])
+    };
+    let parts: serde_json::Value = serde_json::from_str(tree).ok()?;
+    parts.as_array()?.iter().find_map(|p| {
+        let (n, list) = find(p["nodes"].as_array()?, name, None)?;
+        let b = boxed(n)?;
+        let (mut x, mut y) = (b[0] + b[2] / 2.0, b[1] + b[3] / 2.0);
+        // Scrolled out of its list, it comes in at the edge it is past: the
+        // cursor waits for it there, not where it is hidden.
+        if n["off_view"] == true
+            && let Some(w) = list.and_then(boxed)
+        {
+            let into = |v: f64, from: f64, size: f64, half: f64| v.clamp(from + half + 4.0, (from + size - half - 4.0).max(from + half + 4.0));
+            x = into(x, w[0], w[2], b[2] / 2.0);
+            y = into(y, w[1], w[3], b[3] / 2.0);
+        }
+        let scale = p["scale"].as_f64().unwrap_or(1.0);
+        Some((x * scale, y * scale))
+    })
 }
 
 /// The monitors, as the session counts them: name, and box in units.
@@ -226,6 +338,7 @@ fn go(args: &[String]) -> Result<(), String> {
             let reply = Hands::open()?.say("l")?;
             let list = reply.strip_prefix("windows").ok_or(reply.clone())?;
             let entries: Vec<Vec<&str>> = list.split('|').map(|e| e.split_whitespace().collect::<Vec<&str>>()).filter(|f| f.len() >= 9).collect();
+            let scenes = scenes();
             for f in &entries {
                 // A program with several windows: each by its own name.
                 let several = entries.iter().filter(|e| e[0] == f[0]).count() > 1;
@@ -243,7 +356,12 @@ fn go(args: &[String]) -> Result<(), String> {
                     Some(p) if *p != "0" => format!(" · dialog of {p}"),
                     _ => String::new(),
                 };
-                println!("{name:>8}  {}  «{}»  {}x{} at {},{}  {seen}{keys}{dialog}", unhex(f[7]), unhex(f[8]), f[3], f[4], f[1], f[2]);
+                // A pleamar window: it can be asked (`tree`) and used by name (`press`).
+                let scene = match f[0].parse::<u32>().ok().and_then(|p| scenes.get(&p)) {
+                    Some((n, _)) => format!(" · pleamar scene {n}: tree, press"),
+                    None => String::new(),
+                };
+                println!("{name:>8}  {}  «{}»  {}x{} at {},{}  {seen}{keys}{dialog}{scene}", unhex(f[7]), unhex(f[8]), f[3], f[4], f[1], f[2]);
             }
         }
         "monitors" => {
@@ -400,6 +518,33 @@ fn go(args: &[String]) -> Result<(), String> {
             } else {
                 Hands::open()?.act(&format!("h {} {} {key}", target(&p), parts.join(",")))?;
             }
+        }
+        "tree" => {
+            let p = pid()?;
+            let (_, sock) = scene_of(&p)?;
+            let json = args.get(2).is_some_and(|a| a == "json");
+            print!("{}", ask(&sock, if json { "describe json" } else { "describe" })?);
+        }
+        "press" => {
+            let p = pid()?;
+            let name = args.get(2).ok_or("press what: its name, as `tree` gives it")?;
+            let (_, sock) = scene_of(&p)?;
+            // The agent's cursor glides there first, so whoever watches sees what it
+            // presses; the press itself is the scene's own, by name.
+            if let Some((x, y)) = place_of(&ask(&sock, "describe json")?, name) {
+                Hands::open()?.arrive(&p, x, y)?;
+            }
+            print!("{}", ask(&sock, &format!("press {}", args[2..].join(" ")))?);
+        }
+        "wait" | "watch" | "say" => {
+            let p = pid()?;
+            let (_, sock) = scene_of(&p)?;
+            let rest = args[2..].join(" ");
+            let line = if what == "say" { rest } else { format!("{what} {rest}") };
+            order(&sock, line.trim(), &mut |l| {
+                println!("{l}");
+                let _ = std::io::stdout().flush();
+            })?;
         }
         "done" => Hands::open()?.act("x")?,
         "stop" => Hands::open()?.act("s")?,
