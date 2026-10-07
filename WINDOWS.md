@@ -5,22 +5,23 @@ checkout starts the native desktop companion; it does **not** yet provide a
 complete Windows equivalent of the Linux compositor session. DWM continues to
 compose applications. No WSL, Wayland server or Unix shell is required.
 
-Upstream through `9889e9c` (0.2.24) is merged, including its workspace-wave
+Upstream through `8959992` (0.2.26) is integrated, including its workspace-wave
 fix, independent Linux agent keyboard, Chromium emoji/clipboard handling and
 desktop cursor socket. The socket remains Linux-only; Windows reports global
 cursor positions through pleamar's native event loop and does not need it.
 Windows already emits UTF-16 keyboard input through the matching pleamar
 backend; it does not adopt the Linux Ctrl+Shift+U/clipboard workaround.
 Chromium/Discord typing acceptance is still pending. These merges do not
-provide Windows with an independent input seat or change the capability
-report below.
+provide Windows with an independent input seat. Native scene commands now
+expose the latest element labels, roles, values and states; their validation
+and the remaining capabilities are described below.
 
 ## Build and run from PowerShell
 
 Install the stable Rust x64 MSVC toolchain and Visual Studio Build Tools with
 Desktop development with C++ and the Windows SDK. Keep this checkout next to
 the matching `pleamar` Windows port (`../pleamar`). The current CI pins pleamar
-commit `2e0d27ce0ab49b1252784fc16112041359bf71c4` from the Windows PR; upstream
+commit specified in `.github/workflows/native.yml` from the Windows PR; upstream
 pleamar alone does not yet include that backend.
 
 ```powershell
@@ -36,6 +37,38 @@ starts a native pleamar scene with its normal hot reload. Ship the same
 verified graphics runtime DLLs as pleamar when distributing this executable.
 The matching Marea preview installer packages the companion and supervises its
 lifetime. This checkout's Cargo build does not install it or enable startup.
+
+## Named scene commands
+
+The native CLI discovers pleamar scenes through logon-scoped named pipes.
+Panels such as Marea appear in `agent scenes` even when the ordinary window
+catalog excludes them. Use its current PID and the element names in its tree:
+
+```powershell
+./target/release/pleamar-wm.exe agent scenes
+./target/release/pleamar-wm.exe agent tree 1234 json
+./target/release/pleamar-wm.exe agent press 1234 save
+./target/release/pleamar-wm.exe agent say 1234 'type query España ñ'
+./target/release/pleamar-wm.exe agent wait 1234 'saved == true 3s'
+./target/release/pleamar-wm.exe agent watch 1234 10
+```
+
+Replace `1234` and the example element/fact names with those from your scene.
+`agent say` also supports named drag, wheel, hold and key commands. Commands
+use the scene's own input and Luau logic; they do not inject the OS mouse or
+keyboard. A watch streams while other commands continue. The matching engine
+retires waits, watches and actions on reload or client cancellation.
+
+Discovery compares `hello` with the native pipe server PID, then verifies the
+PID again before sending an action. A filename containing protocol delimiter
+words does not change its identity. Multiple endpoints in the same process
+require `scene:ENDPOINT`; selecting only that PID fails as ambiguous. `PID.N`
+addresses the process's single scene, not a native child-window input seat.
+
+Arbitrary-application click/type, independent seats, cursor glide and background
+program launch remain unavailable here. They return errors. These limits do
+not prevent named actions on pleamar scenes. The matching engine documents
+the [protocol and interaction guards](https://github.com/SamuelHinestrosa/pleamar/blob/codex/windows-native-026/docs/windows-scene-commands.md).
 
 ## Explicit window layouts
 

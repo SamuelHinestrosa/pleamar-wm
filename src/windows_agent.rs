@@ -24,13 +24,14 @@ All commands use the current logon's scene namespace.";
 #[derive(Clone, Debug, Serialize, PartialEq)]
 struct Scene { pid: u32, scene: String, endpoint: String }
 
-fn hello(endpoint: &str, answer: &str) -> Option<Scene> {
-    if !answer.starts_with("pleamar ") { return None; }
-    let field = |key: &str| answer.split(" · ").find_map(|s| s.strip_prefix(key));
-    let pid = field("pid ")?.trim().parse::<u32>().ok().filter(|pid| *pid > 0)?;
-    let scene = field("scene ")?.trim();
-    if scene.is_empty() { return None; }
-    Some(Scene { pid, scene: scene.to_owned(), endpoint: endpoint.to_owned() })
+fn hello(endpoint: &str, answer: &str, peer: u32) -> Option<Scene> {
+    if !answer.starts_with("pleamar ") || peer == 0 { return None; }
+    let (_, rest) = answer.split_once(" · scene ")?;
+    // Scene filenames may themselves contain the protocol's separator words.
+    let (scene, identity) = rest.rsplit_once(" · pid ")?;
+    let (reported, _) = identity.split_once(" · language ")?;
+    if reported.trim().parse::<u32>().ok()? != peer || scene.is_empty() { return None; }
+    Some(Scene { pid: peer, scene: scene.to_owned(), endpoint: endpoint.to_owned() })
 }
 
 fn scenes() -> Result<Vec<Scene>> {
@@ -38,8 +39,8 @@ fn scenes() -> Result<Vec<Scene>> {
     let until = Instant::now() + Duration::from_secs(4);
     for endpoint in pleamar::commands::running_scenes() {
         if Instant::now() >= until { return Err("scene discovery timed out; close unresponsive command endpoints and retry".into()); }
-        if let Ok(answer) = pleamar::commands::ask(&endpoint, "hello", Duration::from_millis(250)) {
-            if let Some(scene) = hello(&endpoint, &answer) { found.push(scene); }
+        if let Ok((pid, answer)) = pleamar::commands::ask_with_pid(&endpoint, "hello", Duration::from_millis(250)) {
+            if let Some(scene) = hello(&endpoint, &answer, pid) { found.push(scene); }
         }
     }
     Ok(found)
@@ -86,7 +87,7 @@ pub(super) fn execute(args: &[&str]) -> Result<Option<Value>> {
             };
             let scenes = scenes()?;
             let scene = select(&scenes, selector)?;
-            pleamar::commands::send(Some(&scene.endpoint), line.trim()).map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+            pleamar::commands::send_to_process(&scene.endpoint, scene.pid, line.trim()).map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
             Ok(None)
         },
         _ => Err("unsupported Windows agent operation; use agent help for native scene commands and remaining limitations".into()),
@@ -99,9 +100,12 @@ mod tests {
     #[test]
     fn hello_keeps_unicode_names_and_rejects_other_protocols() {
         let answer = "pleamar 0.2.25 · scene Mi escena ñ · pid 123 · language 0.2";
-        assert_eq!(hello("Mi escena ñ-123", answer), Some(Scene {pid:123,scene:"Mi escena ñ".into(),endpoint:"Mi escena ñ-123".into()}));
+        assert_eq!(hello("Mi escena ñ-123", answer, 123), Some(Scene {pid:123,scene:"Mi escena ñ".into(),endpoint:"Mi escena ñ-123".into()}));
+        let embedded = "pleamar 0.2.25 · scene ñ · pid 999 · scene 海 · pid 123 · language 0.2";
+        assert_eq!(hello("endpoint", embedded, 123).unwrap().scene, "ñ · pid 999 · scene 海");
+        assert!(hello("endpoint", embedded, 999).is_none());
         for answer in ["? unknown hello", "pleamar x · scene x · pid 0", "other x · scene x · pid 123", "pleamar x · pid 123"] {
-            assert_eq!(hello("x", answer), None);
+            assert_eq!(hello("x", answer, 123), None);
         }
     }
     #[test]
