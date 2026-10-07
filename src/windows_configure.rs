@@ -56,7 +56,7 @@ impl Configure {
             self.wanted=Some(ask);self.deferred=true;return Ok(());
         }
         normal(&window)?;
-        let monitor=select_monitor(&scope.monitor)?;
+        let monitor=select_monitor(&window.monitor)?;
         if !monitor.bounds.contains(&window.bounds) { return Err("bring the window wholly onto its monitor before resizing".into()); }
         let bounds=geometry(&window.bounds,&monitor.work,monitor.scale,ask,budget)?;
         if bounds==window.bounds { return Ok(()); }

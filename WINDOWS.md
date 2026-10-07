@@ -234,12 +234,36 @@ mode still avoids catalog scans entirely.
 ```
 
 Choose the source monitor explicitly. `--screen NAME` additionally chooses the
-scene's output; it is independent of the source monitor. The source windows
-populate the scene's first output. Multiple output layouts remain unfinished.
+scene's output; it is independent of the source monitor. Source windows belong
+to the scene copy on their monitor, or to its first live copy when previewing
+an explicitly selected source on a different display.
 These are actual Windows Graphics Capture pictures with a shared D3D11 device,
 rendered by pleamar through D3D12. Titles, counts, closing, resizing and scene
 reload use the normal `windows` scene API. `--preview-process` retains the
 current process creation identity; a reused PID does not expand its scope.
+
+For separate copies on every represented monitor:
+
+```powershell
+./target/release/pleamar-wm.exe --scene examples/windows-monitors.plm --preview-monitor all
+```
+
+The scene uses `screens: each max 4`; `win.N.screen` follows the actual output
+name of each scene copy, independently of native monitor enumeration order.
+`all` includes only source monitors represented by a live main scene copy.
+The example draws each monitor's windows in that copy; named panels and popups
+do not redefine the mapping. A source that moves between represented monitors
+keeps its slot. Removing a represented output removes its source slots; hot
+reload republishes the output mapping.
+
+Each picture converts physical capture dimensions with its source monitor's
+DPI. Changing DPI also updates retained-picture geometry without requiring a
+new source repaint. The same aggregate capture budget applies across all
+monitors. This requires the matching engine with `ToNest::WindowsScreens`.
+Mapping/order/removal and per-source DPI conversions have unit coverage; the
+new example is compile-checked. Mixed-DPI movement, physical hotplug and the
+multi-output scene still require native acceptance. This does not enable
+redirected application input or the pending compositor effects.
 
 Without `--window-actions`, this mode is **view-only**. With that explicit flag,
 the normal scene actions `focus`, `minimize`, `restore` and `close` operate on
@@ -345,7 +369,7 @@ are retained; these short tests do not establish full desktop parity.
 | Automatic per-monitor session | Native creation/closure, minimize, failure rollback, shutdown and crash recovery verified on DISPLAY2 |
 | Window rules | Native app/title, float, initial size and monitor rules; DISPLAY2 lifecycle tests passed; transfers between physical displays still need acceptance |
 | Live scene layouts; private/workspace rules | Pending |
-| Live window previews | Experimental native capture/render transport; explicit source monitor, optional native focus/close/minimize/restore and bounded scene size requests |
+| Live window previews | Experimental native capture/render transport; one source or represented scene monitors, optional native focus/close/minimize/restore and bounded scene size requests; new multi-output mapping awaits native acceptance |
 | Marea menu/finder bridge | Module tested with real Luau, IPC and owned Windows windows; complete Marea UI acceptance pending; package lifecycle tested separately |
 | Rain, snow, ride, dock, animated window transitions | Pending native equivalents |
 | Per-monitor tide pools and overview | Pending; Windows virtual desktops are not the same model |

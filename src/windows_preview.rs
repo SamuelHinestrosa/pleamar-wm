@@ -12,8 +12,27 @@ mod configure;
 struct Scope { monitor:String, process:Option<u32>, actions:bool }
 impl Scope {
     fn allows(&self, window:&Window, created:Option<u64>) -> bool {
-        window.monitor==self.monitor && self.process.is_none_or(|pid|window.process==pid)
+        (self.monitor=="all" || window.monitor==self.monitor) && self.process.is_none_or(|pid|window.process==pid)
             && created.is_none_or(|stamp|window.id.ends_with(&format!(":{stamp:x}")))
+    }
+}
+
+#[derive(Default)]
+struct Outputs(Vec<(usize,String)>);
+impl Outputs {
+    fn new(mut copies:Vec<(usize,String)>) -> Result<Self> {
+        copies.sort();copies.dedup();
+        if copies.len()>64 || copies.iter().any(|(index,name)|*index>=4 || name.is_empty())
+            || copies.iter().any(|(i,name)|copies.iter().any(|(j,other)|i!=j && name==other)) {
+            return Err("ambiguous native scene outputs; use distinct screens: each copies".into());
+        }
+        Ok(Self(copies))
+    }
+    fn screen(&self, source:&str, scope:&Scope) -> Option<usize> {
+        self.0.iter().find(|(_,name)|name==source).map(|(index,_)|*index)
+            // An explicitly chosen source can be previewed on a different
+            // display. It belongs to the first live copy of that scene.
+            .or_else(||(scope.monitor!="all").then(||self.0.first().map(|(i,_)|*i)).flatten())
     }
 }
 static SCOPE:OnceLock<Scope> = OnceLock::new();
@@ -48,7 +67,7 @@ pub(super) fn prepare(args:&[String]) -> Result<Vec<String>> {
         if process.is_some() || actions { return Err("window previews and actions need an explicit preview monitor".into()); }
         return Ok(forwarded);
     };
-    let monitor=select_monitor(&monitor)?.name;
+    let monitor=if monitor=="all" { monitor } else { select_monitor(&monitor)?.name };
     let process=process.map(|v|v.parse::<u32>()).transpose()?;
     if process==Some(0) || process==Some(std::process::id()) { return Err("invalid preview process".into()); }
     SCOPE.set(Scope { monitor,process,actions }).map_err(|_|"window preview is already configured")?;
@@ -90,7 +109,7 @@ impl Retry {
 }
 
 struct Slot { window:Window, capture:Option<capture::Capture>, received:bool, pixels:u64, born:Instant, next_frame:Instant,
-    configure:configure::Configure, visible:bool, retry:Retry }
+    configure:configure::Configure, visible:bool, retry:Retry, screen:usize, scale:f64, last_size:Option<(u32,u32)> }
 impl Slot {
     // A minimized window still has its last texture in the renderer. It must
     // count towards the same bound even after its capture resources are freed.
@@ -105,10 +124,11 @@ impl Slot {
 struct Preview {
     scope:Scope, created:Option<u64>, device:std::rc::Rc<capture::Device>,
     slots:Vec<Option<Slot>>, send:Sender<ToRender>, _hooks:Hooks,
-    consumed:Option<mpsc::Receiver<String>>, scale:f64, waiter:wait::Waiter, warned:HashSet<&'static str>,
+    consumed:Option<mpsc::Receiver<String>>, waiter:wait::Waiter, warned:HashSet<&'static str>,
     focused:Option<usize>,
     visible:HashSet<usize>,
     screens:Vec<Monitor>,
+    outputs:Outputs,
 }
 impl Preview {
     fn new(max:usize,scope:Scope,send:Sender<ToRender>,wake:std::sync::Arc<wait::Wake>) -> Result<Self> {
@@ -126,7 +146,7 @@ impl Preview {
         hooks.add(EVENT_SYSTEM_FOREGROUND,EVENT_SYSTEM_FOREGROUND,0)?;
         let waiter=wait::Waiter::new(wake.clone())?;
         Ok(Self { scope,created,device:capture::Device::new(Some(wake))?,slots:(0..max).map(|_|None).collect(),
-            send,_hooks:hooks,consumed:None,scale:1.0,waiter,warned:HashSet::new(),focused:None,visible:HashSet::new(),screens:Vec::new() })
+            send,_hooks:hooks,consumed:None,waiter,warned:HashSet::new(),focused:None,visible:HashSet::new(),screens:Vec::new(),outputs:Outputs::default() })
     }
     fn tell(&self,event:NestEvent) -> Result<()> { self.send.send(ToRender::Nest(event))?; Ok(()) }
     fn order(&self) -> Result<()> {
@@ -159,34 +179,35 @@ impl Preview {
     fn refresh(&mut self) -> Result<()> {
         let screens=monitors()?;
         self.screens=screens.clone();
-        let Some(source)=screens.iter().find(|m|m.name==self.scope.monitor) else {
-            for i in 0..self.slots.len() {
-                if self.slots[i].take().is_some() { self.tell(NestEvent::Closed(i))?; }
-            }
-            self.order()?;
-            self.focus()?;
-            return Ok(());
-        };
-        self.scale=source.scale;
         let live:Vec<_>=windows()?.into_iter().filter(|w| w.process!=std::process::id()
-            && self.scope.allows(w,self.created)).collect();
+            && self.scope.allows(w,self.created)).filter_map(|window| {
+                let screen=self.outputs.screen(&window.monitor,&self.scope)?;
+                let scale=screens.iter().find(|m|m.name==window.monitor)?.scale;
+                Some((window,screen,scale))
+            }).collect();
         for i in 0..self.slots.len() {
-            let remove=self.slots[i].as_ref().is_some_and(|s|!live.iter().any(|w|w.id==s.window.id));
+            let remove=self.slots[i].as_ref().is_some_and(|s|!live.iter().any(|(w,_,_)|w.id==s.window.id));
             if remove {
                 self.slots[i]=None;
                 self.tell(NestEvent::Closed(i))?;
             }
         }
-        for window in live {
+        for (window,screen,scale) in live {
             if let Some(i)=self.slots.iter().position(|s|s.as_ref().is_some_and(|s|s.window.id==window.id)) {
                 let slot=self.slots[i].as_mut().unwrap();
                 let title=slot.window.title!=window.title;
                 let app=slot.window.app!=window.app;
                 let state=slot.window.minimized!=window.minimized;
                 let minimized=window.minimized;
+                let moved=slot.screen!=screen;
+                let resized=slot.scale!=scale;
                 if minimized { slot.capture=None; }
                 slot.window=window;
+                slot.screen=screen;slot.scale=scale;
                 slot.configure.wake();
+                let retained=if resized { slot.last_size.map(|size|native_frame(i,size,scale,PieceContent::Kept)) } else { None };
+                if moved { self.tell(NestEvent::Screen(i,screen))?; }
+                if let Some(frame)=retained { self.tell(frame)?; }
                 if title { self.tell(NestEvent::Title(i,self.slots[i].as_ref().unwrap().window.title.clone()))?; }
                 if app { self.tell(NestEvent::App(i,self.slots[i].as_ref().unwrap().window.app.clone()))?; }
                 if state {
@@ -196,10 +217,10 @@ impl Preview {
                 continue;
             }
             let Some(i)=self.slots.iter().position(Option::is_none) else { break; };
-            self.tell(NestEvent::Opened {slot:i,title:window.title.clone(),app:window.app.clone(),screen:0})?;
+            self.tell(NestEvent::Opened {slot:i,title:window.title.clone(),app:window.app.clone(),screen})?;
             self.tell(NestEvent::Minimized(i,window.minimized))?;
             self.slots[i]=Some(Slot {window,capture:None,received:false,pixels:0,born:Instant::now(),next_frame:Instant::now(),
-                configure:configure::Configure::default(),visible:self.visible.contains(&i),retry:Retry::default()});
+                configure:configure::Configure::default(),visible:self.visible.contains(&i),retry:Retry::default(),screen,scale,last_size:None});
             self.capture(i);
         }
         self.order()?;
@@ -207,7 +228,6 @@ impl Preview {
         Ok(())
     }
     fn frames(&mut self) -> Result<()> {
-        let scale=self.scale;
         let mut sent=false;
         for i in 0..self.slots.len() {
             let others:u64=self.slots.iter().enumerate().filter(|(k,_)|*k!=i).filter_map(|(_,s)|s.as_ref())
@@ -223,11 +243,10 @@ impl Preview {
                     slot.received=true;
                     slot.retry.reset();
                     slot.pixels=picture.size.0 as u64*picture.size.1 as u64;
-                    let (w,h)=picture.size;
-                    let size=((w as f64/scale).round().max(1.0) as u32,(h as f64/scale).round().max(1.0) as u32);
-                    self.tell(NestEvent::Frame {slot:i,geometry:[0,0,size.0 as i32,size.1 as i32],pieces:vec![WindowPiece {
-                        id:i as u64+1,at:(0,0),size,px:(w,h),src:[0.0,0.0,w as f32,h as f32],content:picture.shared.map(PieceContent::Windows).unwrap_or_else(||PieceContent::Pixels(picture.pixels))
-                    }]})?;
+                    slot.last_size=Some(picture.size);
+                    let frame=native_frame(i,picture.size,slot.scale,
+                        picture.shared.map(PieceContent::Windows).unwrap_or_else(||PieceContent::Pixels(picture.pixels)));
+                    self.tell(frame)?;
                     sent=true;
                 },
                 Ok(None) if slot.received || slot.born.elapsed()<Duration::from_secs(5) => {},
@@ -255,7 +274,7 @@ impl Preview {
         for i in 0..self.slots.len() {
             let Some(slot)=self.slots[i].as_mut() else { continue; };
             if slot.visible && !self.visible.contains(&i) {
-                slot.visible=false;slot.capture=None;slot.pixels=0;slot.received=false;slot.retry.reset();
+                slot.visible=false;slot.capture=None;slot.pixels=0;slot.received=false;slot.retry.reset();slot.last_size=None;
                 self.tell(NestEvent::Frame {slot:i,geometry:[0,0,0,0],pieces:Vec::new()})?;
             }
         }
@@ -293,6 +312,10 @@ impl Preview {
                     Err(TryRecvError::Empty) => break,
                     Ok(ToNest::FrameDone) => {},
                     Ok(ToNest::WindowsGpu(shared)) => self.gpu(shared),
+                    Ok(ToNest::WindowsScreens(copies)) => {
+                        self.outputs=Outputs::new(copies).unwrap_or_else(|error| { eprintln!("windows preview: {error}"); Outputs::default() });
+                        CATALOG_DIRTY.set(true);
+                    },
                     Ok(ToNest::Visible(slots)) => self.visible(slots)?,
                     Ok(ToNest::Size(..)|ToNest::Shown {..}|ToNest::OnScreen(..)|ToNest::Gpu {..}|ToNest::Released(..)|ToNest::PointerOut|ToNest::HostFocus(..)) => {},
                     Ok(ToNest::Configure {slot,w,h}) => {
@@ -372,6 +395,14 @@ impl Preview {
     }
 }
 
+fn native_frame(slot:usize,px:(u32,u32),scale:f64,content:PieceContent) -> NestEvent {
+    let (w,h)=px;
+    let size=((w as f64/scale).round().max(1.0) as u32,(h as f64/scale).round().max(1.0) as u32);
+    NestEvent::Frame {slot,geometry:[0,0,size.0 as i32,size.1 as i32],pieces:vec![WindowPiece {
+        id:slot as u64+1,at:(0,0),size,px,src:[0.0,0.0,w as f32,h as f32],content
+    }]}
+}
+
 enum Action { Focus, Close, Minimize(bool) }
 fn act(scope:&Scope,created:Option<u64>,id:&str,action:Action) -> Result<()> {
     if !scope.actions { return Err("window actions require --window-actions; this scene is view-only".into()); }
@@ -400,6 +431,36 @@ fn act(scope:&Scope,created:Option<u64>,id:&str,action:Action) -> Result<()> {
 mod tests {
     use super::*;
     #[test]
+    fn source_outputs_follow_scene_names_and_keep_cross_display_single_previews() {
+        let all=Scope {monitor:"all".into(),process:None,actions:false};
+        let single=Scope {monitor:"SOURCE".into(),process:None,actions:false};
+        let outputs=Outputs::new(vec![(1,"RIGHT".into()),(0,"LEFT".into()),(1,"RIGHT".into())]).unwrap();
+        assert_eq!(outputs.screen("RIGHT",&all),Some(1));
+        assert_eq!(outputs.screen("LEFT",&all),Some(0));
+        assert_eq!(outputs.screen("UNREPRESENTED",&all),None);
+        assert_eq!(outputs.screen("SOURCE",&single),Some(0));
+        let removed=Outputs::new(vec![(1,"RIGHT".into())]).unwrap();
+        assert_eq!(removed.screen("RIGHT",&all),Some(1));
+        assert_eq!(removed.screen("LEFT",&all),None);
+        assert_eq!(removed.screen("SOURCE",&single),Some(1));
+        assert_eq!(Outputs::default().screen("SOURCE",&single),None);
+        assert!(Outputs::new(vec![(0,"SAME".into()),(1,"SAME".into())]).is_err());
+        assert!(Outputs::new(vec![(4,"FIFTH".into())]).is_err());
+    }
+    #[test]
+    fn each_native_window_uses_its_source_dpi_even_for_a_retained_frame() {
+        for (pixels,scale,logical) in [((2560,1440),1.25,(2048,1152)),((1920,1080),1.0,(1920,1080)),
+            ((1920,1080),1.5,(1280,720)),((2560,1440),2.0,(1280,720))] {
+            let NestEvent::Frame {slot,geometry,pieces}=native_frame(3,pixels,scale,PieceContent::Kept) else { panic!() };
+            assert_eq!(slot,3);
+            assert_eq!(geometry,[0,0,logical.0,logical.1]);
+            assert_eq!(pieces[0].size,(logical.0 as u32,logical.1 as u32));
+            assert_eq!(pieces[0].px,pixels);
+            assert_eq!(pieces[0].id,4);
+            assert!(matches!(pieces[0].content,PieceContent::Kept));
+        }
+    }
+    #[test]
     fn preview_actions_need_explicit_opt_in() {
         let scope=Scope {monitor:"unused".into(),process:None,actions:false};
         for action in [Action::Focus,Action::Close,Action::Minimize(true),Action::Minimize(false)] {
@@ -418,7 +479,7 @@ mod tests {
         window.process=13;assert!(!scope.allows(&window,Some(255)));
         window.process=12;window.monitor="primary".into();assert!(!scope.allows(&window,Some(255)));
         let mut slot=Slot {window,capture:None,received:true,pixels:1_000_000,born:Instant::now(),next_frame:Instant::now(),
-            configure:configure::Configure::default(),visible:false,retry:Retry::default()};
+            configure:configure::Configure::default(),visible:false,retry:Retry::default(),screen:0,scale:1.0,last_size:None};
         assert_eq!(slot.pixels(),1_000_000,"suspended capture must retain its renderer memory budget");
         let now=Instant::now();
         slot.retry.failed(now);
