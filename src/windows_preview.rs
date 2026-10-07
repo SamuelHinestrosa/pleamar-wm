@@ -77,14 +77,29 @@ fn start(max:usize,to_render:Sender<ToRender>) -> Option<pleamar::NestSender> {
     }
 }
 
+#[derive(Default)]
+struct Retry { failures:u32, at:Option<Instant> }
+impl Retry {
+    fn failed(&mut self, now:Instant) {
+        let seconds=(1u64<<self.failures.min(5)).min(30);
+        self.failures=self.failures.saturating_add(1);
+        self.at=Some(now+Duration::from_secs(seconds));
+    }
+    fn wait(&self, now:Instant) -> Duration { self.at.map_or(Duration::ZERO,|at|at.saturating_duration_since(now)) }
+    fn reset(&mut self) { *self=Self::default(); }
+}
+
 struct Slot { window:Window, capture:Option<capture::Capture>, received:bool, pixels:u64, born:Instant, next_frame:Instant,
-    configure:configure::Configure, visible:bool }
+    configure:configure::Configure, visible:bool, retry:Retry }
 impl Slot {
     // A minimized window still has its last texture in the renderer. It must
     // count towards the same bound even after its capture resources are freed.
     fn pixels(&self) -> u64 {
         self.pixels.max(self.configure.pixels())
             .max(self.capture.as_ref().and_then(|c|c.size().ok()).map_or(0,|(w,h)|w as u64*h as u64))
+    }
+    fn retry_wait(&self, now:Instant) -> Option<Duration> {
+        (self.visible && !self.window.minimized && self.capture.is_none()).then(||self.retry.wait(now))
     }
 }
 struct Preview {
@@ -93,6 +108,7 @@ struct Preview {
     consumed:Option<mpsc::Receiver<String>>, scale:f64, waiter:wait::Waiter, warned:HashSet<&'static str>,
     focused:Option<usize>,
     visible:HashSet<usize>,
+    screens:Vec<Monitor>,
 }
 impl Preview {
     fn new(max:usize,scope:Scope,send:Sender<ToRender>,wake:std::sync::Arc<wait::Wake>) -> Result<Self> {
@@ -105,11 +121,12 @@ impl Preview {
         let mut hooks=Hooks(Vec::new());
         hooks.add(EVENT_OBJECT_CREATE,EVENT_OBJECT_NAMECHANGE,scope.process.unwrap_or(0))?;
         hooks.add(EVENT_SYSTEM_MINIMIZESTART,EVENT_SYSTEM_MINIMIZEEND,scope.process.unwrap_or(0))?;
+        hooks.add(EVENT_OBJECT_CLOAKED,EVENT_OBJECT_UNCLOAKED,scope.process.unwrap_or(0))?;
         // A different process taking focus clears this scene's focused slot.
         hooks.add(EVENT_SYSTEM_FOREGROUND,EVENT_SYSTEM_FOREGROUND,0)?;
         let waiter=wait::Waiter::new(wake.clone())?;
         Ok(Self { scope,created,device:capture::Device::new(Some(wake))?,slots:(0..max).map(|_|None).collect(),
-            send,_hooks:hooks,consumed:None,scale:1.0,waiter,warned:HashSet::new(),focused:None,visible:HashSet::new() })
+            send,_hooks:hooks,consumed:None,scale:1.0,waiter,warned:HashSet::new(),focused:None,visible:HashSet::new(),screens:Vec::new() })
     }
     fn tell(&self,event:NestEvent) -> Result<()> { self.send.send(ToRender::Nest(event))?; Ok(()) }
     fn order(&self) -> Result<()> {
@@ -133,11 +150,15 @@ impl Preview {
             Ok(capture::Capture::new(self.device.clone(),hwnd,16_777_216u64.saturating_sub(existing))?) })();
         match result {
             Ok(capture) => { slot.capture=Some(capture);slot.received=false;slot.born=Instant::now();slot.next_frame=Instant::now(); },
-            Err(error) => eprintln!("windows preview: could not capture {}: {error}",slot.window.id),
+            Err(error) => {
+                slot.retry.failed(Instant::now());
+                eprintln!("windows preview: could not capture {}: {error}; retry scheduled",slot.window.id);
+            },
         }
     }
     fn refresh(&mut self) -> Result<()> {
         let screens=monitors()?;
+        self.screens=screens.clone();
         let Some(source)=screens.iter().find(|m|m.name==self.scope.monitor) else {
             for i in 0..self.slots.len() {
                 if self.slots[i].take().is_some() { self.tell(NestEvent::Closed(i))?; }
@@ -170,7 +191,7 @@ impl Preview {
                 if app { self.tell(NestEvent::App(i,self.slots[i].as_ref().unwrap().window.app.clone()))?; }
                 if state {
                     self.tell(NestEvent::Minimized(i,minimized))?;
-                    if !minimized { self.capture(i); }
+                    if !minimized { self.slots[i].as_mut().unwrap().retry.reset(); self.capture(i); }
                 }
                 continue;
             }
@@ -178,7 +199,7 @@ impl Preview {
             self.tell(NestEvent::Opened {slot:i,title:window.title.clone(),app:window.app.clone(),screen:0})?;
             self.tell(NestEvent::Minimized(i,window.minimized))?;
             self.slots[i]=Some(Slot {window,capture:None,received:false,pixels:0,born:Instant::now(),next_frame:Instant::now(),
-                configure:configure::Configure::default(),visible:self.visible.contains(&i)});
+                configure:configure::Configure::default(),visible:self.visible.contains(&i),retry:Retry::default()});
             self.capture(i);
         }
         self.order()?;
@@ -200,6 +221,7 @@ impl Preview {
             match capture.next(16_777_216u64.saturating_sub(others)) {
                 Ok(Some(picture)) => {
                     slot.received=true;
+                    slot.retry.reset();
                     slot.pixels=picture.size.0 as u64*picture.size.1 as u64;
                     let (w,h)=picture.size;
                     let size=((w as f64/scale).round().max(1.0) as u32,(h as f64/scale).round().max(1.0) as u32);
@@ -213,6 +235,7 @@ impl Preview {
                     eprintln!("windows preview: capture stopped for {}: {}",slot.window.id,
                         result.err().map(|e|e.to_string()).unwrap_or_else(||"no capture frame received".into()));
                     slot.capture=None;
+                    slot.retry.failed(Instant::now());
                 },
             }
         }
@@ -232,13 +255,13 @@ impl Preview {
         for i in 0..self.slots.len() {
             let Some(slot)=self.slots[i].as_mut() else { continue; };
             if slot.visible && !self.visible.contains(&i) {
-                slot.visible=false;slot.capture=None;slot.pixels=0;slot.received=false;
+                slot.visible=false;slot.capture=None;slot.pixels=0;slot.received=false;slot.retry.reset();
                 self.tell(NestEvent::Frame {slot:i,geometry:[0,0,0,0],pieces:Vec::new()})?;
             }
         }
         for i in 0..self.slots.len() {
             let Some(slot)=self.slots[i].as_mut() else { continue; };
-            if !slot.visible && self.visible.contains(&i) { slot.visible=true;self.capture(i); }
+            if !slot.visible && self.visible.contains(&i) { slot.visible=true;slot.retry.reset();self.capture(i); }
         }
         Ok(())
     }
@@ -254,7 +277,7 @@ impl Preview {
             Ok(device) => {
                 self.device=device;
                 eprintln!("windows preview: capture transport = {}",if self.device.shared() {"shared GPU textures"} else {"CPU readback"});
-                for slot in self.slots.iter_mut().flatten() { slot.capture=None; }
+                for slot in self.slots.iter_mut().flatten() { slot.capture=None;slot.retry.reset(); }
                 for i in 0..self.slots.len() { self.capture(i); }
             },
             Err(error) => eprintln!("windows preview: retaining current capture transport: {error}"),
@@ -293,10 +316,16 @@ impl Preview {
                     },
                 }
             }
-            if CATALOG_DIRTY.replace(false)||topology.elapsed()>=Duration::from_secs(2) {
-                self.refresh()?;topology=Instant::now();
+            let mut refresh=CATALOG_DIRTY.replace(false);
+            if topology.elapsed()>=Duration::from_secs(2) {
+                // Display polling also detects DPI/work-area changes. Ordinary
+                // windows are enumerated only on events or a topology change.
+                refresh |= monitors()?!=self.screens;
+                topology=Instant::now();
             }
+            if refresh { self.refresh()?; }
             for i in 0..self.slots.len() {
+                if self.slots[i].as_ref().and_then(|s|s.retry_wait(Instant::now())).is_some_and(|d|d.is_zero()) { self.capture(i); }
                 if !self.slots[i].as_ref().is_some_and(|s|s.configure.wait(Instant::now()).is_some_and(|d|d.is_zero())) { continue; }
                 let others:u64=self.slots.iter().enumerate().filter(|(k,_)|*k!=i).filter_map(|(_,s)|s.as_ref())
                     .map(Slot::pixels).sum();
@@ -318,6 +347,7 @@ impl Preview {
             let mut wait=(topology+Duration::from_secs(2)).saturating_duration_since(now);
             for slot in self.slots.iter().flatten() {
                 if let Some(resize)=slot.configure.wait(now) { wait=wait.min(resize); }
+                if let Some(retry)=slot.retry_wait(now) { wait=wait.min(retry); }
             }
             if self.consumed.is_some() { wait=wait.min(Duration::from_millis(2)); }
             else {
@@ -387,8 +417,37 @@ mod tests {
         assert!(!scope.allows(&window,Some(256)));
         window.process=13;assert!(!scope.allows(&window,Some(255)));
         window.process=12;window.monitor="primary".into();assert!(!scope.allows(&window,Some(255)));
-        let slot=Slot {window,capture:None,received:true,pixels:1_000_000,born:Instant::now(),next_frame:Instant::now(),
-            configure:configure::Configure::default(),visible:false};
+        let mut slot=Slot {window,capture:None,received:true,pixels:1_000_000,born:Instant::now(),next_frame:Instant::now(),
+            configure:configure::Configure::default(),visible:false,retry:Retry::default()};
         assert_eq!(slot.pixels(),1_000_000,"suspended capture must retain its renderer memory budget");
+        let now=Instant::now();
+        slot.retry.failed(now);
+        assert_eq!(slot.retry_wait(now),None,"a hidden page must not wake for capture retries");
+        slot.visible=true;
+        assert_eq!(slot.retry_wait(now),None,"a minimized source must not wake for capture retries");
+        slot.window.minimized=false;
+        assert_eq!(slot.retry_wait(now),Some(Duration::from_secs(1)));
+        assert_eq!(slot.retry_wait(now+Duration::from_secs(1)),Some(Duration::ZERO));
+    }
+    #[test]
+    fn capture_failures_back_off_until_pixels_arrive_or_the_view_reopens() {
+        let mut retry=Retry::default();
+        let mut now=Instant::now();
+        for seconds in [1,2,4,8,16,30,30,30] {
+            retry.failed(now);
+            assert_eq!(retry.wait(now),Duration::from_secs(seconds));
+            assert!(!retry.wait(now+Duration::from_millis(500)).is_zero());
+            now+=Duration::from_secs(seconds);
+            assert!(retry.wait(now).is_zero());
+            // Merely reaching the deadline or creating a new capture must not
+            // reset backoff: some drivers start successfully but send no pixels.
+        }
+        retry.reset();
+        assert!(retry.wait(now).is_zero());
+        retry.failed(now);
+        assert_eq!(retry.wait(now),Duration::from_secs(1));
+        retry.failures=u32::MAX;
+        retry.failed(now);
+        assert_eq!(retry.wait(now),Duration::from_secs(30));
     }
 }

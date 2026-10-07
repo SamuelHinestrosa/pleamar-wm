@@ -73,7 +73,7 @@ impl Bounds {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, PartialEq)]
 struct Monitor { name: String, bounds: Bounds, work: Bounds, scale: f64, primary: bool, refresh_hz: u32 }
 
 fn wide_text(text: &[u16]) -> String {

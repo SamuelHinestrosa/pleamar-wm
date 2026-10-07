@@ -148,7 +148,7 @@ across monitors and rejects overflow before moving additional windows.
 preserving minimized state. If the process crashes, the next session restores
 the journal before accepting commands. Unavailable/hidden windows and changed
 display geometry can leave pending recovery entries, which `status` reports;
-real hotplug and maximized-window acceptance are still pending.
+real hotplug and multi-monitor show-state acceptance are still pending.
 
 The Windows CI workflow also runs an opt-in native recovery regression on its
 disposable runner: maximized, minimized and minimized-from-maximized windows,
@@ -158,6 +158,8 @@ rectangle, restored show state and focus separately. Its report is the
 does not count as a pass. It changes focus between its own fixture windows and
 refuses to run outside the explicit GitHub-hosted CI step. This API regression
 does not replace a mixed-DPI, multi-monitor or physical desktop walkthrough.
+All six state/restart cases passed on Windows Server 2022 in
+[the first recovery run](https://github.com/SamuelHinestrosa/pleamar-wm/actions/runs/37575372834).
 
 Commands use a local named pipe restricted to the current Windows user and
 session; remote pipe clients are rejected. Frames, waits and cancellation are
@@ -254,7 +256,17 @@ closes. Minimized windows keep their slot and last picture, release their captur
 resources, and resume capture when restored. Initially minimized windows are
 listed without a picture until restored. Capture failures also leave the real
 window listed; they do not invent an image or pretend it closed. A failed
-capture is retried on its next minimize/restore cycle.
+capture retries after 1, 2, 4, 8, 16 and then at most every 30 seconds while its
+page is visible and the source is not minimized. Only receiving pixels resets
+that backoff; a driver that starts but produces no frame cannot spin. Reopening
+the page or restoring the source requests an immediate attempt.
+
+Window events, including native cloaking/uncloaking, refresh the catalog. The
+two-second timer checks display topology, DPI and work areas, but no longer
+enumerates all applications when those values are unchanged. Unit tests cover
+retry deadlines and suspended views. Post-change native capture/reopen and
+sustained CPU measurements remain pending; earlier measurements below predate
+these changes.
 
 `focus` selects the original native window for normal application input. It
 respects Windows' foreground restrictions and reports a rejected activation to
