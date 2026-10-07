@@ -12,8 +12,10 @@ parser.add_argument('--monitor', required=True)
 parser.add_argument('--output', type=Path, required=True)
 parser.add_argument('--scene-file', type=Path, help='Marea application dock scene, exercised with its actual Luau companion')
 parser.add_argument('--ci-owned-desktop', action='store_true', help='Allow the disposable CI desktop; refused on local machines')
+parser.add_argument('--idle-seconds', type=float, default=0, help='Sample the owned scene CPU and memory after settling (0 or 1..30 seconds)')
 parser.add_argument('--ci-ole-source', type=Path, help='Owned engine test binary; requires the explicit disposable CI step')
 options = parser.parse_args()
+assert options.idle_seconds == 0 or 1 <= options.idle_seconds <= 30
 ci_drop=options.ci_ole_source is not None
 if ci_drop and (os.environ.get('GITHUB_ACTIONS')!='true' or os.environ.get('RUNNER_ENVIRONMENT')!='github-hosted' or os.environ.get('PLEAMAR_WM_CI_DOCK_DROP')!='1'):
     raise RuntimeError('OS file dragging is restricted to the disposable GitHub-hosted test')
@@ -189,11 +191,45 @@ def capture(name):
         if previous:gdi.SelectObject(memory,previous)
         gdi.DeleteObject(bitmap);gdi.DeleteDC(memory);user.ReleaseDC(None,dc)
 
+def idle_sample():
+    kernel=C.WinDLL('kernel32',use_last_error=True)
+    psapi=C.WinDLL('psapi',use_last_error=True)
+    class Memory(C.Structure):
+        _fields_=[('cb',W.DWORD),('faults',W.DWORD)]+[(name,C.c_size_t) for name in
+            ['peak_working','working','peak_paged','paged','peak_nonpaged','nonpaged','pagefile','peak_pagefile','private']]
+    kernel.OpenProcess.argtypes=[W.DWORD,W.BOOL,W.DWORD];kernel.OpenProcess.restype=W.HANDLE
+    kernel.CloseHandle.argtypes=[W.HANDLE];kernel.CloseHandle.restype=W.BOOL
+    kernel.GetProcessTimes.argtypes=[W.HANDLE]+[C.POINTER(W.FILETIME)]*4;kernel.GetProcessTimes.restype=W.BOOL
+    psapi.GetProcessMemoryInfo.argtypes=[W.HANDLE,C.POINTER(Memory),W.DWORD];psapi.GetProcessMemoryInfo.restype=W.BOOL
+    process=kernel.OpenProcess(0x410,False,scene.pid);assert process
+    def read():
+        times=[W.FILETIME() for _ in range(4)]
+        assert kernel.GetProcessTimes(process,*[C.byref(t) for t in times])
+        memory=Memory();memory.cb=C.sizeof(memory)
+        assert psapi.GetProcessMemoryInfo(process,C.byref(memory),C.sizeof(memory))
+        return dict(cpu=sum(t.dwLowDateTime+(t.dwHighDateTime<<32) for t in times[2:])/10_000_000,
+                    private_bytes=memory.private,working_bytes=memory.working)
+    try:
+        time.sleep(2);guard();before=read();start=time.monotonic()
+        while time.monotonic()-start < options.idle_seconds:
+            guard();time.sleep(.1)
+        elapsed=time.monotonic()-start;after=read()
+        report['idle_sample']=dict(seconds=elapsed,before=before,after=after,
+            one_core_cpu_percent=100*(after['cpu']-before['cpu'])/elapsed)
+    finally:kernel.CloseHandle(process)
+
 try:
-    initial=subprocess.Popen([str(fixture)],env=env,creationflags=flags,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);owned_pids.add(initial.pid)
-    first=wait(lambda:next((x for x in launches() if x['pid']==initial.pid),None),'initial fixture')
+    with (output/'fixture-start.log').open('wb') as log:
+        initial=subprocess.Popen([str(fixture)],env=env,creationflags=flags,stdout=log,stderr=subprocess.STDOUT)
+    owned_pids.add(initial.pid)
+    def first_launch():
+        value=next((x for x in launches() if x['pid']==initial.pid),None)
+        assert value is not None or initial.poll() is None, f'Owned fixture exited ({initial.returncode}); see fixture-start.log'
+        return value
+    first=wait(first_launch,'initial fixture')
     start_scene();index=wait(fixture_index,'dock metadata')-1
     time.sleep(.7);capture('01-populated')
+    if options.idle_seconds:idle_sample()
     if options.scene_file:
         press(f'open.{index} right');capture('00-pin-menu')
     press(f'keep.{index}')

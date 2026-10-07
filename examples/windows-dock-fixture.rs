@@ -53,10 +53,11 @@ mod fixture {
         };
         if !root.is_absolute() || !root.is_dir() {return Err("fixture output must be an existing absolute directory".into());}
         unsafe {SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)}?;
-        let ci_drag=std::env::var("GITHUB_ACTIONS").as_deref()==Ok("true")
-            && std::env::var("RUNNER_ENVIRONMENT").as_deref()==Ok("github-hosted")
-            && std::env::var("PLEAMAR_WM_CI_DOCK_DROP").as_deref()==Ok("1");
-        let mut find=Find {name,work:None,package:ci_package || ci_drag};
+        let ci_desktop=disposable_desktop(std::env::var("GITHUB_ACTIONS").ok().as_deref(),
+            std::env::var("RUNNER_ENVIRONMENT").ok().as_deref(),
+            std::env::var("PLEAMAR_WM_CI_DOCK").ok().as_deref(),
+            std::env::var("PLEAMAR_WM_CI_DOCK_DROP").ok().as_deref());
+        let mut find=Find {name,work:None,package:ci_package || ci_desktop};
         if !unsafe {EnumDisplayMonitors(None,None,Some(monitor),LPARAM(&mut find as *mut _ as isize))}.as_bool() {return Err("monitor enumeration failed".into());}
         let area=find.work.ok_or("the explicit non-primary fixture monitor is unavailable")?;
         if area.right-area.left<400 || area.bottom-area.top<260 {return Err("secondary work area is too small".into());}
@@ -74,5 +75,21 @@ mod fixture {
         let mut message=MSG::default();
         while unsafe {GetMessageW(&mut message,None,0,0)}.0>0 {unsafe {let _=TranslateMessage(&message);DispatchMessageW(&message);}}
         Ok(())
+    }
+
+    fn disposable_desktop(actions:Option<&str>,host:Option<&str>,dock:Option<&str>,drop:Option<&str>) -> bool {
+        actions==Some("true") && host==Some("github-hosted") && (dock==Some("1") || drop==Some("1"))
+    }
+    #[cfg(test)]
+    mod tests {
+        use super::disposable_desktop as allowed;
+        #[test]
+        fn local_or_unrequested_primary_output_is_refused() {
+            assert!(!allowed(None,None,Some("1"),Some("1")));
+            assert!(!allowed(Some("true"),Some("self-hosted"),Some("1"),None));
+            assert!(!allowed(Some("true"),Some("github-hosted"),None,None));
+            assert!(allowed(Some("true"),Some("github-hosted"),Some("1"),None));
+            assert!(allowed(Some("true"),Some("github-hosted"),None,Some("1")));
+        }
     }
 }

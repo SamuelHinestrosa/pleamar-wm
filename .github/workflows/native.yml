@@ -61,6 +61,10 @@ jobs:
       - name: Check the native dock scene
         working-directory: pleamar-wm
         run: cargo run --locked -- --check examples/windows-dock.plm
+      - name: Check the owned fixture desktop guard
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        run: cargo test --locked --example windows-dock-fixture
       - name: Retire and reopen idle native capture devices without desktop interaction
         if: runner.os == 'Windows'
         working-directory: pleamar-wm
