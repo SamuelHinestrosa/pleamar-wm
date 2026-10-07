@@ -231,6 +231,10 @@ def exercise(binary, output):
                         actual = (bgra[i + 2], bgra[i + 1], bgra[i])
                         if any(abs(a - b) > 3 for a, b in zip(actual, expected)):
                             return False
+                        # The background can arrive before the font workshop.
+                        # Require the title and button glyphs in the saved frame.
+                        if not scene_labels_ready(picture):
+                            return False
                         png(folder / f'frame-{generation}.png', picture)
                         return True
 
@@ -357,6 +361,18 @@ def main():
         binary = args.binary.resolve(strict=True)
         output.mkdir()
         exercise(binary, output)
+
+
+def scene_labels_ready(picture):
+    width, height, bgra = picture
+    scale = width / 640
+    for left, top, right, bottom in [(24, 24, 500, 55), (40, 112, 275, 138)]:
+        bright = sum(min(bgra[(y * width + x) * 4:(y * width + x) * 4 + 3]) > 200
+                     for y in range(round(top * scale), min(round(bottom * scale), height))
+                     for x in range(round(left * scale), min(round(right * scale), width)))
+        if bright < 100 * scale * scale:
+            return False
+    return True
 
 
 if __name__ == '__main__':
