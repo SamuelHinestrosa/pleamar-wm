@@ -17,12 +17,6 @@ $certificate = $null
 $trusted = $null
 $registered = $null
 $registrationAttempted = $false
-$policyChanged = $false
-$policy = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Appx'
-$policyExisted = Test-Path -LiteralPath $policy
-$oldPolicy = if ($policyExisted) { Get-ItemProperty -LiteralPath $policy } else { $null }
-$hadValue = $null -ne $oldPolicy -and $null -ne $oldPolicy.PSObject.Properties['AllowAllTrustedApps']
-$previousValue = if ($hadValue) { $oldPolicy.AllowAllTrustedApps } else { $null }
 try {
     if (Get-AppxPackage -Name 'Pleamar.NativeDockTest') { throw 'The test package already exists; refusing to replace it.' }
     $sdk = Get-ChildItem -Path "${env:ProgramFiles(x86)}\Windows Kits\10\bin\*\x64\makeappx.exe" -File |
@@ -77,9 +71,8 @@ try {
     $trusted = Import-Certificate -FilePath $public -CertStoreLocation Cert:\LocalMachine\TrustedPeople
     & $sign sign /fd SHA256 /sha1 $certificate.Thumbprint /s My $package
     if ($LASTEXITCODE -ne 0) { throw 'Package signing failed.' }
-    New-Item -Path $policy -Force | Out-Null
-    New-ItemProperty -LiteralPath $policy -Name AllowAllTrustedApps -PropertyType DWord -Value 1 -Force | Out-Null
-    $policyChanged = $true
+    # A signed package trusted by this disposable runner uses its existing
+    # deployment policy. Do not rewrite machine policy to make a test pass.
     $registrationAttempted = $true
     Add-AppxPackage -Path $package
     $registered = Get-AppxPackage -Name 'Pleamar.NativeDockTest'
@@ -108,10 +101,6 @@ try {
     }
     if ($trusted) { Remove-Item -LiteralPath ("Cert:\LocalMachine\TrustedPeople\" + $trusted.Thumbprint) }
     if ($certificate) { Remove-Item -LiteralPath ("Cert:\CurrentUser\My\" + $certificate.Thumbprint) }
-    if ($policyChanged) {
-        if ($hadValue) { Set-ItemProperty -LiteralPath $policy -Name AllowAllTrustedApps -Value $previousValue }
-        else { Remove-ItemProperty -LiteralPath $policy -Name AllowAllTrustedApps -ErrorAction SilentlyContinue }
-    }
     $report.cleanup.package_removed = -not [bool](Get-AppxPackage -Name 'Pleamar.NativeDockTest')
     $report.cleanup.certificate_removed = $null -eq $trusted -or -not (Test-Path -LiteralPath ("Cert:\LocalMachine\TrustedPeople\" + $trusted.Thumbprint))
     $report | ConvertTo-Json -Depth 8 | Set-Content -LiteralPath (Join-Path $out 'package-report.json') -Encoding UTF8

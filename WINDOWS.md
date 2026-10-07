@@ -709,9 +709,12 @@ uses named scene actions without OS input and cleans up its own windows.
 or manual dispatch. It creates a
 signed, owned MSIX fixture on a disposable Windows runner and exercises the
 actual application identity, persisted pin, reactivation and file-activation
-path. Its test signer, package and temporary policy value are removed afterward.
+path. Its test signer and package are removed afterward; machine deployment
+policy is not changed.
 The scripts refuse local execution; no Store account or download is involved.
-This workflow is newly added and has not yet passed. It does not establish OS
+The first CI attempt failed during setup, before activation, because it tried
+to create a machine policy key. That unnecessary policy write has been removed;
+the activation workflow has not yet passed. It does not establish OS
 drag acceptance or support for every Store app. The ordinary secondary-monitor
 fixture still refuses a primary output when it has no CI package identity.
 
