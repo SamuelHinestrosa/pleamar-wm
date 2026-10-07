@@ -53,6 +53,17 @@ lifetime. This checkout's Cargo build does not install it or enable startup.
 
 ## Named scene commands
 
+The automatic session accepts `--say wm 'emit minimize'` and
+`--say wm 'emit restore_last'`, matching Marea's optional Win+M / Win+Shift+M
+bindings. Minimize targets the actual foreground application and requires its
+monitor to be managed in free-window mode. Restore uses actual minimize events
+from that session, including application title-bar buttons; its history keeps
+at most 64 identities and retires them on restore/destruction. A session restart
+starts a new history. Disconnected displays and a different process scope are
+never substituted for the requested window. Restoration preserves Windows'
+restore-to-maximized behavior and requests activation under normal foreground
+rules. An empty history or native failure is reported to Marea.
+
 The native CLI discovers pleamar scenes through logon-scoped named pipes.
 Panels such as Marea appear in `agent scenes` even when the ordinary window
 catalog excludes them. Use its current PID and the element names in its tree:

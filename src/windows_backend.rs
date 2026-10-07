@@ -43,6 +43,7 @@ const HELP: &str = "pleamar-wm — experimental native Windows desktop companion
           [--rules FILE]           window rules; defaults to pleamar's session.conf
                                    --process PID scopes automatic management to one application
   --say wm COMMAND                status, toggle MONITOR, layout MONITOR KIND, free MONITOR, quit
+                                   emit minimize, emit restore_last, emit toggle_free
   hyprctl monitors|activewindow     compatibility queries for existing scenes
   tile MONITOR LAYOUT --save FILE ID...
                                    tile these normal windows on their current monitor;
@@ -295,8 +296,17 @@ fn restore_layout(path: &Path) -> Result<Value> {
 }
 
 fn state(id: &str, minimize: bool) -> Result<Value> {
+    window_state(id, minimize, false)
+}
+fn window_state(id: &str, minimize: bool, activate: bool) -> Result<Value> {
     let (hwnd, _) = target(id)?;
-    if !unsafe { ShowWindowAsync(hwnd, if minimize { SW_SHOWMINNOACTIVE } else { SW_SHOWNOACTIVATE }) }.as_bool() {
+    let mode = match (minimize, activate) {
+        (true, true) => SW_MINIMIZE,
+        (false, true) => SW_RESTORE,
+        (true, false) => SW_SHOWMINNOACTIVE,
+        (false, false) => SW_SHOWNOACTIVATE,
+    };
+    if !unsafe { ShowWindowAsync(hwnd, mode) }.as_bool() {
         return Err("Windows rejected the window state change".into());
     }
     let until = Instant::now() + Duration::from_secs(1);
@@ -328,13 +338,18 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
             "agent_window_capture": true, "agent_window_send": true, "agent_native_input": true, "agent_input_mode": "opt-in-foreground",
             "window_rules": ["app", "title", "float", "size", "monitor"], "private_window_rules": false, "workspace_window_rules": false,
             "window_scene_provider": false, "automatic_session": true, "rain": false, "snow": false,
+            "session_shortcuts": ["minimize", "restore_last", "toggle_free"],
             "ride": false, "dock": false, "pools": false, "remote": false, "phone_monitor": false, "independent_agent_seat": false,
             "agent_scene_commands": ["scenes", "tree", "press", "wait", "watch", "say"]}))),
         ["agent", rest @ ..] => agent::execute(rest),
         ["monitors"] => Ok(Some(serde_json::to_value(monitors()?)?)),
         ["windows"] => Ok(Some(serde_json::to_value(windows()?)?)),
         ["session", rest @ ..] => session::run(&rest.iter().map(|s|(*s).to_owned()).collect::<Vec<_>>()).map(Some),
-        ["--say", "wm", command] => ipc::Endpoint::current()?.ask(command).map(Some),
+        ["--say", "wm", command] => {
+            let endpoint = ipc::Endpoint::current()?;
+            if command.split_whitespace().eq(["emit", "restore_last"]) { endpoint.ask_with_focus(command).map(Some) }
+            else { endpoint.ask(command).map(Some) }
+        },
         ["window", id, "minimize"] => state(id, true).map(Some),
         ["window", id, "restore"] => state(id, false).map(Some),
         ["restore-layout", path] => restore_layout(Path::new(path)).map(Some),

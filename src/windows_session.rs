@@ -1,18 +1,26 @@
 //! Event-driven per-monitor layouts. The recovery journal is flushed before
 //! changing a window; ending a session restores free positions, not focus.
 use super::*;
-use std::{cell::Cell, collections::{BTreeMap, BTreeSet}, io::Write, os::windows::{fs::OpenOptionsExt, ffi::OsStrExt, io::{AsRawHandle, FromRawHandle, OwnedHandle}},
+use std::{cell::{Cell, RefCell}, collections::{BTreeMap, BTreeSet}, io::Write, os::windows::{fs::OpenOptionsExt, ffi::OsStrExt, io::{AsRawHandle, FromRawHandle, OwnedHandle}},
     path::PathBuf, sync::atomic::Ordering};
 use windows::Win32::{Storage::FileSystem::*, UI::Accessibility::*};
 
 thread_local! {
     static DIRTY: Cell<bool> = const { Cell::new(false) };
     static DRAGGING: Cell<bool> = const { Cell::new(false) };
+    static MINIMIZE_EVENTS: RefCell<Vec<(isize, bool)>> = const { RefCell::new(Vec::new()) };
 }
-unsafe extern "system" fn changed(_: HWINEVENTHOOK, event: u32, _: HWND, object: i32, child: i32, _: u32, _: u32) {
+unsafe extern "system" fn changed(_: HWINEVENTHOOK, event: u32, hwnd: HWND, object: i32, child: i32, _: u32, _: u32) {
     if event == EVENT_SYSTEM_MOVESIZESTART { DRAGGING.set(true); }
     if event == EVENT_SYSTEM_MOVESIZEEND { DRAGGING.set(false); }
     if event < EVENT_OBJECT_CREATE || (object == 0 && child == 0) { DIRTY.set(true); }
+    if matches!(event, EVENT_SYSTEM_MINIMIZESTART | EVENT_SYSTEM_MINIMIZEEND) || (event == EVENT_OBJECT_DESTROY && object == 0 && child == 0) {
+        MINIMIZE_EVENTS.with(|pending| {
+            let mut pending = pending.borrow_mut();
+            if pending.len() == 256 { pending.remove(0); }
+            pending.push((hwnd.0 as isize, event == EVENT_SYSTEM_MINIMIZESTART));
+        });
+    }
 }
 struct Hooks(Vec<HWINEVENTHOOK>);
 impl Hooks {
@@ -84,6 +92,19 @@ impl Journal {
 struct Mode { tiled: bool, layout: Layout, order: Vec<String>, error: Option<String> }
 impl Default for Mode { fn default() -> Self { Self { tiled:false, layout:Layout::Left, order:Vec::new(), error:None } } }
 
+#[derive(Default)]
+struct Minimized(Vec<String>);
+impl Minimized {
+    fn remember(&mut self, id: String) {
+        self.0.retain(|old| old != &id);
+        if self.0.len() == 64 { self.0.remove(0); }
+        self.0.push(id);
+    }
+    fn destroyed(&mut self, hwnd: isize) {
+        self.0.retain(|id| id.split(':').nth(2).and_then(|h| usize::from_str_radix(h, 16).ok()) != Some(hwnd as usize));
+    }
+}
+
 fn placement(hwnd: HWND) -> Result<WINDOWPLACEMENT> {
     let mut p = WINDOWPLACEMENT { length:size_of::<WINDOWPLACEMENT>() as u32, ..Default::default() };
     unsafe { GetWindowPlacement(hwnd, &mut p) }?;
@@ -126,6 +147,7 @@ struct Manager {
     modes: BTreeMap<String, Mode>, originals:BTreeMap<String, Original>, journal:Journal,
     process:Option<u32>, owner:Option<u32>, creation:Option<u64>, all:bool, scans:u64, changes:u64,
     rules:rules::Rules,
+    minimized:Minimized,
 }
 impl Manager {
     fn owns(&self, window: &Window) -> bool {
@@ -139,7 +161,7 @@ impl Manager {
         if !options.all && modes.len() != options.monitors.len() { return Err("a requested monitor is not connected".into()); }
         let rules = rules::Rules::read(options.rules.clone(),options.explicit_rules)?;
         let (journal, originals) = Journal::open(options.state.clone())?;
-        let mut manager = Self { modes, originals, journal, process:options.process, owner:options.owner, creation:None, all:options.all, scans:0, changes:0, rules };
+        let mut manager = Self { modes, originals, journal, process:options.process, owner:options.owner, creation:None, all:options.all, scans:0, changes:0, rules, minimized:Minimized::default() };
         if let Some(pid) = options.process {
             // Store a creation stamp as well: a recycled PID must not widen a fixture's scope.
             manager.creation = windows()?.iter().find(|w| w.process == pid)
@@ -174,6 +196,7 @@ impl Manager {
             "pools":false,"process":self.process,"owner":self.owner,"saved_windows":self.originals.len(),
             "pending_recovery":self.originals.values().filter(|w|self.modes.get(&w.monitor).is_none_or(|m|!m.tiled)).count(),
             "catalog_scans":self.scans,"geometry_changes":self.changes,
+            "minimize_shortcuts":true,"last_minimized":self.minimized.0.last(),
             "rules_file":self.rules.path,"window_rules":self.rules.entries.len(),
             "ruled_windows":self.rules.applied.len(),"rule_errors":self.rules.errors,
             "rule_limit_reached":self.rules.applied.len()+self.rules.errors.len()>=256,
@@ -318,7 +341,47 @@ impl Manager {
         }
         Ok(())
     }
+    fn minimized_events(&mut self) {
+        let events = MINIMIZE_EVENTS.with(|pending| std::mem::take(&mut *pending.borrow_mut()));
+        for (hwnd, minimized) in events {
+            if !minimized { self.minimized.destroyed(hwnd); continue; }
+            if let Some(window) = inspect(HWND(hwnd as _)) {
+                if self.owns(&window) && self.modes.contains_key(&window.monitor) && window.minimized {
+                    self.minimized.remember(window.id);
+                }
+            }
+        }
+    }
+    fn minimize_focused(&mut self) -> Result<Value> {
+        let hwnd = unsafe { GetForegroundWindow() };
+        let window = inspect(hwnd).ok_or("the active window is not an eligible application window")?;
+        if !self.owns(&window) || !self.modes.contains_key(&window.monitor) {
+            return Err("the active window is outside this WM session".into());
+        }
+        if self.modes[&window.monitor].tiled { return Err("switch this monitor to free windows before minimizing".into()); }
+        if window.minimized || !unsafe { windows::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled(hwnd) }.as_bool() {
+            return Err("the active window is minimized or blocked by a dialog".into());
+        }
+        window_state(&window.id, true, true)?;
+        self.minimized.remember(window.id);
+        self.minimized_events();
+        Ok(self.status())
+    }
+    fn restore_last(&mut self) -> Result<Value> {
+        while let Some(id) = self.minimized.0.last().cloned() {
+            let window = target(&id).ok().map(|(_, window)| window);
+            if window.as_ref().is_none_or(|w| !w.minimized || !self.owns(w) || !self.modes.contains_key(&w.monitor)) {
+                self.minimized.0.pop(); continue;
+            }
+            // Keep a failed restoration retryable; remove it only after native readback.
+            window_state(&id, false, true)?;
+            self.minimized.0.pop();
+            return Ok(self.status());
+        }
+        Err("no recently minimized window remains in this WM session".into())
+    }
     fn command(&mut self, line:&str) -> Result<(Value,bool)> {
+        self.minimized_events();
         let words:Vec<_> = line.split_whitespace().collect();
         let value = match words.as_slice() {
             ["status"] | ["capabilities"] => self.status(),
@@ -333,6 +396,8 @@ impl Manager {
             }
             ["layout", name, kind] => self.set_mode(name,true,Some(kind.parse()?))?,
             ["free", name] => self.set_mode(name,false,None)?,
+            ["emit", "minimize"] => self.minimize_focused()?,
+            ["emit", "restore_last"] => self.restore_last()?,
             ["emit", "toggle_free"] => {
                 let mut point = POINT::default();
                 unsafe { GetCursorPos(&mut point) }?;
@@ -417,6 +482,7 @@ pub(super) fn run(args:&[String]) -> Result<Value> {
     let result = (|| -> Result<()> {
         loop {
             pump();
+            manager.minimized_events();
             if owner.as_ref().map(Owner::exited).transpose()?.unwrap_or(false) { break; }
             if !server.running() { return Err("WM command listener stopped unexpectedly".into()); }
             server.wake.reset();
@@ -457,6 +523,24 @@ mod recovery_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn minimized_history_is_ordered_bounded_and_forgets_reused_handles() {
+        let mut history = Minimized::default();
+        for handle in 1..=70 { history.remember(format!("1:2:{handle:x}:3")); }
+        assert_eq!(history.0.len(), 64);
+        assert_eq!(history.0.first().unwrap(), "1:2:7:3");
+        history.remember("1:2:7:3".into());
+        assert_eq!(history.0.len(), 64);
+        assert_eq!(history.0.last().unwrap(), "1:2:7:3");
+        history.destroyed(7);
+        assert_eq!(history.0.len(), 63);
+        assert_eq!(history.0.last().unwrap(), "1:2:46:3");
+        history.remember("8:9:7:10".into());
+        assert_eq!(history.0.last().unwrap(), "8:9:7:10");
+        history.destroyed(7);
+        assert!(!history.0.iter().any(|id| id.split(':').nth(2) == Some("7")));
+    }
 
     #[test]
     fn session_names_separate_default_journals_and_reject_path_injection() {

@@ -10,7 +10,7 @@ on:
         required: true
       pleamar_ref:
         description: Exact pleamar revision (Windows backend required)
-        default: f8933e91a77b5ddcce3545637a0fb5ba0519cb46
+        default: 26d5a832179ec72163c4cb388aff950c207f2990
         required: true
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.pleamar_repository || 'SamuelHinestrosa/pleamar' }}
-          ref: ${{ inputs.pleamar_ref || 'f8933e91a77b5ddcce3545637a0fb5ba0519cb46' }}
+          ref: ${{ inputs.pleamar_ref || '26d5a832179ec72163c4cb388aff950c207f2990' }}
           path: pleamar
       - name: Linux system libraries
         if: runner.os == 'Linux'
@@ -105,19 +105,43 @@ jobs:
           foreach ($name in @('LICENCE-MIT.txt', 'LICENSE-LLVM.txt', 'LICENSE-MS.txt')) {
             Copy-Item -LiteralPath (Join-Path $unpacked $name) -Destination $licenses
           }
-      - name: Native agent CLI input on owned Win32 controls
+      - name: Build owned native control fixture
         if: runner.os == 'Windows'
         working-directory: pleamar-wm
         timeout-minutes: 12
         shell: pwsh
-        env:
-          PLEAMAR_WM_CI_AGENT_INPUT: '1'
         run: |
           $messages = cargo test --manifest-path ../pleamar/Cargo.toml --target-dir target --locked --lib --no-run --message-format=json | ForEach-Object { $_ | ConvertFrom-Json }
           if ($LASTEXITCODE -ne 0) { throw 'Could not build the owned native input fixture' }
           $tests = @($messages | Where-Object { $_.reason -eq 'compiler-artifact' -and $_.target.name -eq 'pleamar' -and $_.profile.test -and $_.executable })
           if ($tests.Count -ne 1) { throw 'Expected one engine test executable' }
-          python tests/windows-agent-input.py --binary target/release/pleamar-wm.exe --tests $tests[0].executable --output "${{ runner.temp }}/wm agent input ñ"
+          Add-Content -LiteralPath $env:GITHUB_ENV -Value "PLEAMAR_ENGINE_TEST_BINARY=$($tests[0].executable)"
+      - name: Native minimize and restore shortcuts on owned windows
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        timeout-minutes: 4
+        shell: pwsh
+        env:
+          PLEAMAR_WM_CI_SHORTCUTS: '1'
+        run: |
+          python tests/windows-session-shortcuts.py --binary target/release/pleamar-wm.exe --tests $env:PLEAMAR_ENGINE_TEST_BINARY --output "${{ runner.temp }}/wm shortcuts ñ"
+          if ($LASTEXITCODE -ne 0) { throw 'Native minimize/restore shortcuts failed' }
+      - name: Keep native shortcut evidence
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wm-native-shortcuts
+          path: ${{ runner.temp }}/wm shortcuts ñ
+          if-no-files-found: warn
+      - name: Native agent CLI input on owned Win32 controls
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        timeout-minutes: 4
+        shell: pwsh
+        env:
+          PLEAMAR_WM_CI_AGENT_INPUT: '1'
+        run: |
+          python tests/windows-agent-input.py --binary target/release/pleamar-wm.exe --tests $env:PLEAMAR_ENGINE_TEST_BINARY --output "${{ runner.temp }}/wm agent input ñ"
           if ($LASTEXITCODE -ne 0) { throw 'Native agent CLI input failed' }
       - name: Keep native agent CLI evidence
         if: always() && runner.os == 'Windows'
