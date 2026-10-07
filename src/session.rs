@@ -63,8 +63,10 @@ struct Flips {
 
 struct Monitor {
     name: String,
-    crtc: crtc::Handle,
-    connector: connector::Handle,
+    /// What drives it on the card; none on the phone's monitor, which has no
+    /// screen (see phone.rs).
+    crtc: Option<crtc::Handle>,
+    connector: Option<connector::Handle>,
     /// Lit, or dark (idle, or a program turned it off).
     on: bool,
     /// Its size upright, as it is seen: a monitor on its side is taller than wide.
@@ -237,6 +239,9 @@ struct State {
     sheets: Vec<u32>,
     next_sheet: u32,
     quit: bool,
+    /// The mouse of this desk moved while the session was on the phone: how
+    /// far, to tell a hand on it from a table being bumped.
+    desk_moved: f64,
 }
 
 fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String> {
@@ -257,7 +262,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     // controller of its own, left to right as `PLEAMAR_MONITORS` says.
     let mut monitors: Vec<Monitor> = Vec::new();
     for (name, conn, mode, crtcs) in connected(&drm) {
-        let used: Vec<crtc::Handle> = monitors.iter().map(|m| m.crtc).collect();
+        let used: Vec<crtc::Handle> = monitors.iter().filter_map(|m| m.crtc).collect();
         let Some(crtc) = crtcs.into_iter().find(|c| !used.contains(c)) else { continue };
         monitors.push(make_monitor(&drm, &gbm, name, conn, mode, crtc));
     }
@@ -349,7 +354,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     layers::set_card(drm.clone());
     layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz, scale: m.scale }, m.screen.clone())).collect());
     let mover = CursorMover::new(drm.clone());
-    let mut state = State { mover, session, drm, monitors, libinput, to_render: to_render.clone(), keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, route: Route::new(to_render), cursor_pictures: Vec::new(), handle: event_loop.handle(), gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false };
+    let mut state = State { mover, session, drm, monitors, libinput, to_render: to_render.clone(), keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, route: Route::new(to_render), cursor_pictures: Vec::new(), handle: event_loop.handle(), gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false, desk_moved: 0.0 };
     state.make_cursors(&gbm);
     // The cursor the scene and the programs ask for, whenever it changes.
     let (cursor_tx, cursor_rx) = smithay::reexports::calloop::channel::channel::<(bool, Cursor)>();
@@ -375,6 +380,17 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
         .insert_source(power_rx, |event, _, state: &mut State| {
             if let smithay::reexports::calloop::channel::Event::Msg((which, on)) = event {
                 state.power(which, on);
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    // The phone's monitor, as `pleamar-wm remote` asks (docs/phone.md).
+    let (phone_tx, phone_rx) = smithay::reexports::calloop::channel::channel::<Option<layers::PhoneWish>>();
+    layers::set_phone_sink(Box::new(move |wish| phone_tx.send(wish).is_ok()));
+    event_loop
+        .handle()
+        .insert_source(phone_rx, |event, _, state: &mut State| {
+            if let smithay::reexports::calloop::channel::Event::Msg(wish) = event {
+                state.phone(wish);
             }
         })
         .map_err(|e| e.to_string())?;
@@ -500,13 +516,17 @@ fn make_monitor(drm: &DrmDeviceFd, gbm: &Arc<Mutex<gbm::Device<DrmDeviceFd>>>, n
     if scale != 1.0 {
         println!("session · {name}: scale {scale}");
     }
-    Monitor { name, crtc, connector: conn, on: true, size, turn, x: 0, y: 0, scale, screen, flips, mhz: refresh_mhz(&mode) }
+    Monitor { name, crtc: Some(crtc), connector: Some(conn), on: true, size, turn, x: 0, y: 0, scale, screen, flips, mhz: refresh_mhz(&mode) }
 }
 
 /// Where the configuration puts them; the ones it does not place, left to
 /// right after them, as `PLEAMAR_MONITORS` says («DP-3,HDMI-A-1») and then in
 /// the card's order. Numbered left to right, top to bottom.
 fn place_monitors(monitors: &mut [Monitor]) {
+    // The phone's monitor last, far to the right of the real ones.
+    monitors.sort_by_key(|m| m.crtc.is_none());
+    let real = monitors.iter().filter(|m| m.crtc.is_some()).count();
+    let (monitors, phones) = monitors.split_at_mut(real);
     if let Ok(order) = std::env::var("PLEAMAR_MONITORS") {
         let names: Vec<&str> = order.split(',').map(str::trim).collect();
         monitors.sort_by_key(|m| names.iter().position(|n| *n == m.name).unwrap_or(names.len()));
@@ -524,7 +544,11 @@ fn place_monitors(monitors: &mut [Monitor]) {
         };
     }
     monitors.sort_by_key(|m| (m.x, m.y));
-    println!("session · monitors: {}", monitors.iter().map(|m| format!("{} at {},{}", m.name, m.x, m.y)).collect::<Vec<_>>().join(", "));
+    let right = monitors.iter().map(|m| m.x + m.units().0).max().unwrap_or(0);
+    for m in phones.iter_mut() {
+        (m.x, m.y) = crate::phone::place(right);
+    }
+    println!("session · monitors: {}", monitors.iter().chain(phones.iter()).map(|m| format!("{} at {},{}", m.name, m.x, m.y)).collect::<Vec<_>>().join(", "));
 }
 
 /// The scene's surfaces on the monitors, as sheets for the render. Its own:
@@ -608,7 +632,7 @@ impl State {
         let now = connected(&self.drm);
         let names: Vec<&str> = now.iter().map(|c| c.0.as_str()).collect();
         let before: Vec<String> = self.monitors.iter().map(|m| m.name.clone()).collect();
-        let (kept, gone): (Vec<Monitor>, Vec<Monitor>) = std::mem::take(&mut self.monitors).into_iter().partition(|m| names.contains(&m.name.as_str()));
+        let (kept, gone): (Vec<Monitor>, Vec<Monitor>) = std::mem::take(&mut self.monitors).into_iter().partition(|m| m.crtc.is_none() || names.contains(&m.name.as_str()));
         self.monitors = kept;
         for m in gone {
             println!("session · monitor {} unplugged", m.name);
@@ -616,13 +640,15 @@ impl State {
             st.quit = true;
             drop(st);
             m.screen.1.notify_all();
-            let _ = self.drm.set_crtc(m.crtc, None, (0, 0), &[], None);
+            if let Some(crtc) = m.crtc {
+                let _ = self.drm.set_crtc(crtc, None, (0, 0), &[], None);
+            }
         }
         for (name, conn, mode, crtcs) in now {
             if self.monitors.iter().any(|m| m.name == name) {
                 continue;
             }
-            let used: Vec<crtc::Handle> = self.monitors.iter().map(|m| m.crtc).collect();
+            let used: Vec<crtc::Handle> = self.monitors.iter().filter_map(|m| m.crtc).collect();
             let Some(crtc) = crtcs.into_iter().find(|c| !used.contains(c)) else {
                 eprintln!("session · {name}: no controller left to drive it");
                 continue;
@@ -634,6 +660,12 @@ impl State {
         if self.monitors.iter().map(|m| m.name.clone()).collect::<Vec<_>>() == before {
             return;
         }
+        self.monitors_changed();
+    }
+
+    /// The row of monitors is new (one plugged in or out, the phone's put up
+    /// or taken down): placed again, and the scene's surfaces given again.
+    fn monitors_changed(&mut self) {
         place_monitors(&mut self.monitors);
         if self.monitors.is_empty() {
             return;
@@ -651,9 +683,59 @@ impl State {
         self.sheets = give_sheets(&self.monitors, &self.surfaces, &self.to_render, &self.cursor_kind, &mut self.next_sheet);
         layers::register(self.monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz, scale: m.scale }, m.screen.clone())).collect());
         layers::tell(ToLayers::Monitors);
+        // Which one is the phone's, for the scene (-1: none).
+        let phone = self.monitors.iter().position(|m| m.crtc.is_none()).map_or(-1.0, |k| k as f32);
+        let _ = self.to_render.send(ToRender::Fact(pleamar::scene::intern("phone"), phone));
         // The cursor on every monitor, and the pointer within them.
         self.shown = None;
         self.show_cursor();
+        self.move_pointer(0.0, 0.0);
+    }
+
+    /// Back from the phone to this desk: the phone's monitor goes (its
+    /// windows go back to where they were) and the session is locked —it was
+    /// out of its owner's hands, and whoever is at the desk now has to say
+    /// who they are—.
+    fn take_back(&mut self) {
+        println!("session · someone at the desk: the session comes back from the phone, locked");
+        self.desk_moved = 0.0;
+        self.phone(None);
+        let lock = config::get().phone_lock.clone().unwrap_or_else(|| "marea lock".to_owned());
+        if !lock.is_empty() && lock != "none" {
+            layers::tell(ToLayers::Launch(lock));
+        }
+        let _ = self.to_render.send(ToRender::ExternalSignal(pleamar::scene::intern("phone_taken_back"), None));
+    }
+
+    /// The phone's monitor put up (of that size and scale: again if it
+    /// changed, a phone turned on its side), or taken down.
+    fn phone(&mut self, wish: Option<layers::PhoneWish>) {
+        let now = self.monitors.iter().position(|m| m.crtc.is_none());
+        if let (Some(k), Some(w)) = (now, wish) {
+            let m = &self.monitors[k];
+            if m.size == w.size && (m.scale - w.scale).abs() < 0.01 {
+                return;
+            }
+        }
+        if wish.is_none() && now.is_none() {
+            return;
+        }
+        if let Some(k) = now {
+            let m = self.monitors.remove(k);
+            println!("session · the phone's monitor goes");
+            let mut st = m.screen.0.lock().unwrap();
+            st.quit = true;
+            drop(st);
+            m.screen.1.notify_all();
+        }
+        self.desk_moved = 0.0;
+        if let Some(w) = wish {
+            let screen = crate::phone::make(w.size, &self.to_render);
+            let scale = w.scale.clamp(0.5, 4.0);
+            println!("session · a monitor for the phone: {}×{} at scale {scale}", w.size.0, w.size.1);
+            self.monitors.push(Monitor { name: layers::PHONE_NAME.to_owned(), crtc: None, connector: None, on: true, size: w.size, turn: 0, x: 0, y: 0, scale, screen, flips: Default::default(), mhz: crate::phone::PHONE_MHZ });
+        }
+        self.monitors_changed();
     }
 
     /// The pointer moved by that much: across the monitors as they are
@@ -691,7 +773,9 @@ impl State {
             } else {
                 (-256, -256)
             };
-            self.mover.to(m.crtc, (cx, cy));
+            if let Some(crtc) = m.crtc {
+                self.mover.to(crtc, (cx, cy));
+            }
         }
         let m = &self.monitors[on];
         let (mx, my) = ((px - m.x as f64) * m.scale, (py - m.y as f64) * m.scale);
@@ -815,9 +899,10 @@ impl State {
         }
         use smithay::reexports::drm::buffer::Buffer;
         for m in &self.monitors {
+            let Some(crtc) = m.crtc else { continue };
             let Some((_, _, bo, hot)) = self.cursors.iter().find(|c| c.0 == want && c.1 == m.turn).or_else(|| self.cursors.iter().find(|c| c.0 == want && c.1 == 0)) else { continue };
             let image = CursorImage { size: Buffer::size(bo), format: Buffer::format(bo), pitch: Buffer::pitch(bo), handle: Buffer::handle(bo) };
-            self.mover.shape(m.crtc, image, *hot);
+            self.mover.shape(crtc, image, *hot);
         }
         self.shown = Some(want);
         layers::set_pointer_picture(self.cursor_pictures.iter().find(|c| c.0 == want).map(|c| c.1.clone()));
@@ -833,7 +918,7 @@ impl State {
         let Ok(events) = self.drm.receive_events() else { return };
         for e in events {
             if let DrmEvent::PageFlip(e) = e {
-                for m in self.monitors.iter().filter(|m| m.crtc == e.crtc) {
+                for m in self.monitors.iter().filter(|m| m.crtc == Some(e.crtc)) {
                     {
                         let mut f = m.flips.lock().unwrap();
                         if let Some(p) = f.pending.take() {
@@ -884,6 +969,26 @@ impl State {
         // Anything but a device coming or going is someone there.
         if !matches!(event, InputEvent::DeviceAdded { .. } | InputEvent::DeviceRemoved { .. }) {
             self.touched();
+        }
+        // The session is on the phone and someone at this desk uses it: it
+        // comes back here, locked (docs/phone.md). The phone's own taps come
+        // through the remote's devices, and do not count.
+        if self.monitors.iter().any(|m| m.crtc.is_none()) {
+            use smithay::backend::input::Event;
+            let here = |name: String| !name.starts_with("pleamar remote");
+            let at_desk = match &event {
+                InputEvent::Keyboard { event } => event.state() == KeyState::Pressed && here(event.device().name().to_owned()),
+                InputEvent::PointerButton { event } => event.state() == ButtonState::Pressed && here(event.device().name().to_owned()),
+                InputEvent::PointerMotion { event } if here(event.device().name().to_owned()) => {
+                    self.desk_moved += event.delta_x().abs() + event.delta_y().abs();
+                    self.desk_moved > 60.0
+                }
+                _ => false,
+            };
+            if at_desk {
+                self.take_back();
+                return;
+            }
         }
         match event {
             InputEvent::PointerMotion { event } => {
@@ -1025,13 +1130,15 @@ impl State {
     /// put together; on, lit and put together again from the start.
     fn power(&mut self, which: Option<usize>, on: bool) {
         for (k, m) in self.monitors.iter_mut().enumerate() {
-            if which.is_some_and(|w| w != k) || m.on == on {
+            // (The phone's goes on while the phone is there: someone reading
+            // on it touches nothing for a while.)
+            if which.is_some_and(|w| w != k) || m.on == on || (m.crtc.is_none() && !on) {
                 continue;
             }
             m.on = on;
-            if let Some((h, _)) = property(&self.drm, m.connector, "DPMS") {
+            if let Some((conn, (h, _))) = m.connector.and_then(|c| Some((c, property(&self.drm, c, "DPMS")?))) {
                 // 0 on, 3 off.
-                if let Err(e) = self.drm.set_property(m.connector, h, if on { 0 } else { 3 }) {
+                if let Err(e) = self.drm.set_property(conn, h, if on { 0 } else { 3 }) {
                     eprintln!("session · {}: could not turn it {}: {e}", m.name, if on { "on" } else { "off" });
                 }
             }

@@ -36,6 +36,9 @@
 //! | `M PID W H IDX X Y` | cursor IDX to X, Y of that process' surface of W × H that is no window (a panel: Marea, a bar) |
 //! | `B PID W H IDX BUTTON PRESSED` | a button there |
 //! | `R MONITOR HEX` · `R off` | `pleamar-wm remote`: someone uses this desktop from elsewhere, looking at that monitor, from that address (hex encoded) — said again every few seconds while it lasts, and forgotten 15 s after the last |
+//! | `E phone_NAME` | a gesture on the phone: the scene's event of that name |
+//! | `U HEX` | text from the phone's keyboard (hex encoded), typed into the window with the keyboard as the person's own: no agent marks |
+//! | `P W H SCALE` · `P off` | `pleamar-wm remote` from a phone: a monitor of W × H pixels at that scale is put up for it (`PHONE-1`), or taken down (docs/phone.md) |
 //!
 //! A TARGET is `pid:N` (that process' only window), `root:N` (the only window
 //! of that process or a child of it: a browser's), or an app_id.
@@ -131,6 +134,9 @@ pub struct Agent {
     /// was copied before, to give back then: its answer waits for that (see
     /// `agent_lines`).
     pasting: Option<(std::sync::Arc<super::Kept>, Option<std::sync::Arc<super::Kept>>)>,
+    /// Typing for the person, not for an agent (the phone's keyboard, `U`):
+    /// the same hands, without the agent's marks on the monitor.
+    quiet: bool,
     pub path: String,
 }
 
@@ -205,7 +211,7 @@ pub fn start(state: &mut State) {
         return;
     }
     println!("agent · computer use: cua-inject v1 at {path}");
-    state.agent = Some(Agent { seats, on_monitor: [None; CURSORS], raw_entered: [None, None], raw_real: [None, None], kb_entered: None, kb_slot: None, kb_real: None, opening: Vec::new(), seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None, remote: None, pasting: None });
+    state.agent = Some(Agent { seats, on_monitor: [None; CURSORS], raw_entered: [None, None], raw_real: [None, None], kb_entered: None, kb_slot: None, kb_real: None, opening: Vec::new(), seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None, remote: None, pasting: None, quiet: false });
     // Whether it is at work, looked at every second: between one action and
     // the next an agent thinks, and that is still working.
     let timer = Timer::from_duration(Duration::from_secs(1));
@@ -326,6 +332,45 @@ impl State {
                 self.remote_mark(None);
                 Ok("ok".to_owned())
             }
+            // What the phone's keyboard writes, into the window with the
+            // keyboard: the person's own typing, any text.
+            ["U", hex] => (|| {
+                let text = unhex(hex)?;
+                let focus = self.keyboard.current_focus();
+                let slot = self.slots.iter().position(|w| w.as_ref().is_some_and(|w| focus.as_ref() == Some(&w.surface))).ok_or("no-window")?;
+                if let Some(a) = self.agent.as_mut() {
+                    a.quiet = true;
+                }
+                let done = self.agent_type(slot, &text);
+                if let Some(a) = self.agent.as_mut() {
+                    a.quiet = false;
+                }
+                done.map(|_| "ok".to_owned())
+            })(),
+            // A gesture on the phone, to the scene as the event of that name
+            // (`phone_cards`, `phone_next`…): only the phone's.
+            ["E", name] if name.starts_with("phone_") && name.len() < 40 && name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') => {
+                let _ = self.to_render.send(ToRender::ExternalSignal(pleamar::scene::intern(name), None));
+                Ok("ok".to_owned())
+            }
+            // A phone asks for a monitor of its own, and lets it go.
+            ["P", "off"] => {
+                if layers::request_phone(None) {
+                    Ok("ok".to_owned())
+                } else {
+                    Err("no-session")
+                }
+            }
+            ["P", w, h, scale] => match (w.parse::<u32>(), h.parse::<u32>(), scale.parse::<f64>()) {
+                (Ok(w), Ok(h), Ok(scale)) if (200..=4096).contains(&w) && (200..=4096).contains(&h) && (0.5..=4.0).contains(&scale) => {
+                    if layers::request_phone(Some(layers::PhoneWish { size: (w, h), scale })) {
+                        Ok("ok".to_owned())
+                    } else {
+                        Err("no-session")
+                    }
+                }
+                _ => Err("bad-args"),
+            },
             ["R", monitor, who] => match (monitor.parse::<i32>(), unhex(who)) {
                 (Ok(monitor), Ok(who)) => {
                     let who: String = String::from_utf8_lossy(&who).chars().filter(|c| !c.is_control()).take(64).collect();
@@ -829,6 +874,9 @@ impl State {
     /// The scene is told the agent is at work, on which window and monitor:
     /// it lights that monitor's edges and that window's outline while it is.
     fn agent_busy(&mut self, slot: usize) {
+        if self.agent.as_ref().is_some_and(|a| a.quiet) {
+            return;
+        }
         let pid = self.pid_of(slot);
         let screen = self.slots.get(slot).and_then(Option::as_ref).map(|w| w.screen);
         let Some(agent) = self.agent.as_mut() else { return };

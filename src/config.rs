@@ -89,6 +89,9 @@ pub struct Config {
     pub touchpad: Pointing,
     /// Seconds without input before the monitors go dark (none: never).
     pub off_after: Option<u64>,
+    /// What locks the session when it comes back from the phone to the desk
+    /// (`phone lock COMMAND`; `none`, nothing). By default, Marea's lock.
+    pub phone_lock: Option<String>,
     /// What some windows do when they open: `window app=… [float] [size WxH]
     /// [monitor N|NAME] [workspace N] [private]`.
     pub windows: Vec<WindowRule>,
@@ -376,7 +379,11 @@ pub fn parse(text: &str, c: &mut Config) {
                 "off-after" => c.off_after = v.and_then(|v| v.parse().ok()).filter(|s| *s > 0),
                 _ => eprintln!("config · line {}: idle has no '{k}'", n + 1),
             }),
-            other => eprintln!("config · line {}: '{other}' is not something it knows (monitor, keyboard, pointer, touchpad, idle, agent)", n + 1),
+            "phone" => match rest.split_first() {
+                Some((w, cmd)) if w == "lock" && !cmd.is_empty() => c.phone_lock = Some(cmd.join(" ")),
+                _ => eprintln!("config · line {}: `phone lock COMMAND` (or `phone lock none`)", n + 1),
+            },
+            other => eprintln!("config · line {}: '{other}' is not something it knows (monitor, keyboard, pointer, touchpad, idle, agent, phone)", n + 1),
         }
     }
 }

@@ -107,6 +107,69 @@ scene Session {
     prop ov = 0 ~calm
     follow ov = if(overview, 1, 0)
 
+    // ── the phone (docs/phone.md) ──
+    // While someone uses the session from a phone, the compositor puts up a
+    // monitor for it (`phone`: which one; -1, none) and every window goes
+    // there. On it each window is an app: all of the screen under a status
+    // line, one at a time, the others waiting beside it, out of sight, to
+    // slide in. A swipe up from the bottom (or a tap on the bar there) shows
+    // them all as cards —a tap opens one, a flick up closes it— over the
+    // programs pinned to the dock, to open another. The real monitors, while
+    // the session is away, are covered (`phone_curtain`).
+    fact phone = -1
+    let is.ph = phone >= 0 and screen.index == phone
+    let W.ph = pick(max(phone, 0), screen.0.width, screen.1.width, screen.2.width, screen.3.width)
+    let H.ph = pick(max(phone, 0), screen.0.height, screen.1.height, screen.2.height, screen.3.height)
+    let ph.sb = 34
+    let ph.hb = 28
+    // The app in front: the last one on the phone to take the keyboard.
+    fact ph.front = -1
+    // The cards, and which one is in the middle.
+    fact ph.cards = 0
+    fact ph.at = 0
+    prop pc = 0 ~spring(230, 23)
+    // (The hour, on the phone's status line.)
+    permissions { services: "clock" }
+    service clock as now { time: text; hour: number }
+    // Each window's turn on the phone, left to right as they opened, and how many there are.
+    let ph.on.0 = phone >= 0 and win.0.open and win.0.screen == phone and not win.0.dialog
+    let ph.on.1 = phone >= 0 and win.1.open and win.1.screen == phone and not win.1.dialog
+    let ph.on.2 = phone >= 0 and win.2.open and win.2.screen == phone and not win.2.dialog
+    let ph.on.3 = phone >= 0 and win.3.open and win.3.screen == phone and not win.3.dialog
+    let ph.on.4 = phone >= 0 and win.4.open and win.4.screen == phone and not win.4.dialog
+    let ph.on.5 = phone >= 0 and win.5.open and win.5.screen == phone and not win.5.dialog
+    let ph.on.6 = phone >= 0 and win.6.open and win.6.screen == phone and not win.6.dialog
+    let ph.on.7 = phone >= 0 and win.7.open and win.7.screen == phone and not win.7.dialog
+    let ph.on.8 = phone >= 0 and win.8.open and win.8.screen == phone and not win.8.dialog
+    let ph.on.9 = phone >= 0 and win.9.open and win.9.screen == phone and not win.9.dialog
+    let ph.on.10 = phone >= 0 and win.10.open and win.10.screen == phone and not win.10.dialog
+    let ph.on.11 = phone >= 0 and win.11.open and win.11.screen == phone and not win.11.dialog
+    let ph.on.12 = phone >= 0 and win.12.open and win.12.screen == phone and not win.12.dialog
+    let ph.on.13 = phone >= 0 and win.13.open and win.13.screen == phone and not win.13.dialog
+    let ph.on.14 = phone >= 0 and win.14.open and win.14.screen == phone and not win.14.dialog
+    let ph.on.15 = phone >= 0 and win.15.open and win.15.screen == phone and not win.15.dialog
+    let ph.n = ph.on.0 + ph.on.1 + ph.on.2 + ph.on.3 + ph.on.4 + ph.on.5 + ph.on.6 + ph.on.7 + ph.on.8 + ph.on.9 + ph.on.10 + ph.on.11 + ph.on.12 + ph.on.13 + ph.on.14 + ph.on.15
+    let ph.k.0 = 0
+    let ph.k.1 = ph.on.0
+    let ph.k.2 = ph.on.0 + ph.on.1
+    let ph.k.3 = ph.on.0 + ph.on.1 + ph.on.2
+    let ph.k.4 = ph.on.0 + ph.on.1 + ph.on.2 + ph.on.3
+    let ph.k.5 = ph.on.0 + ph.on.1 + ph.on.2 + ph.on.3 + ph.on.4
+    let ph.k.6 = ph.on.0 + ph.on.1 + ph.on.2 + ph.on.3 + ph.on.4 + ph.on.5
+    let ph.k.7 = ph.on.0 + ph.on.1 + ph.on.2 + ph.on.3 + ph.on.4 + ph.on.5 + ph.on.6
+    let ph.k.8 = ph.on.0 + ph.on.1 + ph.on.2 + ph.on.3 + ph.on.4 + ph.on.5 + ph.on.6 + ph.on.7
+    let ph.k.9 = ph.on.0 + ph.on.1 + ph.on.2 + ph.on.3 + ph.on.4 + ph.on.5 + ph.on.6 + ph.on.7 + ph.on.8
+    let ph.k.10 = ph.on.0 + ph.on.1 + ph.on.2 + ph.on.3 + ph.on.4 + ph.on.5 + ph.on.6 + ph.on.7 + ph.on.8 + ph.on.9
+    let ph.k.11 = ph.on.0 + ph.on.1 + ph.on.2 + ph.on.3 + ph.on.4 + ph.on.5 + ph.on.6 + ph.on.7 + ph.on.8 + ph.on.9 + ph.on.10
+    let ph.k.12 = ph.on.0 + ph.on.1 + ph.on.2 + ph.on.3 + ph.on.4 + ph.on.5 + ph.on.6 + ph.on.7 + ph.on.8 + ph.on.9 + ph.on.10 + ph.on.11
+    let ph.k.13 = ph.on.0 + ph.on.1 + ph.on.2 + ph.on.3 + ph.on.4 + ph.on.5 + ph.on.6 + ph.on.7 + ph.on.8 + ph.on.9 + ph.on.10 + ph.on.11 + ph.on.12
+    let ph.k.14 = ph.on.0 + ph.on.1 + ph.on.2 + ph.on.3 + ph.on.4 + ph.on.5 + ph.on.6 + ph.on.7 + ph.on.8 + ph.on.9 + ph.on.10 + ph.on.11 + ph.on.12 + ph.on.13
+    let ph.k.15 = ph.on.0 + ph.on.1 + ph.on.2 + ph.on.3 + ph.on.4 + ph.on.5 + ph.on.6 + ph.on.7 + ph.on.8 + ph.on.9 + ph.on.10 + ph.on.11 + ph.on.12 + ph.on.13 + ph.on.14
+    let ph.kf = pick(max(ph.front, 0), ph.k.0, ph.k.1, ph.k.2, ph.k.3, ph.k.4, ph.k.5, ph.k.6, ph.k.7, ph.k.8, ph.k.9, ph.k.10, ph.k.11, ph.k.12, ph.k.13, ph.k.14, ph.k.15)
+    // The cards (and what to open) instead of an app: asked for, or nothing in front.
+    let ph.home = phone >= 0 and (ph.cards > 0.5 or ph.n < 1 or ph.front < 0)
+    follow pc = if(ph.home, 1, 0)
+
     // ── rain: on the windows, as if they were glass, and falling in front of
     // everything. Marea turns it on and off (`emit toggle_rain`); it comes
     // and goes slowly ──
@@ -6006,13 +6069,16 @@ scene Session {
         // A window is laid out on its own monitor: how big that one is and how
         // many windows share it. Each copy of the scene draws only its own.
         let sc = win.$i.screen
+        // On the phone (see `phone`): an app, whatever its pool.
+        let onph = phone >= 0 and sc == phone
         // (Asked to close: see `seen`.)
         prop bye.$i = 0 ~0ms
         // On the workspace its monitor shows; or how far from it, while they slide.
         // On the pool its monitor shows; and drawn, the one the water has left.
         let ws.here = win.$i.pool == pick(sc, win.pool.0, win.pool.1, win.pool.2, win.pool.3)
-        let ws.vis = win.$i.pool == pick(sc, inpool.0, inpool.1, inpool.2, inpool.3)
-        let here = win.$i.open and sc == screen.index and not win.$i.minimized and bye.$i < 0.5 and ws.vis
+        let ws.vis = win.$i.pool == pick(sc, inpool.0, inpool.1, inpool.2, inpool.3) or onph
+        // (On the phone its zones are the phone's: no title bars, no edges.)
+        let here = win.$i.open and sc == screen.index and not win.$i.minimized and bye.$i < 0.5 and ws.vis and not onph
         // (Drawn while it goes away into the island, too.)
         let drawn = win.$i.open and sc == screen.index and ws.vis
         let n = max(win.$i.among, 1)
@@ -6158,10 +6224,26 @@ scene Session {
         on change Fm while Fm < 0.5 and win.$i.minimized { restore win.$i }
         // Tiled there is no putting away: whoever asks (a program, a dock), it comes back.
         on change win.$i.minimized while win.$i.minimized and Fm < 0.5 { restore win.$i }
-        let goal.x = if(win.$i.minimized, mx.$i, if(fr, fgx, if(tm, x0 + gap, txv)))
-        let goal.y = if(win.$i.minimized, my.$i, if(fr, fgy, if(tm, y0, tyv)))
-        let goal.w = if(win.$i.minimized, mw.$i, if(fr, fgw, if(tm, Ws - 2 * gap, twv)))
-        let goal.h = if(win.$i.minimized, mh.$i, if(fr, fgh, if(tm, ah, thv)))
+        // On the phone: all of it under the status line; the ones that are
+        // not in front wait beside it, the earlier ones to the left.
+        let ph.rel = ph.k.$i - ph.kf
+        let ph.gx = if(ph.front == i or ph.front < 0, 0, if(ph.rel > 0, W.ph + 40, 0 - W.ph - 40))
+        let goal.x = if(onph, ph.gx, if(win.$i.minimized, mx.$i, if(fr, fgx, if(tm, x0 + gap, txv))))
+        let goal.y = if(onph, ph.sb, if(win.$i.minimized, my.$i, if(fr, fgy, if(tm, y0, tyv))))
+        let goal.w = if(onph, W.ph, if(win.$i.minimized, mw.$i, if(fr, fgw, if(tm, Ws - 2 * gap, twv))))
+        let goal.h = if(onph, H.ph - ph.sb - ph.hb, if(win.$i.minimized, mh.$i, if(fr, fgh, if(tm, ah, thv))))
+        // As a card, in a deck: each one a step below the one before, the
+        // one at `ph.at` whole near the top, the ones behind it piled up
+        // above, a little smaller.
+        let ph.d = ph.k.$i - ph.at
+        let ph.cs = 0.84 * (1 - 0.06 * clamp(0 - ph.d, 0, 4))
+        let ph.cw = W.ph * ph.cs
+        let ph.ch = (H.ph - ph.sb - ph.hb) * ph.cs
+        let ph.cx = (W.ph - ph.cw) / 2
+        let ph.cy = ph.sb + 96 + if(ph.d < 0, max(ph.d, -4) * 26, ph.d * 150)
+        let card = onph and ph.home
+        // Over the others: on the phone, the app in front; as cards, each over the one before.
+        let zz = if(onph, if(card, 100000 + ph.k.$i * 10, if(ph.front == i, 100500, 100000)), stamp.$i)
         // How far into the island: 0 here, 1 put away.
         prop mini.$i = 0 ~720ms
         follow mini.$i = if(win.$i.minimized, 1, 0)
@@ -6314,10 +6396,10 @@ scene Session {
             fsc.$i = sc
             maxed.$i = 0
         }
-        follow x.$i = if(win.$i.open, if(overview, ox, goal.x), home.x)
-        follow y.$i = if(win.$i.open, if(overview, oy, goal.y), home.y)
-        follow w.$i = if(win.$i.open, if(overview, tw * s, goal.w), 60)
-        follow h.$i = if(win.$i.open, if(overview, th * s, goal.h), 34)
+        follow x.$i = if(win.$i.open, if(card, ph.cx, if(overview, ox, goal.x)), home.x)
+        follow y.$i = if(win.$i.open, if(card, ph.cy, if(overview, oy, goal.y)), home.y)
+        follow w.$i = if(win.$i.open, if(card, ph.cw, if(overview, tw * s, goal.w)), 60)
+        follow h.$i = if(win.$i.open, if(card, ph.ch, if(overview, th * s, goal.h)), 34)
         // Carried with the mouse: how far from its place.
         prop dx.$i = 0 ~glide
         prop dy.$i = 0 ~glide
@@ -6405,7 +6487,7 @@ scene Session {
         // windows overlap, the one on top takes the mouse, and on its own
         // window its edges and buttons go before what the program shows.)
         group {
-            z: stamp.$i + 0.5 + if(win.$i.floating, 50000, 0)
+            z: zz + 0.5 + if(win.$i.floating, 50000, 0)
             // Free, it is carried by its title bar; tiled, by the gap just
             // above it, which takes nothing from the program.
             // With Super held, all of it.
@@ -6430,13 +6512,13 @@ scene Session {
         }
         group {
             // Over the others as it was last touched (free, they overlap).
-            z: stamp.$i + if(win.$i.floating, 50000, 0)
+            z: zz + if(win.$i.floating, 50000, 0)
             // Carried, it is drawn over the others, further down; flying into
             // the island or out of it, too.
             show: seen.$i > 0.01 and sc == screen.index and ws.vis and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog and mini.$i <= 0.02
             // Born, it grows out of the drop: the same size as the black that
             // spreads, showing through it as the black clears.
-            opacity: seen.$i * smooth(0.2, 0.5, swell.$i) * (1 - 0.25 * ovcarry.$i)
+            opacity: seen.$i * smooth(0.2, 0.5, swell.$i) * (1 - 0.25 * ovcarry.$i) * if(card, clamp(1 + 0.2 * ph.d, 0.3, 1), 1)
             pivot: x + w / 2, y + h / 2
             move: (nb.cx - x - w / 2) * (1 - nb.g) * (swell.$i < 0.999), (nb.cy - y - h / 2) * (1 - nb.g) * (swell.$i < 0.999)
             scale: (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F)) * (1 + 0.012 * sin(180 * wave.$i)) * (1 + 0.03 * sin(180 * smooth(0.8, 1, swell.$i))) * nb.sx * (1 - 0.6 * ovcarry.$i), (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F)) * (1 + 0.012 * sin(180 * wave.$i)) * (1 + 0.03 * sin(180 * smooth(0.8, 1, swell.$i))) * nb.sy * (1 - 0.6 * ovcarry.$i)
@@ -6551,7 +6633,7 @@ scene Session {
         // An agent at work on it: a mint outline that breathes round it, over
         // it (the agent's own monitor glow is further down).
         group {
-            z: stamp.$i + 0.45 + if(win.$i.floating, 50000, 0)
+            z: zz + 0.45 + if(win.$i.floating, 50000, 0)
             show: agent.on > 0.01 and agent.win == i and win.$i.open and sc == screen.index and ws.vis
             opacity: agent.on * (0.75 + 0.15 * ag.breath)
             group {
@@ -6560,9 +6642,43 @@ scene Session {
             }
             box { from: x - 1, y - 1; size: w + 2, h + 2; corner: 13; stroke: 1.6; color: mint }
         }
+        // ── on the phone, as a card: its name over it and a cross to close
+        // it; pressed, it opens. The ones piled behind show only their edge. ──
+        group {
+            z: zz + 0.7
+            zone box phcard.$i { from: x, y - 30; size: w, if(ph.d < -0.5, 14, h + 30); active: card and sc == screen.index and win.$i.open and pc > 0.9; label: "{win.$i.title}"; role: item }
+            zone ellipse phx.$i { at: x + w - 14, y - 17; radius: 16; active: card and sc == screen.index and win.$i.open and pc > 0.9 and ph.d > -0.5; label: "Close {win.$i.title}"; role: button }
+        }
+        group {
+            z: zz + 0.6
+            show: card and sc == screen.index and win.$i.open and pc > 0.02 and ph.d > -0.5
+            opacity: smooth(0.4, 1, pc)
+            text win.$i.title { at: x + 4, y - 17; anchor: left center; size: 13; weight: 650; width: w - 50; lines: 1; color: ink; opacity: 92% }
+            ellipse { at: x + w - 14, y - 17; radius: 12; color: #ffffff; opacity: 10% + 14% * phx.$i.hover }
+            box { at: x + w - 14, y - 17; size: 11, 1.8; corner: 1; rotate: 45deg; color: ink }
+            box { at: x + w - 14, y - 17; size: 11, 1.8; corner: 1; rotate: -45deg; color: ink }
+        }
+        on release phx.$i { close win.$i }
+        on release phcard.$i while not phx.$i.hover {
+            focus win.$i
+            ph.front = i
+            ph.cards = 0
+        }
+        // Along the bottom edge, to the next app and the one before.
+        on phone_next while onph and win.$i.open and not ph.home and ph.k.$i == ph.kf + 1 {
+            focus win.$i
+            ph.front = i
+        }
+        on phone_prev while onph and win.$i.open and not ph.home and ph.k.$i == ph.kf - 1 {
+            focus win.$i
+            ph.front = i
+        }
+        // The one in front closed: the cards, or the one beside it.
+        on change win.$i.open while not win.$i.open and ph.front == i { ph.front = -1 }
+
         // Born from the water: its drawing (its shape is worked out above, with `nb.`).
         group {
-            z: stamp.$i + 0.4 + if(win.$i.floating, 50000, 0)
+            z: zz + 0.4 + if(win.$i.floating, 50000, 0)
             show: nb.s < 0.995 and fresh.$i < 0.5 and win.$i.open and sc == screen.index and ws.here and not win.$i.dialog
             opacity: 1 - smooth(0.3, 0.75, nb.s)
             body {
@@ -7413,6 +7529,504 @@ scene Session {
             zone ellipse rider_zone.$i { at: px, py; radius: r.r + 4; cursor: pointer; active: riding and rider == i and not homing and not falling }
         }
         on press rider_zone.$i { emit unride }
+    }
+
+    // ── the phone's own (see `phone`, above): its water, its status line,
+    // the bar at the bottom, the cards' deck and what to open ──
+    event phone_cards
+    event phone_next
+    event phone_prev
+    event phone_taken_back
+    // From the phone's bottom edge (the page): up, the cards —or back to the
+    // app—; sideways, the next app or the one before. In the cards, sideways
+    // goes along the deck.
+    on phone_cards while phone >= 0 {
+        ph.cards = if(ph.home and ph.front >= 0 and ph.n > 0, 0, 1)
+        ph.at = clamp(ph.kf, 0, max(ph.n - 1, 0))
+    }
+    on phone_next while ph.home { ph.at = clamp(round(ph.at) + 1, 0, max(ph.n - 1, 0)) }
+    on phone_prev while ph.home { ph.at = clamp(round(ph.at) - 1, 0, max(ph.n - 1, 0)) }
+    // The phone arrives: the app that had the keyboard in front, or the cards.
+    on change phone while phone >= 0 {
+        ph.front = if(win.focus >= 0, win.focus, -1)
+        ph.cards = 0
+        ph.at = clamp(ph.kf, 0, max(ph.n - 1, 0))
+    }
+    on change phone while phone < 0 {
+        ph.front = -1
+        ph.cards = 0
+    }
+    // The one with the keyboard on the phone is the one in front.
+    on change win.focus while phone >= 0 and win.focus >= 0 and fscreen == phone and not focus.dialog {
+        ph.front = win.focus
+    }
+    // The deck goes along with a finger (the wheel, from the page), and
+    // settles on a card.
+    on scroll ph_deck while ph.n > 1 { ph.at = clamp(ph.at - wheel * 0.3, 0, ph.n - 1) }
+    on still ph.at for 160ms while ph.at != round(ph.at) { ph.at = round(ph.at) }
+    on release ph_bar {
+        ph.cards = if(ph.home and ph.front >= 0 and ph.n > 0, 0, 1)
+        ph.at = clamp(ph.kf, 0, max(ph.n - 1, 0))
+    }
+    // The water behind: three soft lights that drift, now and then.
+    prop phb.x.0 = 0.2 ~spring(8, 6)
+    prop phb.y.0 = 0.25 ~spring(8, 6)
+    prop phb.x.1 = 0.8 ~spring(7, 6)
+    prop phb.y.1 = 0.55 ~spring(7, 6)
+    prop phb.x.2 = 0.35 ~spring(9, 7)
+    prop phb.y.2 = 0.85 ~spring(9, 7)
+    fact phb.seed = 0
+    every 4s..7s while phone >= 0 {
+        phb.seed = phb.seed + 1
+        phb.x.0: 0.1 + 0.5 * random(phb.seed * 3 + 1)
+        phb.y.0: 0.1 + 0.4 * random(phb.seed * 3 + 2)
+        phb.x.1: 0.5 + 0.45 * random(phb.seed * 5 + 3)
+        phb.y.1: 0.35 + 0.4 * random(phb.seed * 5 + 4)
+        phb.x.2: 0.1 + 0.7 * random(phb.seed * 7 + 5)
+        phb.y.2: 0.6 + 0.35 * random(phb.seed * 7 + 6)
+    }
+    group {
+        show: is.ph
+        z: 90000
+        box { from: 0, 0; size: W, H; color: #071014 }
+        group {
+            blur: 70
+            ellipse { at: W * phb.x.0, H * phb.y.0; radius: W * 0.55; color: #1f5a4c; opacity: 55% }
+            ellipse { at: W * phb.x.1, H * phb.y.1; radius: W * 0.5; color: #173f5a; opacity: 50% }
+            ellipse { at: W * phb.x.2, H * phb.y.2; radius: W * 0.45; color: #2a6b5b; opacity: 40% }
+        }
+        // Behind the cards the water darkens a little, as if it got deeper.
+        box { from: 0, 0; size: W, H; color: #000000; opacity: 28% * pc }
+        // Nothing open: the hour, large, and what can be done.
+        group {
+            show: ph.n < 1
+            text now.time { at: W / 2, H * 0.3; anchor: center; size: 76; weight: 250; color: ink }
+            text "Nothing open" { at: W / 2, H * 0.3 + 62; anchor: center; size: 15; weight: 600; color: ink; opacity: 75% }
+            text "Open something from below" { at: W / 2, H * 0.3 + 86; anchor: center; size: 13; color: #9aa3a8 }
+        }
+        zone box ph_deck { from: 0, ph.sb; size: W, H - ph.sb - ph.hb - 92; active: is.ph and ph.home }
+    }
+    // What to open: the programs of the dock, along the bottom, under the cards.
+    group {
+        show: is.ph and pc > 0.01
+        z: 180000
+        opacity: pc
+        group {
+            blur: 24
+            box { from: 18, H - ph.hb - 84 + 30 * (1 - pc); size: W - 36, 76; corner: 30; color: #000000; opacity: 35% }
+        }
+        body {
+            color: #0d1519
+            rim: 14%
+            box { from: 18, H - ph.hb - 84 + 30 * (1 - pc); size: W - 36, 76; corner: 30 }
+        }
+        group {
+            show: phone == 0 and 0 < win.docks.0
+            let ax = W / 2 + (0 - (min(win.docks.0, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.0.0.hover; color: #ffffff; opacity: 7% + 6% * phapp.0.0.hover }
+            image dockicon.0.0 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.0.0.windows > 0 }
+            zone ellipse phapp.0.0 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.0.0.name}"; role: button }
+        }
+        group {
+            show: phone == 0 and 1 < win.docks.0
+            let ax = W / 2 + (1 - (min(win.docks.0, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.0.1.hover; color: #ffffff; opacity: 7% + 6% * phapp.0.1.hover }
+            image dockicon.0.1 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.0.1.windows > 0 }
+            zone ellipse phapp.0.1 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.0.1.name}"; role: button }
+        }
+        group {
+            show: phone == 0 and 2 < win.docks.0
+            let ax = W / 2 + (2 - (min(win.docks.0, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.0.2.hover; color: #ffffff; opacity: 7% + 6% * phapp.0.2.hover }
+            image dockicon.0.2 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.0.2.windows > 0 }
+            zone ellipse phapp.0.2 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.0.2.name}"; role: button }
+        }
+        group {
+            show: phone == 0 and 3 < win.docks.0
+            let ax = W / 2 + (3 - (min(win.docks.0, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.0.3.hover; color: #ffffff; opacity: 7% + 6% * phapp.0.3.hover }
+            image dockicon.0.3 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.0.3.windows > 0 }
+            zone ellipse phapp.0.3 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.0.3.name}"; role: button }
+        }
+        group {
+            show: phone == 0 and 4 < win.docks.0
+            let ax = W / 2 + (4 - (min(win.docks.0, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.0.4.hover; color: #ffffff; opacity: 7% + 6% * phapp.0.4.hover }
+            image dockicon.0.4 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.0.4.windows > 0 }
+            zone ellipse phapp.0.4 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.0.4.name}"; role: button }
+        }
+        group {
+            show: phone == 0 and 5 < win.docks.0
+            let ax = W / 2 + (5 - (min(win.docks.0, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.0.5.hover; color: #ffffff; opacity: 7% + 6% * phapp.0.5.hover }
+            image dockicon.0.5 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.0.5.windows > 0 }
+            zone ellipse phapp.0.5 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.0.5.name}"; role: button }
+        }
+        group {
+            show: phone == 1 and 0 < win.docks.1
+            let ax = W / 2 + (0 - (min(win.docks.1, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.1.0.hover; color: #ffffff; opacity: 7% + 6% * phapp.1.0.hover }
+            image dockicon.1.0 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.1.0.windows > 0 }
+            zone ellipse phapp.1.0 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.1.0.name}"; role: button }
+        }
+        group {
+            show: phone == 1 and 1 < win.docks.1
+            let ax = W / 2 + (1 - (min(win.docks.1, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.1.1.hover; color: #ffffff; opacity: 7% + 6% * phapp.1.1.hover }
+            image dockicon.1.1 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.1.1.windows > 0 }
+            zone ellipse phapp.1.1 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.1.1.name}"; role: button }
+        }
+        group {
+            show: phone == 1 and 2 < win.docks.1
+            let ax = W / 2 + (2 - (min(win.docks.1, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.1.2.hover; color: #ffffff; opacity: 7% + 6% * phapp.1.2.hover }
+            image dockicon.1.2 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.1.2.windows > 0 }
+            zone ellipse phapp.1.2 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.1.2.name}"; role: button }
+        }
+        group {
+            show: phone == 1 and 3 < win.docks.1
+            let ax = W / 2 + (3 - (min(win.docks.1, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.1.3.hover; color: #ffffff; opacity: 7% + 6% * phapp.1.3.hover }
+            image dockicon.1.3 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.1.3.windows > 0 }
+            zone ellipse phapp.1.3 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.1.3.name}"; role: button }
+        }
+        group {
+            show: phone == 1 and 4 < win.docks.1
+            let ax = W / 2 + (4 - (min(win.docks.1, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.1.4.hover; color: #ffffff; opacity: 7% + 6% * phapp.1.4.hover }
+            image dockicon.1.4 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.1.4.windows > 0 }
+            zone ellipse phapp.1.4 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.1.4.name}"; role: button }
+        }
+        group {
+            show: phone == 1 and 5 < win.docks.1
+            let ax = W / 2 + (5 - (min(win.docks.1, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.1.5.hover; color: #ffffff; opacity: 7% + 6% * phapp.1.5.hover }
+            image dockicon.1.5 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.1.5.windows > 0 }
+            zone ellipse phapp.1.5 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.1.5.name}"; role: button }
+        }
+        group {
+            show: phone == 2 and 0 < win.docks.2
+            let ax = W / 2 + (0 - (min(win.docks.2, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.2.0.hover; color: #ffffff; opacity: 7% + 6% * phapp.2.0.hover }
+            image dockicon.2.0 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.2.0.windows > 0 }
+            zone ellipse phapp.2.0 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.2.0.name}"; role: button }
+        }
+        group {
+            show: phone == 2 and 1 < win.docks.2
+            let ax = W / 2 + (1 - (min(win.docks.2, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.2.1.hover; color: #ffffff; opacity: 7% + 6% * phapp.2.1.hover }
+            image dockicon.2.1 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.2.1.windows > 0 }
+            zone ellipse phapp.2.1 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.2.1.name}"; role: button }
+        }
+        group {
+            show: phone == 2 and 2 < win.docks.2
+            let ax = W / 2 + (2 - (min(win.docks.2, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.2.2.hover; color: #ffffff; opacity: 7% + 6% * phapp.2.2.hover }
+            image dockicon.2.2 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.2.2.windows > 0 }
+            zone ellipse phapp.2.2 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.2.2.name}"; role: button }
+        }
+        group {
+            show: phone == 2 and 3 < win.docks.2
+            let ax = W / 2 + (3 - (min(win.docks.2, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.2.3.hover; color: #ffffff; opacity: 7% + 6% * phapp.2.3.hover }
+            image dockicon.2.3 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.2.3.windows > 0 }
+            zone ellipse phapp.2.3 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.2.3.name}"; role: button }
+        }
+        group {
+            show: phone == 2 and 4 < win.docks.2
+            let ax = W / 2 + (4 - (min(win.docks.2, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.2.4.hover; color: #ffffff; opacity: 7% + 6% * phapp.2.4.hover }
+            image dockicon.2.4 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.2.4.windows > 0 }
+            zone ellipse phapp.2.4 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.2.4.name}"; role: button }
+        }
+        group {
+            show: phone == 2 and 5 < win.docks.2
+            let ax = W / 2 + (5 - (min(win.docks.2, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.2.5.hover; color: #ffffff; opacity: 7% + 6% * phapp.2.5.hover }
+            image dockicon.2.5 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.2.5.windows > 0 }
+            zone ellipse phapp.2.5 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.2.5.name}"; role: button }
+        }
+        group {
+            show: phone == 3 and 0 < win.docks.3
+            let ax = W / 2 + (0 - (min(win.docks.3, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.3.0.hover; color: #ffffff; opacity: 7% + 6% * phapp.3.0.hover }
+            image dockicon.3.0 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.3.0.windows > 0 }
+            zone ellipse phapp.3.0 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.3.0.name}"; role: button }
+        }
+        group {
+            show: phone == 3 and 1 < win.docks.3
+            let ax = W / 2 + (1 - (min(win.docks.3, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.3.1.hover; color: #ffffff; opacity: 7% + 6% * phapp.3.1.hover }
+            image dockicon.3.1 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.3.1.windows > 0 }
+            zone ellipse phapp.3.1 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.3.1.name}"; role: button }
+        }
+        group {
+            show: phone == 3 and 2 < win.docks.3
+            let ax = W / 2 + (2 - (min(win.docks.3, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.3.2.hover; color: #ffffff; opacity: 7% + 6% * phapp.3.2.hover }
+            image dockicon.3.2 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.3.2.windows > 0 }
+            zone ellipse phapp.3.2 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.3.2.name}"; role: button }
+        }
+        group {
+            show: phone == 3 and 3 < win.docks.3
+            let ax = W / 2 + (3 - (min(win.docks.3, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.3.3.hover; color: #ffffff; opacity: 7% + 6% * phapp.3.3.hover }
+            image dockicon.3.3 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.3.3.windows > 0 }
+            zone ellipse phapp.3.3 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.3.3.name}"; role: button }
+        }
+        group {
+            show: phone == 3 and 4 < win.docks.3
+            let ax = W / 2 + (4 - (min(win.docks.3, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.3.4.hover; color: #ffffff; opacity: 7% + 6% * phapp.3.4.hover }
+            image dockicon.3.4 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.3.4.windows > 0 }
+            zone ellipse phapp.3.4 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.3.4.name}"; role: button }
+        }
+        group {
+            show: phone == 3 and 5 < win.docks.3
+            let ax = W / 2 + (5 - (min(win.docks.3, 6) - 1) / 2) * 64
+            let ay = H - ph.hb - 46 + 30 * (1 - pc)
+            ellipse { at: ax, ay; radius: 27 + 3 * phapp.3.5.hover; color: #ffffff; opacity: 7% + 6% * phapp.3.5.hover }
+            image dockicon.3.5 { at: ax - 19, ay - 19; size: 38, 38 }
+            ellipse { at: ax, ay + 33; radius: 2.2; color: mint; show: win.dock.3.5.windows > 0 }
+            zone ellipse phapp.3.5 { at: ax, ay; radius: 29; cursor: pointer; active: is.ph and ph.home and pc > 0.9; label: "{win.dock.3.5.name}"; role: button }
+        }
+    }
+    on release phapp.0.0 {
+        dock 0 on 0
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.0.1 {
+        dock 1 on 0
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.0.2 {
+        dock 2 on 0
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.0.3 {
+        dock 3 on 0
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.0.4 {
+        dock 4 on 0
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.0.5 {
+        dock 5 on 0
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.1.0 {
+        dock 0 on 1
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.1.1 {
+        dock 1 on 1
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.1.2 {
+        dock 2 on 1
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.1.3 {
+        dock 3 on 1
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.1.4 {
+        dock 4 on 1
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.1.5 {
+        dock 5 on 1
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.2.0 {
+        dock 0 on 2
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.2.1 {
+        dock 1 on 2
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.2.2 {
+        dock 2 on 2
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.2.3 {
+        dock 3 on 2
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.2.4 {
+        dock 4 on 2
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.2.5 {
+        dock 5 on 2
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.3.0 {
+        dock 0 on 3
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.3.1 {
+        dock 1 on 3
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.3.2 {
+        dock 2 on 3
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.3.3 {
+        dock 3 on 3
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.3.4 {
+        dock 4 on 3
+        ph.cards = 0
+        ph.front = -1
+    }
+    on release phapp.3.5 {
+        dock 5 on 3
+        ph.cards = 0
+        ph.front = -1
+    }
+    // The status line and the bar at the bottom, over everything.
+    group {
+        show: is.ph
+        z: 200000
+        box { from: 0, 0; size: W, ph.sb; color: #05090b; opacity: 80% * (1 - pc) }
+        text now.time { at: 22, ph.sb / 2 + 1; anchor: left center; size: 13.5; weight: 700; color: ink }
+        ellipse { at: W - 82, ph.sb / 2 + 1; radius: 3.5; color: mint }
+        text "pleamar" { at: W - 74, ph.sb / 2 + 1; anchor: left center; size: 12.5; weight: 600; color: ink; opacity: 80% }
+        box { from: 0, H - ph.hb; size: W, ph.hb; color: #05090b; opacity: 80% * (1 - pc) }
+        box { at: W / 2, H - ph.hb / 2; size: 132 + 24 * ph_bar.hover, 5; corner: 3; color: ink; opacity: 75% }
+        zone box ph_bar { from: W / 2 - 110, H - ph.hb - 6; size: 220, ph.hb + 6; cursor: pointer; active: is.ph; label: "Apps"; role: button }
+    }
+
+    // ── while the session is on the phone, the real monitors are covered:
+    // whoever walks past sees where it went, not what is being done. A key
+    // or the mouse here brings it back, locked (the session says so). ──
+    prop curtain.wave = 0 ~2600ms
+    prop curtain.float = 0 ~spring(6, 5)
+    fact curtain.n = 0
+    every 2600ms while phone >= 0 {
+        curtain.n = curtain.n + 1
+        curtain.wave: 0 ~0ms
+        curtain.wave: 1 ~2600ms after 16ms
+        curtain.float: if(mod(curtain.n, 2) == 0, -8, 8)
+    }
+    prop curtain.shown = 0 ~700ms
+    follow curtain.shown = if(phone >= 0, 1, 0)
+    surface phone_curtain {
+        size: full, full
+        anchor: top_left
+        level: overlay
+        screens: each max 4
+        open: curtain.shown > 0.001 and screen.index != phone
+        // (Each copy, its own monitor's: the surface's own measure is one for all of them.)
+        let cw.w = pick(screen.index, screen.0.width, screen.1.width, screen.2.width, screen.3.width)
+        let cw.h = pick(screen.index, screen.0.height, screen.1.height, screen.2.height, screen.3.height)
+        let cx = cw.w / 2
+        let cy = cw.h / 2 - 40 + curtain.float
+        box { from: 0, 0; size: cw.w, cw.h; color: #05090b; opacity: 94% * curtain.shown }
+        group {
+            opacity: curtain.shown
+            group {
+                blur: 90
+                ellipse { at: cx, cy; radius: 260; color: #1f5a4c; opacity: 45% }
+            }
+            // Rings of water going out from it.
+            ellipse { at: cx, cy; radius: 70 + 220 * curtain.wave; stroke: 1.5; color: mint; opacity: 30% * (1 - curtain.wave) }
+            ellipse { at: cx, cy; radius: 70 + 110 * curtain.wave; stroke: 1; color: mint; opacity: 18% * (1 - curtain.wave) }
+            // The phone.
+            group {
+                blur: 18
+                box { at: cx, cy; size: 112, 214; corner: 22; stroke: 6; color: mint; opacity: 35% }
+            }
+            body {
+                color: #0b1316
+                rim: 20%
+                box { at: cx, cy; size: 112, 214; corner: 22 }
+            }
+            box { at: cx, cy; size: 112, 214; corner: 22; stroke: 1.6; color: mint; opacity: 85% }
+            box { at: cx, cy - 92; size: 30, 5; corner: 3; color: mint; opacity: 50% }
+            box { at: cx, cy + 96; size: 34, 3; corner: 2; color: ink; opacity: 60% }
+            // Its water, sloshing.
+            group {
+                clip box { at: cx, cy; size: 106, 208; corner: 19 }
+                ellipse { at: cx - 20 + curtain.float * 2, cy + 74; radius: 90; scale: 1, 0.35; color: #2a6b5b; opacity: 70% }
+                ellipse { at: cx + 26 - curtain.float * 2, cy + 86; radius: 80; scale: 1, 0.3; color: #9ed6bd; opacity: 35% }
+            }
+            text "Your session is on your phone" { at: cx, cy + 160; anchor: center; size: 24; weight: 650; color: ink }
+            text "Touch a key or the mouse here to bring it back · it will ask you to unlock" { at: cx, cy + 194; anchor: center; size: 13.5; color: #9aa3a8 }
+        }
     }
 
     // ── this desktop used from elsewhere (`pleamar-wm remote`) ──

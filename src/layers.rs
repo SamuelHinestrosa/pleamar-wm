@@ -346,6 +346,30 @@ pub fn request_power(monitor: Option<usize>, on: bool) {
     }
 }
 
+/// The phone's monitor (`pleamar-wm remote` from a phone, see docs/phone.md):
+/// put up with its size in pixels and its scale, or taken down.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PhoneWish {
+    pub size: (u32, u32),
+    pub scale: f64,
+}
+
+type PhoneSink = Box<dyn Fn(Option<PhoneWish>) -> bool + Send>;
+static PHONE: Mutex<Option<PhoneSink>> = Mutex::new(None);
+
+pub fn set_phone_sink(sink: PhoneSink) {
+    *PHONE.lock().unwrap() = Some(sink);
+}
+
+/// Whether there is anyone to put a phone's monitor up: a session of our own
+/// (or headless), not pleamar-wm inside another compositor.
+pub fn request_phone(wish: Option<PhoneWish>) -> bool {
+    PHONE.lock().unwrap().as_ref().is_some_and(|sink| sink(wish))
+}
+
+/// The name a phone's monitor has, to tell it from the real ones.
+pub const PHONE_NAME: &str = "PHONE-1";
+
 /// Which monitors are on, as the session last said.
 static POWERED: Mutex<Vec<bool>> = Mutex::new(Vec::new());
 
