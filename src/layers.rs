@@ -260,6 +260,11 @@ pub struct ClientLayer {
     /// Which program it is (0: none known), so that its own changes do not
     /// count as «something changed behind» for its own pictures.
     pub owner: u64,
+    /// Shown smaller than it is drawn (1: as it is): a panel wider than the
+    /// phone's monitor, so that its middle fits (see `phone_zoom`). The
+    /// pieces keep their own pixels; where they go and where the pointer
+    /// touches them is scaled by this.
+    pub zoom: f64,
 }
 
 pub struct ClientPiece {
@@ -278,9 +283,20 @@ pub struct ClientPiece {
 }
 
 impl ClientLayer {
+    /// A piece's box on the monitor (its pixels, shown at `zoom`).
+    pub fn piece_rect(&self, p: &ClientPiece) -> [i32; 4] {
+        let z = self.zoom;
+        [self.rect[0] + (p.at.0 as f64 * z).round() as i32, self.rect[1] + (p.at.1 as f64 * z).round() as i32, (p.size.0 as f64 * z).ceil() as i32, (p.size.1 as f64 * z).ceil() as i32]
+    }
+
+    /// A point of the monitor, in its own pixels (from its corner).
+    pub fn local(&self, x: f64, y: f64) -> (f64, f64) {
+        ((x - self.rect[0] as f64) / self.zoom, (y - self.rect[1] as f64) / self.zoom)
+    }
+
     /// Whether it takes the pointer at that point of the monitor.
     pub fn takes(&self, x: f64, y: f64) -> bool {
-        let (lx, ly) = (x - self.rect[0] as f64, y - self.rect[1] as f64);
+        let (lx, ly) = self.local(x, y);
         let inside = |r: &[i32; 4]| lx >= r[0] as f64 && ly >= r[1] as f64 && lx < (r[0] + r[2]) as f64 && ly < (r[1] + r[3]) as f64;
         let Some(root) = self.pieces.first() else { return false };
         // A menu hanging from it takes it wherever it is drawn.
@@ -455,13 +471,13 @@ pub fn show(monitor: usize, layer: ClientLayer) {
         if same_place {
             if let Some(n) = &new {
                 for p in n.pieces.iter().filter(|p| p.content.is_some()) {
-                    st.note_change([n.rect[0] + p.at.0, n.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32], n.owner);
+                    st.note_change(n.piece_rect(p), n.owner);
                 }
             }
         } else {
             for l in old.iter().chain(new.iter()) {
                 for p in &l.pieces {
-                    st.note_change([l.rect[0] + p.at.0, l.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32], l.owner);
+                    st.note_change(l.piece_rect(p), l.owner);
                 }
             }
         }
@@ -498,7 +514,7 @@ pub fn hide(id: u64) {
         if let Some(i) = st.clients.iter().position(|c| c.id == id) {
             let old = st.clients.remove(i);
             for p in &old.pieces {
-                st.note_change([old.rect[0] + p.at.0, old.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32], old.owner);
+                st.note_change(old.piece_rect(p), old.owner);
             }
             for p in old.pieces {
                 if let (Some(PieceContent::Dmabuf(_)), Some(b)) = (&p.content, p.buffer) {
@@ -583,7 +599,7 @@ mod tests {
     fn dragging_while_windows_redraw_does_not_freeze() {
         let info = MonitorInfo { name: "A".into(), size: (1920, 1080), x: 0, y: 0, mhz: 60_000, scale: 1.0 };
         register(vec![(info, crate::screen::screen("A".into(), (1920, 1080), Box::new(Nowhere)))]);
-        show(0, ClientLayer { id: 7, level: 3, rect: [0, 0, 32, 32], pieces: Vec::new(), region: Some(Vec::new()), keyboard: 0, blur: Vec::new(), owner: 0 });
+        show(0, ClientLayer { id: 7, level: 3, rect: [0, 0, 32, 32], pieces: Vec::new(), region: Some(Vec::new()), keyboard: 0, blur: Vec::new(), owner: 0, zoom: 1.0 });
         set_drag_icon(vec![(0, 7)]);
         let (done, finished) = std::sync::mpsc::channel();
         let mover = {

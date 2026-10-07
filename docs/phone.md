@@ -52,6 +52,17 @@ window manager and the shell are scenes.
 | The curtain | `session.plm` | a surface over the real monitors, left out of captures |
 | Touch | `remote.html` | taps, holds, scrolls with momentum, swipes from the edges; the phone's keyboard types |
 
+## Marea, and other panels
+
+Marea follows you onto the phone (`screens: each max 3`): she lives at the
+top of it, in the middle of the status line, like an island, and her card
+opens there. A panel wider than the phone —her surface is 820 points, for
+her card and its shadow— is shown smaller on the phone's monitor, as if it
+were 580 points across (`phone_zoom`): the compositor scales where its
+pieces go and where the pointer touches them, and the program draws as
+ever. Programs that run through XWayland are drawn at scale 1 and enlarged
+on the phone: softer than the rest (Discord and the browsers are native).
+
 ## Locked at the desk
 
 The lock screen is only on the real monitors, so a locked session does not
