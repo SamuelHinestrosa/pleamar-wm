@@ -373,7 +373,7 @@ impl Preview {
                         match result { Ok(())=>self.tell(self.dock.events())?,Err(error)=>eprintln!("windows dock: {error}") }
                     },
                     Ok(ToNest::OpenProgram {key,files}) => {
-                        if let Err(error)=self.scope.dock_actions().and_then(|_|self.dock.open(&key,&files,&mut self.launches,&self.activations)) {
+                        if let Err(error)=self.scope.dock_actions().and_then(|_|self.dock.open(&key,&files,&self.activations)) {
                             eprintln!("windows dock: {error}");
                         }
                     },

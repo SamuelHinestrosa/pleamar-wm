@@ -204,7 +204,7 @@ impl Manager {
         Ok(())
     }
     fn status(&self) -> Value {
-        json!({"running":true,"automatic_layouts":true,"window_overview":true,"rain":false,"snow":false,"ride":false,"dock":false,
+        json!({"running":true,"automatic_layouts":true,"window_overview":true,"application_dock":true,"rain":false,"snow":false,"ride":false,"dock":false,
             "pools":false,"process":self.process,"owner":self.owner,"saved_windows":self.originals.len(),
             "pending_recovery":self.originals.values().filter(|w|self.modes.get(&w.monitor).is_none_or(|m|!m.tiled)).count(),
             "catalog_scans":self.scans,"geometry_changes":self.changes,

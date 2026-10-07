@@ -10,11 +10,15 @@ parser.add_argument('--binary', type=Path, required=True)
 parser.add_argument('--fixture', type=Path, required=True)
 parser.add_argument('--monitor', required=True)
 parser.add_argument('--output', type=Path, required=True)
+parser.add_argument('--scene-file', type=Path, help='Marea application dock scene, exercised with its actual Luau companion')
+parser.add_argument('--ci-owned-desktop', action='store_true', help='Allow the disposable CI desktop; refused on local machines')
 parser.add_argument('--ci-ole-source', type=Path, help='Owned engine test binary; requires the explicit disposable CI step')
 options = parser.parse_args()
 ci_drop=options.ci_ole_source is not None
 if ci_drop and (os.environ.get('GITHUB_ACTIONS')!='true' or os.environ.get('RUNNER_ENVIRONMENT')!='github-hosted' or os.environ.get('PLEAMAR_WM_CI_DOCK_DROP')!='1'):
     raise RuntimeError('OS file dragging is restricted to the disposable GitHub-hosted test')
+if options.ci_owned_desktop and (os.environ.get('GITHUB_ACTIONS')!='true' or os.environ.get('RUNNER_ENVIRONMENT')!='github-hosted' or os.environ.get('PLEAMAR_WM_CI_DOCK')!='1'):
+    raise RuntimeError('The primary desktop is restricted to the disposable GitHub-hosted test')
 repo = Path(__file__).resolve().parents[1]
 binary = options.binary.resolve(strict=True)
 fixture = options.fixture.resolve(strict=True)
@@ -23,7 +27,7 @@ assert not output.exists(), 'Use a fresh output directory; preserve previous evi
 assert binary.is_file() and fixture.is_file()
 flags = subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS
 screens = json.loads(subprocess.check_output([str(binary), 'monitors'], creationflags=flags, encoding='utf-8'))
-matching = [s for s in screens if s['name'] == options.monitor and (ci_drop or not s['primary'])]
+matching = [s for s in screens if s['name'] == options.monitor and (ci_drop or options.ci_owned_desktop or not s['primary'])]
 assert len(matching) == 1, 'The explicit non-primary monitor is unavailable'
 screen = matching[0]
 output.mkdir()
@@ -31,11 +35,21 @@ env = os.environ.copy()
 env.update(PLEAMAR_CONFIG=str(output / 'config'), APPDATA=str(output / 'appdata'), LOCALAPPDATA=str(output / 'localappdata'),
            PLEAMAR_SOCKET_DIR=f'native-dock-acceptance-{os.getpid()}', PLEAMAR_NO_RELAUNCH='1',
            PLEAMAR_TEST_WINDOWS='1', PLEAMAR_DOCK_FIXTURE_MONITOR=screen['name'], PLEAMAR_DOCK_FIXTURE_ROOT=str(output))
-source = (repo / 'examples/windows-dock.plm').read_text(encoding='utf-8')
-surface = 'surface { size: 900, 420; kind: window; title: "pleamar · native dock" }'
-assert source.count(surface) == 1
-source = source.replace(surface, 'surface { size: 900, 420; keyboard: none; anchor: center; reserve: 0; rate: 30 }')
-scene_file = output / 'native-dock.plm'
+if options.scene_file:
+    original = options.scene_file.resolve(strict=True)
+    assert original.name == 'windows-dock.plm'
+    source = original.read_text(encoding='utf-8')
+    assert source.count('keyboard: on_demand') == 1
+    source = source.replace('keyboard: on_demand', 'keyboard: none')
+    scene_file = output / original.name
+    scene_file.with_suffix('.luau').write_bytes(original.with_suffix('.luau').read_bytes())
+    env.update(MAREA_DOCK_MONITOR=screen['name'], MAREA_LOCALE='es', PATH=str(binary.parent)+os.pathsep+env.get('PATH',''))
+else:
+    source = (repo / 'examples/windows-dock.plm').read_text(encoding='utf-8')
+    surface = 'surface { size: 900, 420; kind: window; title: "pleamar · native dock" }'
+    assert source.count(surface) == 1
+    source = source.replace(surface, 'surface { size: 900, 420; keyboard: none; anchor: center; reserve: 0; rate: 30 }')
+    scene_file = output / 'native-dock.plm'
 scene_file.write_text(source, encoding='utf-8')
 subprocess.run([str(binary), '--check', str(scene_file)], check=True, env=env, creationflags=flags, capture_output=True)
 
@@ -89,7 +103,10 @@ def guard():
     assert pid.value not in owned_pids, 'An owned test window unexpectedly took foreground'
     for process in owned_pids:
         for hwnd in windows(process):
-            box=W.RECT();assert user.GetWindowRect(hwnd,C.byref(box));work=screen['work']
+            box=W.RECT();assert user.GetWindowRect(hwnd,C.byref(box))
+            # The transparent dock surface includes the taskbar margin; its
+            # visible bar and input zones are above that margin.
+            work=screen['bounds'] if options.scene_file and scene is not None and process==scene.pid else screen['work']
             assert work['x']<=box.left<box.right<=work['x']+work['width']
             assert work['y']<=box.top<box.bottom<=work['y']+work['height']
 
@@ -123,6 +140,7 @@ def start_scene():
     log.close();owned_pids.add(scene.pid)
     wait(lambda:ask('get win.docks.0'),'scene endpoint')
     wait(lambda:len(canvases(scene.pid))==1,'scene window')
+    if options.scene_file:wait(lambda:ask('get dock_ready') in ('1','true'),'native dock work area')
 
 def stop_scene():
     global scene
@@ -176,6 +194,8 @@ try:
     first=wait(lambda:next((x for x in launches() if x['pid']==initial.pid),None),'initial fixture')
     start_scene();index=wait(fixture_index,'dock metadata')-1
     time.sleep(.7);capture('01-populated')
+    if options.scene_file:
+        press(f'open.{index} right');capture('00-pin-menu')
     press(f'keep.{index}')
     pins=output/'config/wm/windows-dock.json'
     wait(lambda:pins.exists() and len(json.loads(pins.read_text())['pins'])==1,'persisted pin')
@@ -189,6 +209,10 @@ try:
     second=wait(lambda:next((x for x in launches() if x['pid']!=initial.pid),None),'real relaunch')
     wait(lambda:ask('get win.dock.0.0.windows')=='1','relaunched native window');time.sleep(.4);capture('05-relaunched')
     assert second['args']==[];report['stages'].append('pin-restarts-actual-native-program')
+    stop_scene()
+    assert windows(second['pid']), 'Closing the dock killed its application'
+    start_scene();wait(lambda:ask('get win.dock.0.0.windows')=='1','application survives dock restart')
+    report['stages'].append('application-survives-dock-close-and-restart')
     active=second
     if ci_drop:
         close_fixture(second)
@@ -208,11 +232,22 @@ try:
         wait(lambda:ask('get win.dock.0.0.windows')=='1','file-drop native window')
         capture('07-file-drop');report['stages'].append('actual-ole-drop-delivers-both-file-paths')
         report['ole_source']=dict(binary=str(helper),sha256=hashlib.sha256(helper.read_bytes()).hexdigest(),request=request)
+    if options.scene_file:
+        press('open.0 right');capture('08-unpin-menu')
     press('unkeep.0');wait(lambda:json.loads(pins.read_text())['pins']==[],'persistent unpin');capture('06-unpinned')
     close_fixture(active);report['stages'].append('unpin-updates-storage-and-ui');guard()
+    if options.scene_file:
+        # Its Luau quit can close the pipe before the press reply is written.
+        try:press('leave')
+        except RuntimeError as error:report['hide_reply']=str(error)
+        assert scene.wait(timeout=8)==0, 'The hide action did not exit the owned dock cleanly'
+        report['stages'].append('marea-dock-hide-exits-through-luau')
+        report['marea_source']={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in [original,original.with_suffix('.luau')]}
     report.update(passed=True,foreground_owned_at_checks=False,commands=commands,launches=launches(),packaged_apps_tested=False,os_drag_drop_tested=ci_drop)
 finally:
     stop_scene()
+    for entry in launches():
+        if windows(entry['pid']):close_fixture(entry)
     if initial is not None and initial.poll() is None:initial.kill();initial.wait(timeout=5)
     report['remaining_owned_windows']=[pid for pid in owned_pids if windows(pid)]
     (output/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')

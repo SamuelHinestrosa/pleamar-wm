@@ -72,10 +72,10 @@ fn native_packaged_dock_activation() -> Result<()> {
     let mut owned=Owned(Vec::new());let mut seen=HashSet::new();
     let pin=Program {target:Target::Application(id.clone()),name:"Owned packaged dock application".into()};
     let path=root.join("pins.json");let mut dock=Dock::new(path.clone())?;dock.remember(pin.clone());
-    let mut launches=launch::Launches::default();let mut events=Vec::new();
+    let mut events=Vec::new();
     let activations=Activations::new(wait::Wake::new()?)?;
     let result=(|| -> Result<()> {
-        dock.open(&pin.key(),&[],&mut launches,&activations)?;
+        dock.open(&pin.key(),&[],&activations)?;
         let first=arrival(&root,&mut seen,&mut owned,&activations)?;
         assert!(first["package"].as_str().is_some_and(|p|p.starts_with("Pleamar.NativeDockTest_")));
         let hwnd=HWND(first["hwnd"].as_u64().unwrap() as usize as _);
@@ -84,15 +84,13 @@ fn native_packaged_dock_activation() -> Result<()> {
         assert_eq!(resolved.target,pin.target,"packaged metadata must keep its activation identity");
         assert!(!resolved.name.is_empty());events.push(json!({"stage":"activate-and-resolve","window":first,"key":resolved.key(),"name":resolved.name}));
         dock.remember(resolved);dock.pin(&pin.key(),true)?;
-        drop(launches);
-        assert!(unsafe {IsWindow(Some(hwnd))}.as_bool(),"OS-owned activation must survive the scene launch collection");
         close(&first)?;
         let reloaded=Dock::new(path)?;assert_eq!(reloaded.pins.len(),1);
-        launches=launch::Launches::default();reloaded.open(&pin.key(),&[],&mut launches,&activations)?;
+        reloaded.open(&pin.key(),&[],&activations)?;
         let second=arrival(&root,&mut seen,&mut owned,&activations)?;events.push(json!({"stage":"restart-pinned-application","window":second}));close(&second)?;
         let files=[root.join("owned ñ 海 ' $HOME.plmdock"),root.join("second $(exit 9).plmdock")];
         for file in &files {std::fs::write(file,"owned package activation file")?;}
-        reloaded.open(&pin.key(),&files.iter().map(|p|p.to_string_lossy().into_owned()).collect::<Vec<_>>(),&mut launches,&activations)?;
+        reloaded.open(&pin.key(),&files.iter().map(|p|p.to_string_lossy().into_owned()).collect::<Vec<_>>(),&activations)?;
         let mut received=HashSet::new();
         for _ in &files {
             let value=arrival(&root,&mut seen,&mut owned,&activations)?;

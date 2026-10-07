@@ -161,13 +161,13 @@ impl Dock {
         } else if !yes { pins.retain(|p|p.key()!=key); }
         write(&self.path,&pins)?;self.pins=pins;Ok(())
     }
-    pub fn open(&self,key:&str,files:&[String],launches:&mut launch::Launches,activations:&Activations) -> Result<()> {
+    pub fn open(&self,key:&str,files:&[String],activations:&Activations) -> Result<()> {
         let program=self.programs.get(key).or_else(||self.pins.iter().find(|p|p.key()==key)).ok_or("unknown dock program")?;
         if files.len()>256 || files.iter().any(|p|p.contains('\0') || p.len()>32768 || !Path::new(p).is_absolute()) {
             return Err("invalid dropped file paths".into());
         }
         match &program.target {
-            Target::Executable(path)=>{ launches.executable(path,files)?; },
+            Target::Executable(path)=>{ launch::application(path,files)?; },
             Target::Application(id)=>activations.request(id,files)?,
         }
         Ok(())
@@ -392,6 +392,30 @@ mod tests {
     }
     #[test]
     fn native_executable_receives_file_names_without_shell_evaluation() -> Result<()> {
+        use std::os::windows::process::CommandExt;
+        // Production prepares an explicitly breakaway-capable job before
+        // opening applications. Isolate that process-wide setup from other tests.
+        let output=std::process::Command::new(std::env::current_exe()?)
+            .args(["--ignored","--exact","windows_backend::dock::tests::owned_dock_argument_runtime","--nocapture"])
+            .env("PLEAMAR_DOCK_ARGUMENT_RUNTIME","1")
+            .creation_flags(CREATE_NO_WINDOW.0).output()?;
+        assert!(output.status.success(),"{}\n{}",String::from_utf8_lossy(&output.stdout),String::from_utf8_lossy(&output.stderr));
+        Ok(())
+    }
+    #[test]
+    #[ignore = "owned argument fixture with the real runtime job; no windows or input"]
+    fn owned_dock_argument_runtime() -> Result<()> {
+        use windows::Win32::System::JobObjects::*;
+        assert_eq!(std::env::var("PLEAMAR_DOCK_ARGUMENT_RUNTIME").as_deref(),Ok("1"));
+        // Keep the runtime-style job until this isolated subprocess exits.
+        // Closing it inside the test would terminate the test process itself.
+        let job=unsafe {CreateJobObjectW(None,PCWSTR::null())}?;
+        let mut limits=JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+        limits.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE|JOB_OBJECT_LIMIT_BREAKAWAY_OK;
+        unsafe {
+            SetInformationJobObject(job,JobObjectExtendedLimitInformation,&limits as *const _ as _,size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32)?;
+            AssignProcessToJobObject(job,GetCurrentProcess())?;
+        }
         let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
         let directory=std::env::temp_dir().join(format!("pleamar dock ñ ' {}-{nonce}",std::process::id()));
         std::fs::create_dir(&directory)?;
@@ -406,7 +430,7 @@ mod tests {
         let expected=vec![directory.join("it's ñ 海.txt").to_string_lossy().into_owned(),directory.join("$HOME; $(exit 9).txt").to_string_lossy().into_owned()];
         let mut files=vec![script.to_string_lossy().into_owned()];files.extend(expected.clone());
         let activations=Activations::new(wait::Wake::new()?)?;
-        let mut launched=launch::Launches::default();dock.open(&program.key(),&files,&mut launched,&activations)?;
+        dock.open(&program.key(),&files,&activations)?;
         let deadline=Instant::now()+Duration::from_secs(20);
         let received=loop {
             if let Ok(data)=std::fs::read(&report) {
@@ -419,14 +443,16 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         };
         assert_eq!(received,expected);
-        loop {
-            let now=Instant::now();launched.poll(now)?;
-            if launched.wait(now).is_none() { break; }
-            assert!(now<deadline,"dock fixture process did not exit");
-            std::thread::sleep(Duration::from_millis(10));
+        for file in [script,report] {
+            loop {
+                match std::fs::remove_file(&file) {
+                    Ok(())=>break,
+                    Err(error) if (error.kind()==std::io::ErrorKind::PermissionDenied || matches!(error.raw_os_error(),Some(32|33))) && Instant::now()<deadline=>
+                        std::thread::sleep(Duration::from_millis(10)),
+                    Err(error)=>return Err(error.into()),
+                }
+            }
         }
-        drop(launched);
-        for file in [script,report] { std::fs::remove_file(file)?; }
         std::fs::remove_dir(directory)?;Ok(())
     }
 }

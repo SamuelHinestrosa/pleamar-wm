@@ -649,7 +649,7 @@ launch is unavailable. Physical cross-monitor acceptance is still pending.
 | Live scene layouts; private/workspace rules | Pending |
 | Live window previews | Experimental native capture/render transport; one source or represented scene monitors, optional native focus/close/minimize/restore and bounded scene size requests; new multi-output mapping awaits native acceptance |
 | Marea menu/finder bridge | Module tested with real Luau, IPC and owned Windows windows; complete Marea UI acceptance pending; package lifecycle tested separately |
-| Native dock | Experimental: classic-app icons, pin/unpin, restart persistence and relaunch verified on secondary DISPLAY1; actual OS file drop and owned packaged multi-file activation verified in Windows CI; full Marea integration pending |
+| Native dock | Experimental: classic-app icons, pin/unpin, restart persistence and relaunch verified on secondary DISPLAY1; actual OS file drop and owned packaged multi-file activation verified in Windows CI; Marea application bar source integrated and tested on secondary DISPLAY1; installed walkthrough and physical-input acceptance pending |
 | Rain, snow, ride, animated window transitions | Pending native equivalents |
 | Per-monitor tide pools and overview | Pending; Windows virtual desktops are not the same model |
 | Independent agent pointer/keyboard, glow and stop UI | Pending; Marea currently uses guarded shared Windows input |
@@ -664,7 +664,10 @@ of `wm/windows-dock.json` in pleamar's Windows configuration directory, separate
 from Linux's `session.conf`. View-only and process-scoped previews refuse changes.
 
 Classic programs use `CreateProcessW` with typed executable/file arguments and
-creation-time Job Object ownership. Package launches retain their OS-managed
+explicit breakaway from the runtime job. User applications survive the dock
+closing; authored scene helpers still have creation-time Job Object ownership.
+An enclosing job that refuses breakaway returns its error instead of launching
+an app that would die with the dock. Package launches retain their OS-managed
 lifetime. Packaged file activation uses one shell item array per drop. If the app
 lacks UWP's `Windows.File` contract, its exact registered Open With handler runs
 on a separate STA thread. The file's default app is never substituted. Shell
@@ -702,9 +705,11 @@ handler invocations; one window disappeared. One array per activation fixed
 that failing acceptance. Earlier failures exposed canonical shell paths, the
 missing UWP contract and STA requirements. The package and test certificate
 were removed. No machine policy, local package registration, Store account or
-download is involved. The subsequent asynchronous-worker change still needs
-this same native rerun. The fixture does not establish every Store/UWP app or
-full Marea integration, and the broad `dock` capability remains false.
+download is involved. The asynchronous-worker revision also passed the
+[same native acceptance](https://github.com/SamuelHinestrosa/pleamar-wm/actions/runs/37675713712).
+The fixture does not establish every Store/UWP app. `application_dock: true`
+exposes native application icons, pins and activation to Marea; the broader
+Linux workspace `dock` capability remains false.
 
 To run the local scene regression on an explicitly named non-primary output:
 
@@ -857,3 +862,16 @@ actual WGC pixels changed when its owned source repainted, source closure was
 reflected, the scene exited normally and foreground remained unchanged. No
 physical input was sent. This rerun does not replace the outstanding interactive
 or hardware acceptance listed above.
+
+
+The subsequent 2026-10-07 lifetime regression passed 56 local default-feature
+release tests (18 opt-in helper tests excluded). The real Marea dock scene was
+then exercised with `--scene-file ../marea-plm/tools/windows-dock.plm` added to
+the command above. Its Spanish menus, native pin/relaunch/unpin, application
+survival after the scene exited, and Hide action passed on secondary DISPLAY1.
+The harness copies its Luau companion, disables activation for the test,
+isolates state and confines all owned windows to that monitor. The actual
+Windows taskbar work-area inset is handled by Marea's dock logic. Local primary
+monitor acceptance is refused; only the explicit GitHub-hosted fixture may use
+`--ci-owned-desktop`. These named scene actions do not inject OS input or prove
+physical keyboard/mouse dispatch.

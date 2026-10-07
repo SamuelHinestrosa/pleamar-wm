@@ -348,7 +348,7 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
             "window_rules": ["app", "title", "float", "size", "monitor"], "private_window_rules": false, "workspace_window_rules": false,
             "window_scene_provider": false, "automatic_session": true, "rain": false, "snow": false,
             "session_shortcuts": ["minimize", "restore_last", "toggle_free", "focus_next", "focus_previous", "close"],
-            "ride": false, "dock": false, "pools": false, "remote": false, "phone_monitor": false, "independent_agent_seat": false,
+            "application_dock": true, "ride": false, "dock": false, "pools": false, "remote": false, "phone_monitor": false, "independent_agent_seat": false,
             "agent_scene_commands": ["scenes", "tree", "press", "wait", "watch", "say"]}))),
         ["agent", rest @ ..] => agent::execute(rest),
         ["monitors"] => Ok(Some(serde_json::to_value(monitors()?)?)),

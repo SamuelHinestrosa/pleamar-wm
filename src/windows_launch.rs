@@ -55,6 +55,7 @@ impl Launches {
         let executable=std::path::PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe");
         self.create(&executable,command)
     }
+    #[cfg(test)]
     pub(super) fn executable(&mut self,path:&str,args:&[String]) -> Result<u32> {
         self.create(Path::new(path),executable_line(path,args)?)
     }
@@ -124,6 +125,22 @@ fn executable_line(path:&str,args:&[String]) -> Result<Vec<u16>> {
     let command:Vec<u16>=command.encode_utf16().chain([0]).collect();
     if command.len()>32767 { return Err("native arguments exceed the Windows command-line limit".into()); }
     Ok(command)
+}
+
+/// User applications outlive the dock, unlike authored scene helpers.
+pub(super) fn application(path:&str,args:&[String]) -> Result<u32> {
+    let mut command=executable_line(path,args)?;
+    let executable:Vec<u16>=path.encode_utf16().chain([0]).collect();
+    let startup=STARTUPINFOW {cb:size_of::<STARTUPINFOW>() as u32,..Default::default()};
+    let mut info=PROCESS_INFORMATION::default();
+    // The engine's own job permits explicit breakaway. If an enclosing job
+    // refuses it, report that error: falling back would kill the user's app
+    // when its launcher closes.
+    unsafe {CreateProcessW(PCWSTR(executable.as_ptr()),Some(PWSTR(command.as_mut_ptr())),None,None,false,
+        CREATE_NO_WINDOW|CREATE_BREAKAWAY_FROM_JOB,None,PCWSTR::null(),&startup,&mut info)}?;
+    let _process=unsafe {own(info.hProcess)};
+    let _thread=unsafe {own(info.hThread)};
+    Ok(info.dwProcessId)
 }
 
 fn command_line(line:&str) -> Result<Vec<u16>> {

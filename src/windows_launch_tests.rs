@@ -143,6 +143,60 @@ fn scene_launch_descendants_end_after_forced_owner_exit() {
 #[ignore = "owned subprocess helper, no windows or input"]
 fn launch_leaf() { std::thread::sleep(Duration::from_secs(40)); }
 
+struct Application(OwnedHandle);
+impl Drop for Application {
+    fn drop(&mut self) {
+        unsafe {let _=TerminateProcess(handle(&self.0),0);WaitForSingleObject(handle(&self.0),5000);}
+    }
+}
+fn application_owner(mode:&str,files:&Files) -> ChildGuard {
+    ChildGuard(Command::new(std::env::current_exe().unwrap())
+        .args(["--ignored","--exact","windows_backend::launch::tests::owned_application_launcher"])
+        .env("PLEAMAR_LAUNCH_TEST_DIR",&files.0).env("PLEAMAR_LAUNCH_TEST_BREAKAWAY",mode)
+        .creation_flags(CREATE_NO_WINDOW.0).spawn().unwrap())
+}
+
+#[test]
+fn application_survives_its_owned_launcher_and_job() {
+    let files=Files::new();let mut owner=application_owner("allow",&files);
+    let report:Value=serde_json::from_str(&wait_file(&files.file("result.txt"))).unwrap();
+    let pid=report["pid"].as_u64().expect("application creation failed") as u32;
+    let child=Application(unsafe {own(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|PROCESS_SYNCHRONIZE|PROCESS_TERMINATE,false,pid).unwrap())});
+    owner.0.kill().unwrap();owner.0.wait().unwrap();
+    assert_eq!(unsafe {WaitForSingleObject(handle(&child.0),250)},WAIT_TIMEOUT,"closing the dock killed its application");
+}
+
+#[test]
+fn application_refuses_a_job_that_would_kill_it_with_the_launcher() {
+    let files=Files::new();let _owner=application_owner("deny",&files);
+    let report:Value=serde_json::from_str(&wait_file(&files.file("result.txt"))).unwrap();
+    assert!(report["pid"].is_null(),"restricted job unexpectedly launched an application");
+    assert!(report["error"].as_str().is_some_and(|error|!error.is_empty()));
+}
+
+#[test]
+#[ignore = "owned application-lifetime helper, requires an isolated directory and job mode"]
+fn owned_application_launcher() {
+    let directory=PathBuf::from(std::env::var_os("PLEAMAR_LAUNCH_TEST_DIR").expect("isolated test directory"));
+    assert!(directory.is_absolute() && directory.is_dir());
+    let mode=std::env::var("PLEAMAR_LAUNCH_TEST_BREAKAWAY").unwrap();
+    assert!(matches!(mode.as_str(),"allow"|"deny"));
+    let job=unsafe {own(CreateJobObjectW(None,PCWSTR::null()).unwrap())};
+    let mut limits=JOBOBJECT_EXTENDED_LIMIT_INFORMATION::default();
+    limits.BasicLimitInformation.LimitFlags=JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE;
+    if mode=="allow" {limits.BasicLimitInformation.LimitFlags|=JOB_OBJECT_LIMIT_BREAKAWAY_OK;}
+    unsafe {
+        SetInformationJobObject(handle(&job),JobObjectExtendedLimitInformation,&limits as *const _ as _,size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32).unwrap();
+        AssignProcessToJobObject(handle(&job),GetCurrentProcess()).unwrap();
+    }
+    let args=["--ignored","--exact","windows_backend::launch::tests::launch_leaf"].map(str::to_owned);
+    let report=match application(&std::env::current_exe().unwrap().to_string_lossy(),&args) {
+        Ok(pid)=>json!({"pid":pid}),Err(error)=>json!({"error":error.to_string()}),
+    };
+    std::fs::write(directory.join("result.txt"),serde_json::to_vec(&report).unwrap()).unwrap();
+    std::thread::sleep(Duration::from_secs(40));
+}
+
 #[test]
 #[ignore = "owned subprocess helper, requires its isolated test directory"]
 fn launch_owner() {
