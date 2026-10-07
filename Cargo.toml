@@ -16,6 +16,15 @@ path = "src/bin/pleamar-wm-host.rs"
 test = false
 required-features = ["windows-host"]
 
+[workspace]
+# `stream`: the remote's video, a program of its own (it links the system's
+# ffmpeg, which the session itself does not need; and a fault in an encoder
+# ends that program, not the remote). Built apart, `cargo build --release -p
+# pleamar-wm-stream`: without ffmpeg's development files it does not build,
+# and the remote uses wf-recorder instead.
+members = [".", "stream"]
+default-members = ["."]
+
 [dependencies]
 pleamar = { path = "../pleamar" }
 # Native Windows scene discovery and command routing.

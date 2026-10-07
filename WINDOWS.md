@@ -35,6 +35,15 @@ handoff. These remain part of the Linux remote server: its executable watching
 and in-place restart use Unix APIs. The Windows `remote` command still reports
 that the service is unavailable; the browser assets alone do not provide it.
 
+Upstream through `ba9c03ac` adds the separate `pleamar-wm-stream` encoder,
+asynchronous compositor readback, WebCodecs data-channel playback with a video-track
+fallback, and native tablet scale. These source changes are preserved for Linux.
+The new workspace keeps `pleamar-wm` as its default member, so the normal Windows
+build still needs neither FFmpeg development libraries nor Wayland. The optional
+stream encoder itself currently uses wlr-screencopy and Linux shared memory; it is
+not a Windows streaming backend. Building all workspace members on Windows is not
+supported yet. The upstream phone latency figures are not Windows measurements.
+
 ## Build and run from PowerShell
 
 Install the stable Rust x64 MSVC toolchain and Visual Studio Build Tools with
