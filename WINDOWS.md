@@ -175,7 +175,8 @@ must be recorded before treating it as verified.
 
 The Windows Server 2022 native tests exposed `CreateForWindow` failures for both
 ordinary owned dialogs and floating tool windows (`0x80070057`). The backend
-now tries the target's native GDI `WM_PRINT` rendering in a disposable child.
+now tries the target's native GDI `PrintWindow` rendering in a disposable child.
+The earlier direct `WM_PRINT` message failed to draw into the other process's DC.
 This uses the exact HWND and its child controls, with no desktop rectangle,
 owner substitution or window-style mutation. The helper ends on cancellation
 or after three seconds; protected, incomplete and unavailable images remain

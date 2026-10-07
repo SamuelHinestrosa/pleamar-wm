@@ -12,6 +12,15 @@ import sys
 import time
 
 
+def printed_pixels(path):
+    result = subprocess.run(['powershell.exe', '-NoLogo', '-NoProfile', '-NonInteractive',
+                             '-File', str(Path(__file__).with_name('windows-capture-pixels.ps1')),
+                             '-Path', str(path)], capture_output=True, text=True, encoding='utf-8', errors='replace',
+                            timeout=10, creationflags=subprocess.CREATE_NO_WINDOW)
+    assert result.returncode == 0, result.stdout + result.stderr
+    return json.loads(result.stdout)
+
+
 def require_ci():
     if (sys.platform != 'win32' or os.environ.get('GITHUB_ACTIONS') != 'true'
             or os.environ.get('RUNNER_ENVIRONMENT') != 'github-hosted'
@@ -188,6 +197,8 @@ def exercise(binary, tests, folder):
             width, height = struct.unpack('>II', png[16:24])
             assert (width, height) == (data['width'], data['height']) and data['window'] == identity
             assert data['capture_method'] in ['windows-graphics-capture', 'window-print']
+            if data['capture_method'] == 'window-print':
+                report.setdefault('printed_pixels', {})[path.name] = printed_pixels(path)
             report['images'].append(dict(file=path.name, width=width, height=height,
                                         capture_method=data['capture_method'], sha256=hashlib.sha256(png).hexdigest()))
             save()
@@ -357,6 +368,7 @@ def exercise(binary, tests, folder):
         width, height = struct.unpack('>II', png[16:24])
         assert (width, height) == (data['width'], data['height'])
         assert data['capture_method'] == 'window-print', 'tool case must exercise the fallback on this runner'
+        report.setdefault('printed_pixels', {})[tool_path.name] = printed_pixels(tool_path)
         report['images'].append(dict(file=tool_path.name, width=width, height=height,
                                     capture_method=data['capture_method'], sha256=hashlib.sha256(png).hexdigest()))
         assert desktop.user.SetForegroundWindow(hwnd), 'owned tool bootstrap focus'
