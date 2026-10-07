@@ -28,8 +28,9 @@ PID comes from scenes or windows. PID.N also addresses that process's scene.
 If one process has several endpoints, use scene:ENDPOINT to select one.
 Panels such as Marea may appear only in scenes, not the ordinary window catalog.
 This does not provide Linux's independent pointer, keyboard seat or cursor glide.
-Look uses native WGC without activating or restoring the window. Hidden/minimized
-windows and ambiguous PIDs are rejected. The output file must not exist.
+Look uses native WGC, with bounded GDI fallback for unsupported dialog handles,
+without activating or restoring the window. Hidden/minimized windows and ambiguous
+PIDs are rejected. Read-only pictures grant no input. The output file must not exist.
 Native application input is opt-in, in a separate terminal:
   serve --input foreground --monitor NAME [--process PID] [--seconds N]
                                  enable shared foreground input for 300 seconds (maximum 3600)
@@ -127,19 +128,25 @@ fn send_window(selector:&str,monitor:&str) -> Result<Value> {
     Ok(json!({"id":current.id,"monitor":current.monitor,"bounds":current.bounds}))
 }
 
-fn png(picture: capture::Picture) -> Result<Vec<u8>> {
-    use image::ImageEncoder;
-    let (width,height) = picture.size;
-    if width == 0 || height == 0 || width > 8192 || height > 8192 { return Err("invalid native capture dimensions".into()); }
-    let length = u64::from(width)*u64::from(height)*4;
-    if length > 16_777_216*4 || length != picture.pixels.len() as u64 || picture.shared.is_some() {
-        return Err("invalid native capture pixel buffer".into());
-    }
-    let mut rgba = picture.pixels;
-    for p in rgba.chunks_exact_mut(4) { p.swap(0,2); }
-    let mut encoded = Vec::new();
-    image::codecs::png::PngEncoder::new(&mut encoded).write_image(&rgba,width,height,image::ExtendedColorType::Rgba8)?;
-    Ok(encoded)
+struct CapturedPicture { png: Vec<u8>, size: (u32, u32), method: String }
+
+fn decode_picture(value: pleamar::windows_desktop::Value) -> Result<CapturedPicture> {
+    use base64::{Engine, engine::general_purpose::STANDARD};
+    use pleamar::windows_desktop::Value as DesktopValue;
+    let DesktopValue::Map(fields) = value else { return Err("invalid native picture".into()); };
+    let number = |key| fields.iter().find_map(|(name, v)| match v {
+        DesktopValue::Num(n) if name == key && n.is_finite() && n.fract() == 0.0 && *n >= 1.0 && *n <= 8192.0 => Some(*n as u32),
+        _ => None,
+    });
+    let size = (number("width").ok_or("invalid capture width")?, number("height").ok_or("invalid capture height")?);
+    if u64::from(size.0) * u64::from(size.1) > 16_777_216 { return Err("native picture exceeds the pixel limit".into()); }
+    let text = |key| fields.iter().find_map(|(name, v)| match v { DesktopValue::Text(s) if name == key => Some(s.as_str()), _ => None });
+    let data = text("data").ok_or("missing PNG")?;
+    if data.len() > 7 * 1024 * 1024 { return Err("native picture exceeds the transport limit".into()); }
+    let png = STANDARD.decode(data)?;
+    let dimensions = image::ImageReader::with_format(std::io::Cursor::new(&png), image::ImageFormat::Png).into_dimensions()?;
+    if dimensions != size { return Err("PNG dimensions differ from the native capture".into()); }
+    Ok(CapturedPicture { png, size, method: text("method").unwrap_or("unknown").into() })
 }
 
 fn write_picture(path: &Path, encoded: &[u8]) -> Result<()> {
@@ -156,32 +163,11 @@ fn look(selector: &str, output: Option<&str>) -> Result<()> {
     let catalog = windows()?;
     let window = select_window(&catalog,selector)?;
     if window.minimized { return Err("window is minimized; look does not restore or focus it".into()); }
-    let (hwnd,_) = target(&window.id)?;
-    let mut affinity = 0;
-    if unsafe { GetWindowDisplayAffinity(hwnd,&mut affinity) }.is_ok() && affinity != WDA_NONE.0 {
-        return Err("window excludes itself from capture".into());
+    let picture = input::read_only_picture(&window.id)?;
+    let (_, current) = target(&window.id)?;
+    if current.minimized || current.bounds != window.bounds {
+        return Err("window changed during capture; look again".into());
     }
-    let wake = wait::Wake::new()?;
-    let waiter = wait::Waiter::new(wake.clone())?;
-    let device = capture::Device::new(Some(wake))?;
-    let mut source = capture::Capture::new(device,hwnd,16_777_216)?;
-    let deadline = Instant::now()+Duration::from_secs(6);
-    let picture = loop {
-        if let Some(picture) = source.next(16_777_216)? { break picture; }
-        let now = Instant::now();
-        if now >= deadline { return Err("native window capture timed out without a frame".into()); }
-        let delay = if source.pending() { Duration::from_millis(8).min(deadline-now) } else { deadline-now };
-        waiter.wait(delay)?;
-        let mut message = MSG::default();
-        while unsafe { PeekMessageW(&mut message,None,0,0,PM_REMOVE) }.as_bool() {
-            unsafe { let _=TranslateMessage(&message);DispatchMessageW(&message); }
-        }
-    };
-    let (_,current) = target(&window.id)?;
-    if source.closed() || current.minimized { return Err("window closed or became minimized during capture".into()); }
-    let size = picture.size;
-    drop(source);
-    let encoded = png(picture)?;
     let path = match output {
         Some(path) => std::path::PathBuf::from(path),
         None => {
@@ -189,8 +175,8 @@ fn look(selector: &str, output: Option<&str>) -> Result<()> {
             std::env::temp_dir().join(format!("pleamar-agent-look-{}-{stamp}.png",std::process::id()))
         },
     };
-    write_picture(&path,&encoded)?;
-    println!("{} {}x{}",path.display(),size.0,size.1);
+    write_picture(&path,&picture.png)?;
+    println!("{} {}x{}",path.display(),picture.size.0,picture.size.1);
     Ok(())
 }
 
@@ -281,13 +267,23 @@ mod tests {
     }
     #[test]
     fn png_keeps_native_color_channels_and_never_replaces_a_file() {
-        let encoded=png(capture::Picture {size:(2,1),pixels:vec![0x60,0xc0,0x20,255,0x80,0x30,0xd0,255],shared:None}).unwrap();
+        use base64::{Engine, engine::general_purpose::STANDARD};
+        use image::ImageEncoder;
+        use pleamar::windows_desktop::Value as V;
+        let mut encoded=Vec::new();
+        image::codecs::png::PngEncoder::new(&mut encoded).write_image(&[0x20,0xc0,0x60,255,0xd0,0x30,0x80,255],2,1,image::ExtendedColorType::Rgba8).unwrap();
+        let response=|width:f64,height:f64,data:String|V::Map(vec![("width".into(),V::Num(width)),("height".into(),V::Num(height)),
+            ("method".into(),V::Text("window-print".into())),("data".into(),V::Text(data))]);
+        let received=decode_picture(response(2.0,1.0,STANDARD.encode(&encoded))).unwrap();
+        assert_eq!(received.png,encoded);assert_eq!(received.method,"window-print");
         let decoded=image::load_from_memory(&encoded).unwrap().to_rgba8();
         assert_eq!(decoded.dimensions(),(2,1));
         assert_eq!(decoded.into_raw(),[0x20,0xc0,0x60,255,0xd0,0x30,0x80,255]);
-        for (size,pixels) in [((0,1),vec![]),((2,1),vec![0;4]),((u32::MAX,u32::MAX),vec![])] {
-            assert!(png(capture::Picture{size,pixels,shared:None}).is_err());
+        for (width,height) in [(0.0,1.0),(1.0,1.0),(f64::NAN,1.0),(2.5,1.0),(8192.0,8192.0)] {
+            assert!(decode_picture(response(width,height,STANDARD.encode(&encoded))).is_err());
         }
+        assert!(decode_picture(response(2.0,1.0,"not base64".into())).is_err());
+        assert!(decode_picture(response(2.0,1.0,STANDARD.encode(b"not a PNG"))).is_err());
         let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
         let folder=std::env::temp_dir().join(format!("wm-look-{}-{stamp}",std::process::id()));
         std::fs::create_dir(&folder).unwrap();

@@ -134,6 +134,35 @@ def exercise(binary, tests, folder):
         assert result.returncode == 0, result.stderr
         return json.loads(result.stdout)
 
+    def read_only_picture(label, selector=None):
+        selector = selector or identity
+        path = folder / (label + '.png')
+        foreground = desktop.user.GetForegroundWindow()
+        cursor = W.POINT()
+        assert desktop.user.GetCursorPos(C.byref(cursor))
+        result = subprocess.run([str(binary), 'agent', 'look', selector, str(path)], env=env,
+                                capture_output=True, text=True, encoding='utf-8', timeout=18,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
+        report['commands'].append(dict(args=['look', selector, str(path)], exit=result.returncode,
+                                       stdout=result.stdout, stderr=result.stderr))
+        save()
+        assert result.returncode == 0, result.stderr
+        data = path.read_bytes()
+        assert data[:8] == b'\x89PNG\r\n\x1a\n'
+        width, height = struct.unpack('>II', data[16:24])
+        assert result.stdout.strip() == f'{path} {width}x{height}'
+        report.setdefault('printed_pixels', {})[path.name] = printed_pixels(path)
+        report['images'].append(dict(file=path.name, width=width, height=height,
+                                    capture_method='read-only', sha256=hashlib.sha256(data).hexdigest()))
+        assert desktop.user.GetForegroundWindow() == foreground
+        after = W.POINT()
+        assert desktop.user.GetCursorPos(C.byref(after)) and (after.x, after.y) == (cursor.x, cursor.y)
+        run('input-status', fail='unavailable')
+        run('type', selector, 'read-only must not enable input', fail='unavailable')
+        report.setdefault('read_only', []).append(dict(case=label, no_broker=True, no_input=True, focus_unchanged=True, pointer_unchanged=True))
+        save()
+        return data
+
     def fixture(directory, name, dialog=False, tool=False):
         directory.mkdir()
         child_env = dict(env, PLEAMAR_OWNED_INPUT_FIXTURE=str(directory), PLEAMAR_INPUT_TEST_PARENT=str(os.getpid()),
@@ -171,6 +200,7 @@ def exercise(binary, tests, folder):
         catalog = run('windows')
         window = next(entry['window'] for entry in catalog if entry['window']['process'] == target.pid)
         identity, monitor = window['id'], window['monitor']
+        read_only_picture('read-only-normal')
         service = broker(monitor, target.pid, 'broker')
         assert desktop.pid(hwnd) == target.pid
         report.update(monitor=monitor, target_pid=target.pid, target_id=identity)
@@ -311,6 +341,9 @@ def exercise(binary, tests, folder):
         owner_id = next(w['id'] for w in same_process if w['title'].startswith('Owned input parent '))
         window = next(w for w in same_process if w['title'].startswith('Pleamar input fixture '))
         identity, monitor = window['id'], window['monitor']
+        owner_png = read_only_picture('read-only-disabled-owner', owner_id)
+        modal_png = read_only_picture('read-only-modal')
+        assert owner_png != modal_png, 'read-only owner capture must not redirect to its dialog'
         modal_service = broker(monitor, target.pid, 'modal-broker')
         ambiguous = folder / 'ambiguous-must-not-exist.png'
         run('look', str(target.pid), str(ambiguous), fail='process has several windows')
@@ -355,6 +388,7 @@ def exercise(binary, tests, folder):
         window = next(entry['window'] for entry in run('windows')
                       if entry['window']['process'] == target.pid and entry['window']['title'].startswith('Pleamar input fixture '))
         identity, monitor = window['id'], window['monitor']
+        read_only_picture('read-only-tool')
         tool_service = broker(monitor, target.pid, 'tool-broker')
         tool_path = folder / 'tool-window.png'
         result = subprocess.run([str(binary), 'agent', 'look', identity, str(tool_path)], env=env,

@@ -1,6 +1,5 @@
 //! Explicit, short-lived foreground input. The compositor's input remains shared.
 use super::*;
-use base64::{Engine, engine::general_purpose::STANDARD};
 use pleamar::windows_desktop::{Cancellation, Session, Value as DesktopValue};
 use std::{sync::{Arc, Mutex, atomic::{AtomicBool, Ordering}}, thread,
     os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle}};
@@ -121,6 +120,21 @@ fn native_id(session: &mut Session, hwnd: HWND) -> Result<String> {
     Ok(session.window_id(hwnd.0 as usize, identity.pid, identity.thread)?)
 }
 
+/// Share the bounded capture implementation without constructing an input session.
+/// Disabled owners remain readable, with no implicit modal redirection.
+pub(super) fn read_only_picture(window: &str) -> Result<CapturedPicture> {
+    let window = window.to_owned();
+    let result = thread::spawn(move || -> std::result::Result<CapturedPicture, String> {
+        (|| -> Result<CapturedPicture> {
+            let (hwnd, _) = target(&window)?;
+            let identity = Identity::read(hwnd).ok_or("capture target closed")?;
+            decode_picture(pleamar::windows_desktop::read_only_picture(
+                hwnd.0 as usize, identity.pid, identity.thread)?)
+        })().map_err(|error| error.to_string())
+    }).join().map_err(|_| "read-only capture worker failed")?;
+    result.map_err(Into::into)
+}
+
 fn picture(session: &mut Session, options: &Options, selector: &str, path: &str) -> Result<Value> {
     if !Path::new(path).is_absolute() { return Err("input capture requires an absolute new file path".into()); }
     let (hwnd, before) = selected(selector, options)?;
@@ -128,14 +142,10 @@ fn picture(session: &mut Session, options: &Options, selector: &str, path: &str)
     let captured = session.look(&id)?;
     let (_, after) = selected(&before.id, options)?;
     if before.bounds != after.bounds { return Err("window moved during look; try again".into()); }
-    let DesktopValue::Map(fields) = captured else { return Err("invalid native picture".into()); };
-    let number = |key| fields.iter().find_map(|(name, v)| match v { DesktopValue::Num(n) if name == key => Some(*n as u32), _ => None });
-    let size = (number("width").ok_or("missing capture width")?, number("height").ok_or("missing capture height")?);
-    let data = fields.iter().find_map(|(name, v)| match v { DesktopValue::Text(s) if name == "data" => Some(s), _ => None }).ok_or("missing PNG")?;
-    let method = fields.iter().find_map(|(name, v)| match v { DesktopValue::Text(s) if name == "method" => Some(s.as_str()), _ => None }).unwrap_or("unknown");
-    write_picture(Path::new(path), &STANDARD.decode(data)?)?;
-    Ok(json!({"path":path,"width":size.0,"height":size.1,"window":before.id,"input":"foreground",
-        "capture_method":method,"coordinates":"picture physical pixels","permit":"one action within 30 seconds"}))
+    let picture = decode_picture(captured)?;
+    write_picture(Path::new(path), &picture.png)?;
+    Ok(json!({"path":path,"width":picture.size.0,"height":picture.size.1,"window":before.id,"input":"foreground",
+        "capture_method":picture.method,"coordinates":"picture physical pixels","permit":"one action within 30 seconds"}))
 }
 
 struct Pending { cancel: Cancellation, expired: Option<Arc<AtomicBool>> }

@@ -80,7 +80,11 @@ catalog excludes them. Use its current PID and the element names in its tree:
 Replace `1234` and the example element/fact names with those from your scene.
 For an ordinary native application, `agent look 1234 'C:\Pictures\Window ñ.png'`
 captures its visible window through Windows Graphics Capture without focusing
-or restoring it. When the process has several windows, pass the exact
+or restoring it. An HWND rejected by WGC with E_INVALIDARG uses the same bounded
+GDI fallback as broker captures, including exact modal/tool windows. The
+read-only worker creates no input session, broker or permit. A disabled owner
+remains readable and is not redirected to its dialog. Continuous preview scenes
+still require WGC. When the process has several windows, pass the exact
 `window.id` returned by `agent windows` instead of the PID. `PID.N` is a scene
 selector and is not accepted for native capture. Omitting the output path creates
 a PNG in the current user's temporary directory; the command prints its path
@@ -88,7 +92,8 @@ and dimensions. Existing files are never replaced.
 
 Hidden, minimized, closed and capture-excluded windows are refused. Capture
 is bounded to six seconds, 8192 pixels per dimension and 16,777,216 pixels in
-total; the target identity is checked again before writing. This does not
+total; the target identity and geometry are checked again before writing. The
+shared decoder also verifies the PNG dimensions before creating the output. This does not
 capture an entire desktop or panels excluded from the ordinary window catalog.
 `capabilities` reports `agent_window_capture: true`, `agent_native_input: true`
 and `agent_input_mode: "opt-in-foreground"`. Application input requires the
