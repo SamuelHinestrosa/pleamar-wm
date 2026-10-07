@@ -705,6 +705,16 @@ Choose the exact non-primary name from `pleamar-wm monitors` and a fresh output
 directory. The fixture refuses the primary monitor, isolates configuration,
 uses named scene actions without OS input and cleans up its own windows.
 
+`Native packaged dock acceptance` is a separate workflow, run on fixture changes
+or manual dispatch. It creates a
+signed, owned MSIX fixture on a disposable Windows runner and exercises the
+actual application identity, persisted pin, reactivation and file-activation
+path. Its test signer, package and temporary policy value are removed afterward.
+The scripts refuse local execution; no Store account or download is involved.
+This workflow is newly added and has not yet passed. It does not establish OS
+drag acceptance or support for every Store app. The ordinary secondary-monitor
+fixture still refuses a primary output when it has no CI package identity.
+
 Unavailable WM commands exit with an error. `capabilities` states their status
 explicitly; no rain, independent input seat or compositor session is simulated.
 The existing Marea installation is not changed by building this checkout.

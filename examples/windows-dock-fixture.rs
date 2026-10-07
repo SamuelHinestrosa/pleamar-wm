@@ -9,13 +9,13 @@ fn main() {
 mod fixture {
     use windows::{core::{w,BOOL},Win32::{Foundation::*,Graphics::Gdi::*,System::LibraryLoader::*,UI::{HiDpi::*,WindowsAndMessaging::*}}};
     use std::{mem::size_of,path::PathBuf};
-    struct Find {name:String,work:Option<RECT>}
+    struct Find {name:String,work:Option<RECT>,package:bool}
     unsafe extern "system" fn monitor(handle:HMONITOR,_:HDC,_:*mut RECT,data:LPARAM) -> BOOL {
         let find=unsafe {&mut *(data.0 as *mut Find)};
         let mut info=MONITORINFOEXW::default();info.monitorInfo.cbSize=size_of::<MONITORINFOEXW>() as u32;
         if unsafe {GetMonitorInfoW(handle,&mut info.monitorInfo)}.as_bool() {
             let name=String::from_utf16_lossy(&info.szDevice[..info.szDevice.iter().position(|c|*c==0).unwrap_or(info.szDevice.len())]);
-            if name==find.name && info.monitorInfo.dwFlags&MONITORINFOF_PRIMARY==0 {find.work=Some(info.monitorInfo.rcWork);}
+            if name==find.name && (find.package || info.monitorInfo.dwFlags&MONITORINFOF_PRIMARY==0) {find.work=Some(info.monitorInfo.rcWork);}
         }
         true.into()
     }
@@ -35,11 +35,25 @@ mod fixture {
         }
     }
     pub fn run() -> Result<(),Box<dyn std::error::Error>> {
-        let name=std::env::var("PLEAMAR_DOCK_FIXTURE_MONITOR")?;
-        let root=PathBuf::from(std::env::var_os("PLEAMAR_DOCK_FIXTURE_ROOT").ok_or("missing fixture output directory")?);
+        let mut buffer=vec![0u16;1024];let mut length=buffer.len() as u32;
+        let identified=unsafe {windows::Win32::Storage::Packaging::Appx::GetCurrentPackageFullName(&mut length,Some(windows::core::PWSTR(buffer.as_mut_ptr())))}.is_ok();
+        let package=identified.then(||String::from_utf16_lossy(&buffer[..buffer.iter().position(|v|*v==0).unwrap_or(buffer.len())]));
+        let (name,root,ci_package)=if package.as_ref().is_some_and(|p|p.starts_with("Pleamar.NativeDockTest_")) {
+            // Package activation comes from the OS broker, not the test's
+            // environment. Only this separately registered CI package reads
+            // its immutable adjacent configuration and may use a primary output.
+            let config=std::env::current_exe()?.with_file_name("dock-fixture.json");
+            let config:serde_json::Value=serde_json::from_slice(&std::fs::read(config)?)?;
+            if config["disposable_github_runner"]!=true {return Err("invalid packaged fixture configuration".into());}
+            (config["monitor"].as_str().ok_or("missing packaged monitor")?.to_owned(),
+             PathBuf::from(config["output"].as_str().ok_or("missing packaged output")?),true)
+        } else {
+            (std::env::var("PLEAMAR_DOCK_FIXTURE_MONITOR")?,
+             PathBuf::from(std::env::var_os("PLEAMAR_DOCK_FIXTURE_ROOT").ok_or("missing fixture output directory")?),false)
+        };
         if !root.is_absolute() || !root.is_dir() {return Err("fixture output must be an existing absolute directory".into());}
         unsafe {SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)}?;
-        let mut find=Find {name,work:None};
+        let mut find=Find {name,work:None,package:ci_package};
         if !unsafe {EnumDisplayMonitors(None,None,Some(monitor),LPARAM(&mut find as *mut _ as isize))}.as_bool() {return Err("monitor enumeration failed".into());}
         let area=find.work.ok_or("the explicit non-primary fixture monitor is unavailable")?;
         if area.right-area.left<400 || area.bottom-area.top<260 {return Err("secondary work area is too small".into());}
@@ -50,7 +64,7 @@ mod fixture {
         let hwnd=unsafe {CreateWindowExW(WS_EX_APPWINDOW,class.lpszClassName,w!("Owned dock app ñ"),WS_OVERLAPPEDWINDOW,
             area.left+24,area.top+24,340,220,None,None,Some(module.into()),None)}?;
         unsafe {let _=ShowWindow(hwnd,SW_SHOWNOACTIVATE);SetTimer(Some(hwnd),1,60_000,None);}
-        let report=serde_json::json!({"pid":std::process::id(),"hwnd":hwnd.0 as usize,"monitor":find.name,"args":std::env::args().skip(1).collect::<Vec<_>>()});
+        let report=serde_json::json!({"pid":std::process::id(),"hwnd":hwnd.0 as usize,"monitor":find.name,"package":package,"args":std::env::args().skip(1).collect::<Vec<_>>()});
         use std::io::Write;
         let mut file=std::fs::OpenOptions::new().write(true).create_new(true).open(root.join(format!("launch-{}.json",std::process::id())))?;
         file.write_all(serde_json::to_string_pretty(&report)?.as_bytes())?;drop(file);

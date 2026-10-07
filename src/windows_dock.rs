@@ -217,6 +217,10 @@ fn write(path:&Path,pins:&[Program]) -> Result<()> {
 }
 
 #[cfg(test)]
+#[path = "windows_dock_package_tests.rs"]
+mod package_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     unsafe extern "system" fn fixture(hwnd:HWND,message:u32,w:WPARAM,l:LPARAM) -> LRESULT {

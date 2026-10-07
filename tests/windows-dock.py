@@ -104,7 +104,9 @@ def wait(predicate, label, seconds=20):
 def ask(line):
     result=subprocess.run([str(binary),'--say',scene_file.stem,line],env=env,creationflags=flags,capture_output=True,encoding='utf-8',timeout=5)
     if result.returncode:raise RuntimeError(result.stderr)
-    return result.stdout.strip()
+    answer=result.stdout.strip()
+    if answer.startswith('?'):raise RuntimeError(answer)
+    return answer
 
 def press(zone):
     result=ask('press '+zone);assert 'pressed' in result,result
