@@ -44,6 +44,8 @@ struct Original {
     // Only an unfinished rule transaction may restore across displays.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pending_monitor: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    fullscreen: Option<fullscreen::Saved>,
 }
 #[derive(Serialize, Deserialize)]
 struct Recovery { version: u32, windows: Vec<Original> }
@@ -60,7 +62,7 @@ impl Journal {
             let file = std::fs::File::open(&path)?;
             if file.metadata()?.len() > 65536 { return Err("WM recovery journal is too large".into()); }
             let saved: Recovery = serde_json::from_reader(file)?;
-            if !matches!(saved.version,1|2) || saved.windows.len() > 64 { return Err("unknown WM recovery journal".into()); }
+            if !matches!(saved.version,1|2|3) || saved.windows.len() > 64 { return Err("unknown WM recovery journal".into()); }
             for item in saved.windows {
                 if item.bounds.width <= 0 || item.bounds.height <= 0 || windows.insert(item.id.clone(), item).is_some() {
                     return Err("invalid WM recovery journal".into());
@@ -74,7 +76,7 @@ impl Journal {
         let temporary = self.path.with_extension(format!("{}.pending", std::process::id()));
         let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(&temporary)?;
         let result = (|| -> Result<()> {
-            let bytes = serde_json::to_vec(&Recovery { version:2, windows:windows.values().cloned().collect() })?;
+            let bytes = serde_json::to_vec(&Recovery { version:3, windows:windows.values().cloned().collect() })?;
             if bytes.len() > 65536 { return Err("WM recovery journal exceeds its limit".into()); }
             file.write_all(&bytes)?;
             file.sync_all()?;
@@ -125,7 +127,7 @@ fn placement(hwnd: HWND) -> Result<WINDOWPLACEMENT> {
 fn rect_array(rect: RECT) -> [i32; 4] { [rect.left, rect.top, rect.right, rect.bottom] }
 fn original(id: &str) -> Result<Original> {
     let (hwnd, w) = target(id)?;
-    Ok(Original { id:id.into(), monitor:w.monitor, bounds:w.bounds, normal:rect_array(placement(hwnd)?.rcNormalPosition), pending_monitor:None })
+    Ok(Original { id:id.into(), monitor:w.monitor, bounds:w.bounds, normal:rect_array(placement(hwnd)?.rcNormalPosition), pending_monitor:None, fullscreen:None })
 }
 
 fn restore(old: &Original, screens: &[Monitor]) -> Result<bool> {
@@ -133,6 +135,10 @@ fn restore(old: &Original, screens: &[Monitor]) -> Result<bool> {
         .ok_or("invalid recovery window id")?;
     let hwnd = HWND(handle as _);
     if !Identity::read(hwnd).is_some_and(|i| i.token() == old.id) { return Ok(true); }
+    if let Some(saved)=&old.fullscreen {
+        saved.restore(&old.id)?;
+        if !saved.prior_layout { return Ok(true); }
+    }
     let Some(screen) = screens.iter().find(|m| m.name == old.monitor) else { return Ok(false); };
     let Ok((hwnd, current)) = target(&old.id) else { return Ok(false); };
     // A move to another still-connected monitor is the user's new free position.
@@ -160,6 +166,7 @@ struct Manager {
     process:Option<u32>, owner:Option<u32>, creation:Option<u64>, all:bool, scans:u64, changes:u64,
     rules:rules::Rules,
     minimized:Minimized,
+    fullscreen:BTreeSet<String>,
 }
 impl Manager {
     fn owns(&self, window: &Window) -> bool {
@@ -173,7 +180,7 @@ impl Manager {
         if !options.all && modes.len() != options.monitors.len() { return Err("a requested monitor is not connected".into()); }
         let rules = rules::Rules::read(options.rules.clone(),options.explicit_rules)?;
         let (journal, originals) = Journal::open(options.state.clone())?;
-        let mut manager = Self { modes, originals, journal, process:options.process, owner:options.owner, creation:None, all:options.all, scans:0, changes:0, rules, minimized:Minimized::default() };
+        let mut manager = Self { modes, originals, journal, process:options.process, owner:options.owner, creation:None, all:options.all, scans:0, changes:0, rules, minimized:Minimized::default(), fullscreen:BTreeSet::new() };
         if let Some(pid) = options.process {
             // Store a creation stamp as well: a recycled PID must not widen a fixture's scope.
             manager.creation = windows()?.iter().find(|w| w.process == pid)
@@ -189,6 +196,7 @@ impl Manager {
         let mut errors = Vec::new();
         let ids: Vec<_> = self.originals.values().filter(|w| screen.is_none_or(|s| w.monitor == s)).map(|w| w.id.clone()).collect();
         for id in ids {
+            if self.fullscreen.contains(&id) { continue; }
             let old = &self.originals[&id];
             if !self.modes.contains_key(&old.monitor) { continue; }
             if old.pending_monitor.as_ref().is_some_and(|m|!self.modes.contains_key(m)) { continue; }
@@ -206,10 +214,10 @@ impl Manager {
     fn status(&self) -> Value {
         json!({"running":true,"automatic_layouts":true,"window_overview":true,"application_dock":true,"rain":false,"snow":false,"ride":false,"dock":false,
             "pools":false,"process":self.process,"owner":self.owner,"saved_windows":self.originals.len(),
-            "pending_recovery":self.originals.values().filter(|w|self.modes.get(&w.monitor).is_none_or(|m|!m.tiled)).count(),
+            "pending_recovery":self.originals.values().filter(|w|!self.fullscreen.contains(&w.id) && self.modes.get(&w.monitor).is_none_or(|m|!m.tiled)).count(),
             "catalog_scans":self.scans,"geometry_changes":self.changes,
             "minimize_shortcuts":true,"last_minimized":self.minimized.0.last(),
-            "navigation_shortcuts":true,"close_shortcut":true,
+            "navigation_shortcuts":true,"close_shortcut":true,"fullscreen_shortcut":true,"fullscreen_windows":self.fullscreen,
             "rules_file":self.rules.path,"window_rules":self.rules.entries.len(),
             "ruled_windows":self.rules.applied.len(),"rule_errors":self.rules.errors,
             "rule_limit_reached":self.rules.applied.len()+self.rules.errors.len()>=256,
@@ -238,9 +246,12 @@ impl Manager {
         self.originals.retain(|id, old| {
             let handle = id.split(':').nth(2).and_then(|s| usize::from_str_radix(s,16).ok()).unwrap_or(0);
             Identity::read(HWND(handle as _)).is_some_and(|i| i.token() == *id)
-                && !live.iter().any(|w| w.id == *id && w.monitor != old.monitor
-                    && old.pending_monitor.as_deref() != Some(&w.monitor) && screens.iter().any(|m| m.name == old.monitor))
+                && (old.fullscreen.is_some() || !live.iter().any(|w| w.id == *id && w.monitor != old.monitor
+                    && old.pending_monitor.as_deref() != Some(&w.monitor) && screens.iter().any(|m| m.name == old.monitor)))
         });
+        self.fullscreen.retain(|id|self.originals.contains_key(id));
+        // Tiling and initial window rules must not resize an active fullscreen.
+        live.retain(|w|!self.fullscreen.contains(&w.id));
         if self.originals.len() != previous { self.journal.save(&self.originals)?; }
         self.apply_rules(&mut live,&screens)?;
         let names:Vec<_> = self.modes.keys().cloned().collect();
@@ -365,6 +376,45 @@ impl Manager {
             }
         }
     }
+    fn leave_fullscreen(&mut self,id:&str) -> Result<()> {
+        let old=self.originals.get(id).cloned().ok_or("fullscreen recovery is missing")?;
+        let saved=old.fullscreen.as_ref().ok_or("fullscreen placement is missing")?;
+        saved.restore(id)?;
+        if saved.prior_layout { self.originals.get_mut(id).unwrap().fullscreen=None; }
+        else { self.originals.remove(id); }
+        if let Err(error)=self.journal.save(&self.originals) {
+            self.originals.insert(id.into(),old);
+            return Err(error);
+        }
+        self.fullscreen.remove(id);
+        Ok(())
+    }
+    fn toggle_fullscreen(&mut self,id:&str) -> Result<Value> {
+        let (_,window)=target(id)?;
+        if !self.owns(&window) || !self.modes.contains_key(&window.monitor) {
+            return Err("fullscreen target is outside this WM session".into());
+        }
+        if self.fullscreen.contains(id) { self.leave_fullscreen(id)?; }
+        else {
+            let screen=monitors()?.into_iter().find(|m|m.name==window.monitor).ok_or("fullscreen monitor disconnected")?;
+            let previous=self.originals.get(id).cloned();
+            let saved=fullscreen::Saved::read(id,previous.is_some())?;
+            let mut old=match &previous {Some(old)=>old.clone(),None=>original(id)?};
+            old.fullscreen=Some(saved.clone());
+            self.originals.insert(id.into(),old);
+            if let Err(error)=self.journal.save(&self.originals) {
+                match previous {Some(old)=>{self.originals.insert(id.into(),old);},None=>{self.originals.remove(id);}}
+                return Err(error);
+            }
+            self.fullscreen.insert(id.into());
+            if let Err(error)=saved.enter(id,&screen) {
+                let rollback=self.leave_fullscreen(id);
+                return Err(format!("{error}; fullscreen rollback: {}",rollback.err().map_or("restored".into(),|e|e.to_string())).into());
+            }
+        }
+        DIRTY.set(true);
+        Ok(self.status())
+    }
     fn active(&self, include_owned:bool) -> Result<(HWND,Window)> {
         let hwnd = unsafe { GetForegroundWindow() };
         let window = inspect_kind(hwnd,include_owned).ok_or("the active window is not an eligible application window")?;
@@ -441,6 +491,7 @@ impl Manager {
             ["status"] | ["capabilities"] => self.status(),
             ["quit"] => {
                 for mode in self.modes.values_mut() { mode.tiled=false; mode.order.clear(); }
+                self.fullscreen.clear();
                 self.release(None)?;
                 return Ok((json!({"stopped":true,"pending_recovery":self.originals.len()}),true));
             }
@@ -455,6 +506,11 @@ impl Manager {
             ["emit", "focus_next"] => self.focus_relative(true)?,
             ["emit", "focus_previous"] => self.focus_relative(false)?,
             ["emit", "close"] => self.close_focused()?,
+            ["fullscreen", id] => self.toggle_fullscreen(id)?,
+            ["emit", "fullscreen"] => {
+                let (_,window)=self.active(false)?;
+                self.toggle_fullscreen(&window.id)?
+            },
             ["emit", "toggle_free"] => {
                 let mut point = POINT::default();
                 unsafe { GetCursorPos(&mut point) }?;
@@ -567,6 +623,7 @@ pub(super) fn run(args:&[String]) -> Result<Value> {
         }
         Ok(())
     })();
+    manager.fullscreen.clear();
     let restore = manager.release(None);
     result?;
     restore?;
@@ -576,6 +633,10 @@ pub(super) fn run(args:&[String]) -> Result<Value> {
 #[cfg(test)]
 #[path = "windows_recovery_tests.rs"]
 mod recovery_tests;
+
+#[cfg(test)]
+#[path = "windows_fullscreen_tests.rs"]
+mod fullscreen_tests;
 
 #[cfg(test)]
 #[path = "windows_navigation_tests.rs"]

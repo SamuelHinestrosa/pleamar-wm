@@ -73,6 +73,32 @@ lifetime. This checkout's Cargo build does not install it or enable startup.
 
 ## Named scene commands
 
+`emit fullscreen` toggles borderless fullscreen for the active application on
+a managed monitor. Marea's optional dedicated Windows-key layer maps it to
+Win+F. `fullscreen ID` applies the same operation to an explicit catalog identity
+without activating it; a scene's `window ... fullscreen` action uses this route
+through the running native session. View-only and process/monitor scopes still
+apply. Native fullscreen readback updates `win.$i.fullscreen` in preview scenes.
+
+The version-3 recovery journal stores the frame and placement before mutation
+and still reads older journals. Fullscreen windows are excluded from tiling and
+initial geometry rules. Exiting restores their previous frame/placement;
+normal session exit and restarting after interruption also recover them. An
+application that refuses the geometry is rolled back and reports an error.
+This is a DWM borderless window, not an application's exclusive graphics mode.
+
+Local acceptance on secondary DISPLAY1 passed normal/free and tiled transitions,
+restoration after reopening the journal and geometry-refusal rollback, without
+input injection or owned foreground activation. Maximized restoration and focus
+sentinels run only in disposable Windows CI; physical Win+F acceptance remains
+pending. The opt-in native test is:
+
+```powershell
+$env:PLEAMAR_WM_TEST_MONITOR = '\\.\DISPLAY1'
+$env:PLEAMAR_WM_TEST_OUTPUT = 'C:/Temp/wm-fullscreen-evidence'
+cargo test --release --locked --bin pleamar-wm windows_backend::session::fullscreen_tests::native_fullscreen_and_recovery -- --ignored --exact --nocapture --test-threads=1
+```
+
 The automatic session accepts `--say wm 'emit minimize'` and
 `--say wm 'emit restore_last'`, matching Marea's optional Win+M / Win+Shift+M
 bindings. Minimize targets the actual foreground application and requires its

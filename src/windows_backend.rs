@@ -14,6 +14,8 @@ mod ipc;
 mod session;
 #[path = "windows_rules.rs"]
 mod rules;
+#[path = "windows_fullscreen.rs"]
+mod fullscreen;
 
 #[path = "windows_capture.rs"]
 mod capture;
@@ -46,7 +48,8 @@ const HELP: &str = "pleamar-wm — experimental native Windows desktop companion
                                    --process PID scopes automatic management to one application
   --say wm COMMAND                status, toggle MONITOR, layout MONITOR KIND, free MONITOR, quit
                                    emit minimize, emit restore_last, emit toggle_free
-                                   emit focus_next, emit focus_previous, emit close
+                                   emit focus_next, emit focus_previous, emit close, emit fullscreen
+                                   fullscreen ID toggles a catalog window without taking focus
   hyprctl monitors|activewindow     compatibility queries for existing scenes
   tile MONITOR LAYOUT --save FILE ID...
                                    tile these normal windows on their current monitor;
@@ -57,6 +60,7 @@ const HELP: &str = "pleamar-wm — experimental native Windows desktop companion
           --preview-monitor NAME   view-only live native windows in the scene (experimental)
           --preview-process PID    restrict those pictures to one current process
           --window-actions         allow native focus, close, minimize, restore, scene size, send and launch
+                                   fullscreen uses the session's recovery journal
 
 Layouts: left, right, columns, rows, grid. MONITOR is a display name or number
 from `monitors`. IDs come from `windows`. Coordinates are physical pixels.
@@ -342,12 +346,12 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
         ["capabilities"] => Ok(Some(json!({"platform": "windows", "experimental": true,
             "monitors": true, "windows": true, "explicit_layouts": true, "minimize_restore": true,
             "native_scenes_luau": true, "read_only_window_previews": true, "visible_window_capture": true,
-            "preview_window_actions": ["focus", "close", "minimize", "restore", "configure", "send"], "preview_redirected_input": false,
+            "preview_window_actions": ["focus", "close", "minimize", "restore", "configure", "send", "fullscreen"], "preview_redirected_input": false,
             "scene_launch": true, "agent_background_launch": false,
             "agent_window_capture": true, "agent_window_send": true, "agent_native_input": true, "agent_input_mode": "opt-in-foreground",
             "window_rules": ["app", "title", "float", "size", "monitor"], "private_window_rules": false, "workspace_window_rules": false,
             "window_scene_provider": false, "automatic_session": true, "rain": false, "snow": false,
-            "session_shortcuts": ["minimize", "restore_last", "toggle_free", "focus_next", "focus_previous", "close"],
+            "session_shortcuts": ["minimize", "restore_last", "toggle_free", "focus_next", "focus_previous", "close", "fullscreen"],
             "application_dock": true, "ride": false, "dock": false, "pools": false, "remote": false, "phone_monitor": false, "independent_agent_seat": false,
             "agent_scene_commands": ["scenes", "tree", "press", "wait", "watch", "say"]}))),
         ["agent", rest @ ..] => agent::execute(rest),

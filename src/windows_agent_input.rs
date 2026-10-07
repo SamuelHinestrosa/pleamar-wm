@@ -156,8 +156,9 @@ struct Controller {
 struct ControlExit { stop: Arc<AtomicBool>, pending: Arc<Mutex<Pending>>, event: Arc<ipc::Event> }
 impl Drop for ControlExit {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
         self.pending.lock().unwrap_or_else(|e| e.into_inner()).cancel.cancel();
+        // Observing stopped must also observe revoked input permits.
+        self.stop.store(true, Ordering::Release);
         self.event.signal();
     }
 }
@@ -193,8 +194,8 @@ impl Controller {
                 match server.requests.try_recv() {
                     Ok(request) if !request.expired.load(Ordering::Acquire) => {
                         if request.command == "stop" {
-                            halt.store(true, Ordering::Release);
                             active.lock().unwrap().cancel.cancel();
+                            halt.store(true, Ordering::Release);
                             finished.signal();
                             request.finish(Ok(json!({"cancelled":true})));
                             break;
@@ -215,8 +216,8 @@ impl Controller {
 }
 impl Drop for Controller {
     fn drop(&mut self) {
-        self.stop.store(true, Ordering::Release);
         self.pending.lock().unwrap().cancel.cancel();
+        self.stop.store(true, Ordering::Release);
         self.changed.signal();
         if let Some(worker) = self.worker.take() { let _ = worker.join(); }
     }

@@ -129,7 +129,7 @@ impl Retry {
 }
 
 struct Slot { window:Window, capture:Option<capture::Capture>, received:bool, pixels:u64, born:Instant, next_frame:Instant,
-    configure:configure::Configure, visible:bool, retry:Retry, screen:usize, scale:f64, last_size:Option<(u32,u32)> }
+    configure:configure::Configure, visible:bool, retry:Retry, screen:usize, scale:f64, last_size:Option<(u32,u32)>, fullscreen:bool }
 impl Slot {
     // A minimized window still has its last texture in the renderer. It must
     // count towards the same bound even after its capture resources are freed.
@@ -222,6 +222,7 @@ impl Preview {
             }
         }
         for (window,screen,scale) in live {
+            let fullscreen=fullscreen::active(&window,&screens);
             let previous_app=self.programs.get(&window.id).and_then(Option::as_ref).map(|p|p.key()).unwrap_or_else(||window.app.clone());
             if self.slots.iter().flatten().any(|slot|slot.window.id==window.id
                 && (slot.window.title!=window.title || slot.window.app!=window.app)) { self.programs.remove(&window.id); }
@@ -237,12 +238,15 @@ impl Preview {
                 let minimized=window.minimized;
                 let moved=slot.screen!=screen;
                 let resized=slot.scale!=scale;
+                let fullscreen_changed=slot.fullscreen!=fullscreen;
                 if minimized { slot.capture=None; }
                 slot.window=window;
                 slot.screen=screen;slot.scale=scale;
+                slot.fullscreen=fullscreen;
                 slot.configure.wake();
                 let retained=if resized { slot.last_size.map(|size|native_frame(i,size,scale,PieceContent::Kept)) } else { None };
                 if moved { self.tell(NestEvent::Screen(i,screen))?; }
+                if fullscreen_changed { self.tell(NestEvent::Fullscreen(i,fullscreen))?; }
                 if let Some(frame)=retained { self.tell(frame)?; }
                 if title { self.tell(NestEvent::Title(i,self.slots[i].as_ref().unwrap().window.title.clone()))?; }
                 if app { self.tell(NestEvent::App(i,app_id))?;if let Some(program)=&program {self.tell(program.event(i))?;} }
@@ -256,8 +260,9 @@ impl Preview {
             self.tell(NestEvent::Opened {slot:i,title:window.title.clone(),app:app_id,screen})?;
             if let Some(program)=&program { self.tell(program.event(i))?; }
             self.tell(NestEvent::Minimized(i,window.minimized))?;
+            self.tell(NestEvent::Fullscreen(i,fullscreen))?;
             self.slots[i]=Some(Slot {window,capture:None,received:false,pixels:0,born:Instant::now(),next_frame:Instant::now(),
-                configure:configure::Configure::default(),visible:self.visible.contains(&i),retry:Retry::default(),screen,scale,last_size:None});
+                configure:configure::Configure::default(),visible:self.visible.contains(&i),retry:Retry::default(),screen,scale,last_size:None,fullscreen});
             self.capture(i);
         }
         self.order()?;
@@ -350,7 +355,8 @@ impl Preview {
                         self.tell(NestEvent::App(slot,program.key()))?;self.tell(program.event(slot))?;
                         self.dock.remember(program.clone());self.programs.insert(id,Some(program));
                     },
-                    Err(error)=>eprintln!("windows dock: {id}: {error}"),
+                    // Catalog races are diagnostics, not failures of a requested dock action.
+                    Err(error)=>eprintln!("windows dock metadata: {id}: {error}"),
                 }
             }
             for error in self.activations.errors() { eprintln!("windows dock: {error}"); }
@@ -386,7 +392,7 @@ impl Preview {
                                 .and_then(|slot|slot.configure.ask(w,h)) };
                         if let Err(error)=result { eprintln!("windows preview: {error}"); }
                     },
-                    Ok(message @ (ToNest::Focus(_)|ToNest::Close(_)|ToNest::Minimize(..)|ToNest::Send(..))) => {
+                    Ok(message @ (ToNest::Focus(_)|ToNest::Close(_)|ToNest::Minimize(..)|ToNest::Send(..)|ToNest::Fullscreen(_))) => {
                         if let Err(error)=self.action(message) { eprintln!("windows preview: {error}"); }
                         CATALOG_DIRTY.set(true);
                     },
@@ -463,6 +469,7 @@ impl Preview {
             ToNest::Focus(i)=>(i,Action::Focus),
             ToNest::Close(i)=>(i,Action::Close),
             ToNest::Minimize(i,yes)=>(i,Action::Minimize(yes)),
+            ToNest::Fullscreen(i)=>(i,Action::Fullscreen),
             _=>return Err("unsupported native window action".into()),
         };
         let slot=self.slots.get(i).and_then(Option::as_ref).ok_or("window slot is no longer open")?;
@@ -478,12 +485,13 @@ fn native_frame(slot:usize,px:(u32,u32),scale:f64,content:PieceContent) -> NestE
     }]}
 }
 
-enum Action { Focus, Close, Minimize(bool) }
+enum Action { Focus, Close, Minimize(bool), Fullscreen }
 fn act(scope:&Scope,created:Option<u64>,id:&str,action:Action) -> Result<()> {
     if !scope.actions { return Err("window actions require --window-actions; this scene is view-only".into()); }
     let (hwnd,window)=target(id)?;
     if !scope.allows(&window,created) { return Err("window left the selected monitor or process scope".into()); }
     match action {
+        Action::Fullscreen => { ipc::Endpoint::current()?.ask(&format!("fullscreen {id}"))?; },
         Action::Minimize(yes) => { state(id,yes)?; },
         Action::Close => {
             // An application may cancel closing or show an unsaved-work dialog.
@@ -581,7 +589,7 @@ mod tests {
         window.process=13;assert!(!scope.allows(&window,Some(255)));
         window.process=12;window.monitor="primary".into();assert!(!scope.allows(&window,Some(255)));
         let mut slot=Slot {window,capture:None,received:true,pixels:1_000_000,born:Instant::now(),next_frame:Instant::now(),
-            configure:configure::Configure::default(),visible:false,retry:Retry::default(),screen:0,scale:1.0,last_size:None};
+            configure:configure::Configure::default(),visible:false,retry:Retry::default(),screen:0,scale:1.0,last_size:None,fullscreen:false};
         assert_eq!(slot.pixels(),1_000_000,"suspended capture must retain its renderer memory budget");
         let now=Instant::now();
         slot.retry.failed(now);

@@ -90,6 +90,23 @@ jobs:
           name: wm-recovery-acceptance
           path: ${{ runner.temp }}/wm-recovery-acceptance
           if-no-files-found: warn
+      - name: Native fullscreen, rollback and crash recovery on owned windows
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        env:
+          PLEAMAR_WM_CI_FULLSCREEN: '1'
+          PLEAMAR_WM_TEST_OUTPUT: ${{ runner.temp }}/wm-fullscreen-acceptance
+        run: >-
+          cargo test --locked --bin pleamar-wm
+          windows_backend::session::fullscreen_tests::native_fullscreen_and_recovery
+          -- --ignored --exact --nocapture --test-threads=1
+      - name: Keep native fullscreen evidence
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wm-fullscreen-acceptance
+          path: ${{ runner.temp }}/wm-fullscreen-acceptance
+          if-no-files-found: warn
       - name: Native window navigation and polite close on owned windows
         if: runner.os == 'Windows'
         working-directory: pleamar-wm
@@ -115,6 +132,24 @@ jobs:
         if: runner.os == 'Windows'
         working-directory: pleamar-wm
         run: cargo build --release --locked --bin pleamar-wm --example windows-dock-fixture
+      - name: Native cross-process fullscreen and forced-exit recovery
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        env:
+          PLEAMAR_WM_CI_DOCK: '1'
+        shell: pwsh
+        run: |
+          $screens = @(& target/release/pleamar-wm.exe monitors | ConvertFrom-Json)
+          if ($LASTEXITCODE -ne 0 -or $screens.Count -eq 0) { throw 'No CI monitor.' }
+          python tests/windows-fullscreen.py --binary target/release/pleamar-wm.exe --fixture target/release/examples/windows-dock-fixture.exe --monitor $screens[0].name --ci-owned-desktop --output "$env:RUNNER_TEMP/wm-fullscreen-process-acceptance"
+          if ($LASTEXITCODE -ne 0) { throw 'Cross-process fullscreen failed.' }
+      - name: Keep cross-process fullscreen evidence
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wm-fullscreen-process-acceptance
+          path: ${{ runner.temp }}/wm-fullscreen-process-acceptance
+          if-no-files-found: warn
       - name: Verified shader compiler for the native scene fixture
         if: runner.os == 'Windows'
         working-directory: pleamar-wm
