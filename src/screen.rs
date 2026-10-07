@@ -350,7 +350,7 @@ pub fn pointer_at(st: &ScreenState, (x, y): (f64, f64)) -> Hit {
             Item::Client(k) => {
                 let c = &st.clients[*k];
                 if c.takes(x, y) {
-                    return Hit::Client(c.id, (x - c.rect[0] as f64, y - c.rect[1] as f64));
+                    return Hit::Client(c.id, c.local(x, y));
                 }
             }
         }
@@ -672,10 +672,11 @@ fn compose_loop(screen: Screen, mut output: Box<dyn Output>, device: wgpu::Devic
                     Item::Client(k) => {
                         let c = &st.clients[*k];
                         if !c.blur.is_empty() && !c.pieces.is_empty() {
-                            blurs.push((quads.len(), c.blur.iter().map(|b| [c.rect[0] + b[0], c.rect[1] + b[1], b[2], b[3]]).collect()));
+                            let z = c.zoom;
+                            blurs.push((quads.len(), c.blur.iter().map(|b| [c.rect[0] + (b[0] as f64 * z).round() as i32, c.rect[1] + (b[1] as f64 * z).round() as i32, (b[2] as f64 * z).ceil() as i32, (b[3] as f64 * z).ceil() as i32]).collect()));
                         }
                         for p in &c.pieces {
-                            let r = [c.rect[0] + p.at.0, c.rect[1] + p.at.1, p.size.0 as i32, p.size.1 as i32];
+                            let r = c.piece_rect(p);
                             let source = match p.buffer {
                                 Some(b) => Source::Buffer(b),
                                 None => Source::Pixels(p.key),

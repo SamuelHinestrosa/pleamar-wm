@@ -59,7 +59,7 @@ impl Route {
             match self.grab.filter(|_| !layers::dragging()) {
                 // Held: the one it was pressed on keeps it, wherever it goes.
                 Some(id) => match st.clients.iter().find(|c| c.id == id) {
-                    Some(c) => Hit::Client(id, (mx - c.rect[0] as f64, my - c.rect[1] as f64)),
+                    Some(c) => Hit::Client(id, c.local(mx, my)),
                     None => self.hit,
                 },
                 None if !self.scene_held.is_empty() && !layers::dragging() => match st.layers.iter().find(|l| l.main) {

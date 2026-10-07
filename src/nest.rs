@@ -303,6 +303,19 @@ fn panel_place(c: &LayerSurfaceCachedState, (mw, mh): (i32, i32), (w, h): (i32, 
     (x, y)
 }
 
+/// How much smaller a panel is shown on the phone's monitor: one wider than
+/// the phone is shrunk as if the phone were `PHONE_ROOM` points across —room
+/// for the middle of a desktop's panel: Marea's card—; anywhere else, and
+/// any panel that fits, as it is.
+const PHONE_ROOM: f64 = 580.0;
+
+fn phone_zoom(monitor: Option<&str>, monitor_w: i32, w: i32) -> f64 {
+    if monitor != Some(layers::PHONE_NAME) || w <= monitor_w || monitor_w <= 0 {
+        return 1.0;
+    }
+    (monitor_w as f64 / PHONE_ROOM).clamp(0.4, 1.0)
+}
+
 fn owner_of(surface: &WlSurface) -> u64 {
     surface.client().map_or(0, |c| owner_hash(&c.id()))
 }
@@ -1932,6 +1945,11 @@ impl State {
         self.outputs.get(k).and_then(|o| o.current_mode()).map_or((1280, 800), |m| (m.size.w, m.size.h))
     }
 
+    /// A monitor's name (`DP-3`, `PHONE-1`).
+    fn monitor_name(&self, k: usize) -> Option<String> {
+        self.outputs.get(k).map(|o| o.name())
+    }
+
     /// A monitor's size in units: what programs lay themselves out in.
     fn monitor_size(&self, k: usize) -> (i32, i32) {
         let (w, h) = self.monitor_pixels(k);
@@ -1998,10 +2016,14 @@ impl State {
         let id = self.panels[k].id;
         // A lock screen: all of its monitor, over everything, with the keyboard.
         if matches!(self.panels[k].shell, Shell::Lock(_)) {
-            layers::show(self.panels[k].monitor, ClientLayer { id, level: 4, rect: [0, 0, px(w), px(h)], pieces, region: None, keyboard: 1, blur: Vec::new(), owner: owner_of(&root) });
+            layers::show(self.panels[k].monitor, ClientLayer { id, level: 4, rect: [0, 0, px(w), px(h)], pieces, region: None, keyboard: 1, blur: Vec::new(), owner: owner_of(&root), zoom: 1.0 });
             return;
         }
-        let (x, y) = panel_place(&c, (mw, mh), (w, h));
+        // On the phone, a panel wider than it is shown smaller (Marea: her
+        // card fits); placed by the size it is shown at.
+        let zoom = phone_zoom(self.monitor_name(self.panels[k].monitor).as_deref(), mw, w);
+        let (zw, zh) = ((w as f64 * zoom).round() as i32, (h as f64 * zoom).round() as i32);
+        let (x, y) = panel_place(&c, (mw, mh), (zw, zh));
         let region = with_states(&root, |s| {
             s.cached_state.get::<SurfaceAttributes>().current().input_region.as_ref().map(|r| {
                 r.rects.iter().map(|(kind, rect)| (matches!(kind, RectangleKind::Add), [px(rect.loc.x), px(rect.loc.y), px(rect.size.w), px(rect.size.h)])).collect()
@@ -2037,7 +2059,7 @@ impl State {
         if std::env::var_os("PLEAMAR_DEBUG_WINDOWS").is_some() {
             eprintln!("windows · surface {id}: level {level}, keyboard {keyboard}, {}×{} at {x},{y}", w, h);
         }
-        layers::show(self.panels[k].monitor, ClientLayer { id, level, rect: [px(x), px(y), px(w), px(h)], pieces, region, keyboard, blur, owner: owner_of(&root) });
+        layers::show(self.panels[k].monitor, ClientLayer { id, level, rect: [px(x), px(y), px(zw), px(zh)], pieces, region, keyboard, blur, owner: owner_of(&root), zoom });
     }
 
     /// What the programs' bars keep at each edge of each monitor (their
@@ -2299,7 +2321,7 @@ impl State {
                 self.menus[i].sent = pieces.iter().map(|p| p.key).collect();
                 let blur: Vec<[i32; 4]> = with_states(&surface, |s| s.data_map.get::<Blur>().map(|b| b.0.lock().unwrap().clone())).unwrap_or_default().iter().map(|b| [px(b[0] as f64), px(b[1] as f64), px(b[2] as f64), px(b[3] as f64)]).collect();
                 let id = self.menus[i].id;
-                layers::show(k, ClientLayer { id, level: 3, rect: [px(x), px(y), px(w as f64), px(h as f64)], pieces, region: None, keyboard: 0, blur, owner: owner_of(&surface) });
+                layers::show(k, ClientLayer { id, level: 3, rect: [px(x), px(y), px(w as f64), px(h as f64)], pieces, region: None, keyboard: 0, blur, owner: owner_of(&surface), zoom: 1.0 });
                 now.push(id);
             }
         }
@@ -2343,7 +2365,7 @@ impl State {
             panel_pieces(&icon, (0, 0), sent, s, &mut pieces);
             *sent = pieces.iter().map(|p| p.key).collect();
             let rect = layers::drag_rect(*k, (w as f64 * s) as i32, (h as f64 * s) as i32);
-            layers::show(*k, ClientLayer { id: *id, level: 3, rect, pieces, region: Some(Vec::new()), keyboard: 0, blur: Vec::new(), owner });
+            layers::show(*k, ClientLayer { id: *id, level: 3, rect, pieces, region: Some(Vec::new()), keyboard: 0, blur: Vec::new(), owner, zoom: 1.0 });
         }
     }
 
