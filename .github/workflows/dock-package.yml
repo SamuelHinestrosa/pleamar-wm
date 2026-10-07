@@ -6,6 +6,7 @@ on:
       - 'tests/windows-dock-package.ps1'
       - 'src/windows_dock_package_tests.rs'
       - 'src/windows_dock.rs'
+      - 'src/windows_dock_activation.rs'
       - 'examples/windows-dock-fixture.rs'
   workflow_dispatch:
     inputs:

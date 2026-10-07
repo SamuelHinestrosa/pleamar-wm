@@ -153,6 +153,7 @@ struct Preview {
     dock:dock::Dock,
     programs:std::collections::BTreeMap<String,Option<dock::Program>>,
     metadata:dock::Lookup,
+    activations:dock::Activations,
 }
 impl Preview {
     fn new(max:usize,scope:Scope,send:Sender<ToRender>,wake:std::sync::Arc<wait::Wake>) -> Result<Self> {
@@ -171,8 +172,9 @@ impl Preview {
         let waiter=wait::Waiter::new(wake.clone())?;
         let dock=dock::Dock::new(pleamar::config_dir().ok_or("Windows configuration directory unavailable")?.join("wm/windows-dock.json"))?;
         let metadata=dock::Lookup::new(wake.clone())?;
+        let activations=dock::Activations::new(wake.clone())?;
         Ok(Self { scope,created,device:capture::DeviceCache::new(Some(wake)),slots:(0..max).map(|_|None).collect(),
-            send,_hooks:hooks,consumed:None,waiter,warned:HashSet::new(),focused:None,visible:HashSet::new(),screens:Vec::new(),outputs:Outputs::default(),launches:launch::Launches::default(),dock,programs:Default::default(),metadata })
+            send,_hooks:hooks,consumed:None,waiter,warned:HashSet::new(),focused:None,visible:HashSet::new(),screens:Vec::new(),outputs:Outputs::default(),launches:launch::Launches::default(),dock,programs:Default::default(),metadata,activations })
     }
     fn tell(&self,event:NestEvent) -> Result<()> { self.send.send(ToRender::Nest(event))?; Ok(()) }
     fn order(&self) -> Result<()> {
@@ -351,6 +353,7 @@ impl Preview {
                     Err(error)=>eprintln!("windows dock: {id}: {error}"),
                 }
             }
+            for error in self.activations.errors() { eprintln!("windows dock: {error}"); }
             for _ in 0..256 {
                 match commands.try_recv() {
                     Ok(ToNest::Quit)|Err(TryRecvError::Disconnected) => return Ok(()),
@@ -370,7 +373,7 @@ impl Preview {
                         match result { Ok(())=>self.tell(self.dock.events())?,Err(error)=>eprintln!("windows dock: {error}") }
                     },
                     Ok(ToNest::OpenProgram {key,files}) => {
-                        if let Err(error)=self.scope.dock_actions().and_then(|_|self.dock.open(&key,&files,&mut self.launches)) {
+                        if let Err(error)=self.scope.dock_actions().and_then(|_|self.dock.open(&key,&files,&mut self.launches,&self.activations)) {
                             eprintln!("windows dock: {error}");
                         }
                     },

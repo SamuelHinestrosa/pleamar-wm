@@ -649,7 +649,7 @@ launch is unavailable. Physical cross-monitor acceptance is still pending.
 | Live scene layouts; private/workspace rules | Pending |
 | Live window previews | Experimental native capture/render transport; one source or represented scene monitors, optional native focus/close/minimize/restore and bounded scene size requests; new multi-output mapping awaits native acceptance |
 | Marea menu/finder bridge | Module tested with real Luau, IPC and owned Windows windows; complete Marea UI acceptance pending; package lifecycle tested separately |
-| Native dock | Experimental: classic-app icons, pin/unpin, restart persistence and relaunch verified on secondary DISPLAY1; actual OS file drop verified in Windows CI; packaged multi-file activation and Marea integration pending |
+| Native dock | Experimental: classic-app icons, pin/unpin, restart persistence and relaunch verified on secondary DISPLAY1; actual OS file drop and owned packaged multi-file activation verified in Windows CI; full Marea integration pending |
 | Rain, snow, ride, animated window transitions | Pending native equivalents |
 | Per-monitor tide pools and overview | Pending; Windows virtual desktops are not the same model |
 | Independent agent pointer/keyboard, glow and stop UI | Pending; Marea currently uses guarded shared Windows input |
@@ -670,8 +670,15 @@ lacks UWP's `Windows.File` contract, its exact registered Open With handler runs
 on a separate STA thread. The file's default app is never substituted. Shell
 paths preserve file identity while converting canonical DOS/UNC prefixes; paths
 that would alias another file are refused. The native [file activation API](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iapplicationactivationmanager-activateforfile)
-accepts the entire selection in one call. The current change stops retrying an
-unsupported contract between classic-handler launches.
+accepts the entire selection in one call. This avoids retrying an unsupported
+contract between classic-handler launches.
+
+Package opens use a separate worker with at most four queued requests. Slow
+shell activation no longer blocks the preview/capture pump. A full queue is
+reported immediately; asynchronous failures reach the existing dock error log.
+Closing the preview discards queued requests without waiting for a shell
+extension. A request already executing in Windows can still complete, with the
+application's OS-managed lifetime. The worker sleeps on a channel when idle.
 
 The 2026-10-07 local scene acceptance rendered icons on NVIDIA GeForce RTX
 5070/D3D12 on secondary DISPLAY1. Named actions passed pin, close, scene restart,
@@ -687,15 +694,17 @@ also passed, and no owned windows remained. Only this explicit disposable CI
 step may inject OS input; local invocations refuse it. The initial OLE fixture
 needed to process its own queued mouse-down before starting the drag.
 
-[Packaged-app CI at `fc03d3b`](https://github.com/SamuelHinestrosa/pleamar-wm/actions/runs/37671673007)
-registered the owned MSIX app, resolved its identity and reopened its persisted
-pin. Both files reached native app instances, but one window was no longer
-catalogued before timeout: multi-file acceptance failed. The current single-array
-activation correction awaits that rerun. Earlier failures exposed canonical
-shell paths, the missing UWP contract and STA requirements. The package and its
-test certificate were removed. No machine policy, local package registration,
-Store account or download is involved. This fixture does not establish support
-for every Store/UWP app, and the broad `dock` capability remains false.
+[Packaged-app CI at `e624af1`](https://github.com/SamuelHinestrosa/pleamar-wm/actions/runs/37673937182)
+passed actual owned MSIX registration, app identity, pin/reopen and both file
+activations, with exact Unicode/metacharacter paths and native window identities.
+The preceding revision sent separate UWP contract requests between classic
+handler invocations; one window disappeared. One array per activation fixed
+that failing acceptance. Earlier failures exposed canonical shell paths, the
+missing UWP contract and STA requirements. The package and test certificate
+were removed. No machine policy, local package registration, Store account or
+download is involved. The subsequent asynchronous-worker change still needs
+this same native rerun. The fixture does not establish every Store/UWP app or
+full Marea integration, and the broad `dock` capability remains false.
 
 To run the local scene regression on an explicitly named non-primary output:
 

@@ -7,6 +7,10 @@ use windows::Win32::{Storage::{FileSystem::*, Packaging::Appx::GetApplicationUse
     UI::Shell::{*, PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow}}};
 use windows::core::Interface;
 
+#[path = "windows_dock_activation.rs"]
+mod activation;
+pub(super) use activation::Activations;
+
 const APP_ID: PROPERTYKEY = PROPERTYKEY { fmtid: GUID::from_u128(0x9f4c2855_9f79_4b39_a8d0_e1d42de1d5f3), pid: 5 };
 const MAX_FILE: u64 = 128 * 1024;
 
@@ -157,29 +161,21 @@ impl Dock {
         } else if !yes { pins.retain(|p|p.key()!=key); }
         write(&self.path,&pins)?;self.pins=pins;Ok(())
     }
-    pub fn open(&self,key:&str,files:&[String],launches:&mut launch::Launches) -> Result<()> {
+    pub fn open(&self,key:&str,files:&[String],launches:&mut launch::Launches,activations:&Activations) -> Result<()> {
         let program=self.programs.get(key).or_else(||self.pins.iter().find(|p|p.key()==key)).ok_or("unknown dock program")?;
         if files.len()>256 || files.iter().any(|p|p.contains('\0') || p.len()>32768 || !Path::new(p).is_absolute()) {
             return Err("invalid dropped file paths".into());
         }
         match &program.target {
             Target::Executable(path)=>{ launches.executable(path,files)?; },
-            Target::Application(id)=>activate_package(id,files)?,
+            Target::Application(id)=>activations.request(id,files)?,
         }
         Ok(())
     }
 }
 
 fn activate_package(app_id:&str,files:&[String]) -> Result<()> {
-    // Shell handlers can expose IContextMenu, which has no MTA proxy. Create
-    // and invoke every shell object on one STA; the preview uses MTA capture.
-    std::thread::scope(|scope| {
-        let thread=std::thread::Builder::new().name("native-dock-activation".into())
-            .spawn_scoped(scope,||activate_package_sta(app_id,files).map_err(|e|e.to_string()))?;
-        thread.join().map_err(|_|"the Windows application activation thread failed")?.map_err(Into::into)
-    })
-}
-fn activate_package_sta(app_id:&str,files:&[String]) -> Result<()> {
+    // All shell objects stay on the activation worker's STA; capture uses MTA.
     unsafe {CoInitializeEx(None,COINIT_APARTMENTTHREADED|COINIT_DISABLE_OLE1DDE).ok()?;}
     let _apartment=Apartment;
     let id=wide(app_id);
@@ -409,7 +405,8 @@ mod tests {
         let mut dock=Dock::new(directory.join("pins.json"))?;dock.remember(program.clone());
         let expected=vec![directory.join("it's ñ 海.txt").to_string_lossy().into_owned(),directory.join("$HOME; $(exit 9).txt").to_string_lossy().into_owned()];
         let mut files=vec![script.to_string_lossy().into_owned()];files.extend(expected.clone());
-        let mut launched=launch::Launches::default();dock.open(&program.key(),&files,&mut launched)?;
+        let activations=Activations::new(wait::Wake::new()?)?;
+        let mut launched=launch::Launches::default();dock.open(&program.key(),&files,&mut launched,&activations)?;
         let deadline=Instant::now()+Duration::from_secs(20);
         let received=loop {
             if let Ok(data)=std::fs::read(&report) {

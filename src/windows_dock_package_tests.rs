@@ -18,9 +18,11 @@ fn await_value<T>(what:&str,mut read:impl FnMut()->Result<Option<T>>) -> Result<
         std::thread::sleep(Duration::from_millis(25));
     }
 }
-fn arrival(root:&Path,seen:&mut HashSet<u32>,owned:&mut Owned) -> Result<Value> {
+fn arrival(root:&Path,seen:&mut HashSet<u32>,owned:&mut Owned,activations:&Activations) -> Result<Value> {
     let mut rejected=BTreeMap::new();
     let result=await_value("packaged fixture window",|| {
+        let errors=activations.errors();
+        if !errors.is_empty() {return Err(errors.join("; ").into());}
         for entry in std::fs::read_dir(root)? {
             let path=entry?.path();
             if !path.file_name().unwrap_or_default().to_string_lossy().starts_with("launch-") {continue;}
@@ -71,9 +73,10 @@ fn native_packaged_dock_activation() -> Result<()> {
     let pin=Program {target:Target::Application(id.clone()),name:"Owned packaged dock application".into()};
     let path=root.join("pins.json");let mut dock=Dock::new(path.clone())?;dock.remember(pin.clone());
     let mut launches=launch::Launches::default();let mut events=Vec::new();
+    let activations=Activations::new(wait::Wake::new()?)?;
     let result=(|| -> Result<()> {
-        dock.open(&pin.key(),&[],&mut launches)?;
-        let first=arrival(&root,&mut seen,&mut owned)?;
+        dock.open(&pin.key(),&[],&mut launches,&activations)?;
+        let first=arrival(&root,&mut seen,&mut owned,&activations)?;
         assert!(first["package"].as_str().is_some_and(|p|p.starts_with("Pleamar.NativeDockTest_")));
         let hwnd=HWND(first["hwnd"].as_u64().unwrap() as usize as _);
         let window=inspect(hwnd).ok_or("packaged window disappeared")?;
@@ -85,14 +88,14 @@ fn native_packaged_dock_activation() -> Result<()> {
         assert!(unsafe {IsWindow(Some(hwnd))}.as_bool(),"OS-owned activation must survive the scene launch collection");
         close(&first)?;
         let reloaded=Dock::new(path)?;assert_eq!(reloaded.pins.len(),1);
-        launches=launch::Launches::default();reloaded.open(&pin.key(),&[],&mut launches)?;
-        let second=arrival(&root,&mut seen,&mut owned)?;events.push(json!({"stage":"restart-pinned-application","window":second}));close(&second)?;
+        launches=launch::Launches::default();reloaded.open(&pin.key(),&[],&mut launches,&activations)?;
+        let second=arrival(&root,&mut seen,&mut owned,&activations)?;events.push(json!({"stage":"restart-pinned-application","window":second}));close(&second)?;
         let files=[root.join("owned ñ 海 ' $HOME.plmdock"),root.join("second $(exit 9).plmdock")];
         for file in &files {std::fs::write(file,"owned package activation file")?;}
-        reloaded.open(&pin.key(),&files.iter().map(|p|p.to_string_lossy().into_owned()).collect::<Vec<_>>(),&mut launches)?;
+        reloaded.open(&pin.key(),&files.iter().map(|p|p.to_string_lossy().into_owned()).collect::<Vec<_>>(),&mut launches,&activations)?;
         let mut received=HashSet::new();
         for _ in &files {
-            let value=arrival(&root,&mut seen,&mut owned)?;
+            let value=arrival(&root,&mut seen,&mut owned,&activations)?;
             let args=value["args"].as_array().ok_or("package argument report missing")?;
             for arg in args {
                 if let Some(path)=arg.as_str().and_then(|s|std::fs::canonicalize(s).ok()) {received.insert(path);}
