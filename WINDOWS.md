@@ -735,6 +735,9 @@ desktop apps can lack UWP's file-activation contract. That specific refusal now
 uses the registered Open With handler whose AppUserModelID matches the selected
 dock application, rather than substituting the file's default application.
 This follows the documented [association-handler API](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iassochandler-invoke).
+The handler lookup succeeded on CI, but invoking it from the capture thread's
+MTA failed because its `IContextMenu` interface has no proxy. Packaged activation
+now constructs, invokes and releases its shell objects on a separate STA thread.
 The complete packaged file-activation rerun is still pending. This owned desktop
 MSIX fixture does not establish support for every Store/UWP app. The ordinary
 secondary-monitor fixture refuses a primary output without an explicit CI mode.
@@ -745,6 +748,11 @@ application's argument report. Only its explicit GitHub-hosted step may move the
 OS pointer; local runs refuse this mode before creating windows. This new
 end-to-end check has not yet passed. The existing in-memory OLE tests cover
 localhost file URIs, commented URI lists, UNC/extended paths and Unicode.
+The first OS run returned a completed drag with no accepted copy. The source
+fixture now processes its own button-down message before entering `DoDragDrop`:
+asynchronous key state alone can precede the thread's queued key state. The
+rerun records the drag duration and still requires an accepted copy and both
+file arguments in the destination application's report.
 
 Unavailable WM commands exit with an error. `capabilities` states their status
 explicitly; no rain, independent input seat or compositor session is simulated.

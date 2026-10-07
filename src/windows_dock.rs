@@ -164,38 +164,49 @@ impl Dock {
         }
         match &program.target {
             Target::Executable(path)=>{ launches.executable(path,files)?; },
-            Target::Application(id)=>{
-                let _apartment=Apartment::new()?;
-                let app_id=id;
-                let id=wide(app_id);
-                unsafe {
-                    let activation:IApplicationActivationManager=CoCreateInstance(&ApplicationActivationManager,None,CLSCTX_LOCAL_SERVER)?;
-                    if files.is_empty() { activation.ActivateApplication(PCWSTR(id.as_ptr()),w!(""),AO_NONE)?; }
-                    else {
-                        // Activation is an OS-owned app lifetime, not a child of
-                        // a PowerShell helper. Keep every file as a shell item.
-                        for file in files {
-                            let item=file_item(file)?;
-                            let items:IShellItemArray=SHCreateShellItemArrayFromShellItem(&item)
-                                .map_err(|e|format!("Windows shell file array: {e}"))?;
-                            match activation.ActivateForFile(PCWSTR(id.as_ptr()),&items,w!("open")) {
-                                Ok(_)=>{},
-                                // Packaged desktop apps can register file associations
-                                // without implementing UWP's Windows.File contract.
-                                Err(error) if error.code().0 as u32==0x80270254=>{
-                                    let handler=file_handler(app_id,file)?;
-                                    let data:IDataObject=item.BindToHandler(None,&BHID_DataObject)?;
-                                    handler.Invoke(&data).map_err(|e|format!("Windows registered file handler: {e}"))?;
-                                },
-                                Err(error)=>return Err(format!("Windows packaged file activation: {error}").into()),
-                            }
-                        }
-                    }
-                }
-            },
+            Target::Application(id)=>activate_package(id,files)?,
         }
         Ok(())
     }
+}
+
+fn activate_package(app_id:&str,files:&[String]) -> Result<()> {
+    // Shell handlers can expose IContextMenu, which has no MTA proxy. Create
+    // and invoke every shell object on one STA; the preview uses MTA capture.
+    std::thread::scope(|scope| {
+        let thread=std::thread::Builder::new().name("native-dock-activation".into())
+            .spawn_scoped(scope,||activate_package_sta(app_id,files).map_err(|e|e.to_string()))?;
+        thread.join().map_err(|_|"the Windows application activation thread failed")?.map_err(Into::into)
+    })
+}
+fn activate_package_sta(app_id:&str,files:&[String]) -> Result<()> {
+    unsafe {CoInitializeEx(None,COINIT_APARTMENTTHREADED|COINIT_DISABLE_OLE1DDE).ok()?;}
+    let _apartment=Apartment;
+    let id=wide(app_id);
+    unsafe {
+        let activation:IApplicationActivationManager=CoCreateInstance(&ApplicationActivationManager,None,CLSCTX_LOCAL_SERVER)?;
+        if files.is_empty() {activation.ActivateApplication(PCWSTR(id.as_ptr()),w!(""),AO_NONE)?;}
+        else {
+            // Windows owns this app lifetime. Preserve individual file identities.
+            for file in files {
+                let item=file_item(file)?;
+                let items:IShellItemArray=SHCreateShellItemArrayFromShellItem(&item)
+                    .map_err(|e|format!("Windows shell file array: {e}"))?;
+                match activation.ActivateForFile(PCWSTR(id.as_ptr()),&items,w!("open")) {
+                    Ok(_)=>{},
+                    // Packaged desktop apps can register associations without
+                    // implementing UWP's Windows.File contract.
+                    Err(error) if error.code().0 as u32==0x80270254=>{
+                        let handler=file_handler(app_id,file)?;
+                        let data:IDataObject=item.BindToHandler(None,&BHID_DataObject)?;
+                        handler.Invoke(&data).map_err(|e|format!("Windows registered file handler: {e}"))?;
+                    },
+                    Err(error)=>return Err(format!("Windows packaged file activation: {error}").into()),
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 fn file_handler(app_id:&str,path:&str) -> Result<IAssocHandler> {
