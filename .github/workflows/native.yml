@@ -1,53 +1,53 @@
-name: Native Windows and Linux builds
-on:
-  push:
-  pull_request:
-  workflow_dispatch:
-    inputs:
-      pleamar_repository:
-        description: Repository containing the matching pleamar library
-        default: SamuelHinestrosa/pleamar
-        required: true
-      pleamar_ref:
-        description: Exact pleamar revision (Windows backend required)
+name: Native Windows and Linux builds
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      pleamar_repository:
+        description: Repository containing the matching pleamar library
+        default: SamuelHinestrosa/pleamar
+        required: true
+      pleamar_ref:
+        description: Exact pleamar revision (Windows backend required)
         default: 1a9fbaac6366ec92ef12a2547e8e10fcc5103104
-        required: true
-permissions:
-  contents: read
-jobs:
-  test:
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [windows-2022, ubuntu-24.04]
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          path: pleamar-wm
-      # Until the companion pleamar Windows PR is merged, test its exact head.
-      - uses: actions/checkout@v4
-        with:
-          repository: ${{ inputs.pleamar_repository || 'SamuelHinestrosa/pleamar' }}
+        required: true
+permissions:
+  contents: read
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2022, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: pleamar-wm
+      # Until the companion pleamar Windows PR is merged, test its exact head.
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.pleamar_repository || 'SamuelHinestrosa/pleamar' }}
           ref: ${{ inputs.pleamar_ref || '1a9fbaac6366ec92ef12a2547e8e10fcc5103104' }}
-          path: pleamar
-      - name: Linux system libraries
-        if: runner.os == 'Linux'
-        run: >-
-          sudo apt-get update && sudo apt-get install -y
-          pkg-config libwayland-dev libxkbcommon-dev libfontconfig1-dev libpam0g-dev
-          libinput-dev libudev-dev libseat-dev libgbm-dev libdrm-dev
-          libpipewire-0.3-dev libssl-dev libclang-dev clang
-      - uses: dtolnay/rust-toolchain@stable
-      - name: Build with default Luau support
-        working-directory: pleamar-wm
-        run: cargo build --locked
-      - name: Unit tests (interactive desktop tests remain opt-in)
-        working-directory: pleamar-wm
-        run: cargo test --locked
+          path: pleamar
+      - name: Linux system libraries
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update && sudo apt-get install -y
+          pkg-config libwayland-dev libxkbcommon-dev libfontconfig1-dev libpam0g-dev
+          libinput-dev libudev-dev libseat-dev libgbm-dev libdrm-dev
+          libpipewire-0.3-dev libssl-dev libclang-dev clang
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Build with default Luau support
+        working-directory: pleamar-wm
+        run: cargo build --locked
+      - name: Unit tests (interactive desktop tests remain opt-in)
+        working-directory: pleamar-wm
+        run: cargo test --locked
       - name: Check the preview scene
-        working-directory: pleamar-wm
+        working-directory: pleamar-wm
         run: cargo run --locked -- --check examples/windows-preview.plm
       - name: Recover normal positions without changing show state or focus
         if: runner.os == 'Windows'
@@ -67,31 +67,31 @@ jobs:
           name: wm-recovery-acceptance
           path: ${{ runner.temp }}/wm-recovery-acceptance
           if-no-files-found: warn
-      - name: Check the overview scene
-        working-directory: pleamar-wm
-        run: cargo run --locked -- --check examples/windows-overview.plm
+      - name: Check the overview scene
+        working-directory: pleamar-wm
+        run: cargo run --locked -- --check examples/windows-overview.plm
       - name: Check the native sizes scene
         working-directory: pleamar-wm
         run: cargo run --locked -- --check examples/windows-resize.plm
       - name: Check the per-monitor preview scene
         working-directory: pleamar-wm
         run: cargo run --locked -- --check examples/windows-monitors.plm
-      - name: Build the Windows background host
-        if: runner.os == 'Windows'
-        working-directory: pleamar-wm
-        run: cargo build --locked --features windows-host --bin pleamar-wm-host
-      - name: Native Windows capability smoke
-        if: runner.os == 'Windows'
-        working-directory: pleamar-wm
-        shell: pwsh
-        run: |
-          $caps = & ./target/debug/pleamar-wm.exe capabilities | ConvertFrom-Json
-          if ($LASTEXITCODE -ne 0 -or $caps.platform -ne 'windows' -or !$caps.explicit_layouts) {
-            throw 'Native capability query failed'
-          }
-          if (!$caps.visible_window_capture -or $caps.preview_redirected_input -or ($caps.preview_window_actions -join ',') -ne 'focus,close,minimize,restore,configure') {
-            throw 'Incorrect native preview action capabilities'
-          }
-          & ./target/debug/pleamar-wm.exe remote
-          if ($LASTEXITCODE -eq 0) { throw 'An unavailable remote desktop reported success' }
-          exit 0
+      - name: Build the Windows background host
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        run: cargo build --locked --features windows-host --bin pleamar-wm-host
+      - name: Native Windows capability smoke
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        shell: pwsh
+        run: |
+          $caps = & ./target/debug/pleamar-wm.exe capabilities | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0 -or $caps.platform -ne 'windows' -or !$caps.explicit_layouts) {
+            throw 'Native capability query failed'
+          }
+          if (!$caps.visible_window_capture -or $caps.preview_redirected_input -or ($caps.preview_window_actions -join ',') -ne 'focus,close,minimize,restore,configure') {
+            throw 'Incorrect native preview action capabilities'
+          }
+          & ./target/debug/pleamar-wm.exe remote
+          if ($LASTEXITCODE -eq 0) { throw 'An unavailable remote desktop reported success' }
+          exit 0
