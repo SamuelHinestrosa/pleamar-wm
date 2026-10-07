@@ -454,6 +454,35 @@ commit. Resident memory had an unexplained outlier in an earlier run, so no
 consistent RSS saving is claimed. [Commands, hashes, captures and all measurements](https://github.com/SamuelHinestrosa/pleamar/blob/d4c50a40b11ad41bb5d31aa38ee7c31591f974fa/docs/windows-shared-capture.md)
 are retained; these short tests do not establish full desktop parity.
 
+## Sending a scene window to another monitor
+
+`send win.$i to 1` now queues a native move to scene output 1. Run
+`examples/windows-send.plm` with `--preview-monitor all --window-actions`.
+Output indices follow the scene's display names, not the order returned by
+the native monitor enumerator. Missing or ambiguous outputs fail explicitly.
+With a single-monitor preview scope, sending outside that scope is refused.
+
+Only normal, resizable windows can be sent; restore minimized or maximized
+windows first. The move preserves logical outer-frame size using both displays'
+DPI and relative position in their work areas. A smaller destination clamps
+the size to keep the entire window reachable. Capture dimensions and the shared
+pixel budget remain bounded. Application size constraints can reject the move.
+
+Moves and scene size requests share one asynchronous placement pipeline. The
+latest destination replaces an unsent request; an in-flight move finishes before
+another size request is issued. Each operation revalidates the native window
+identity, scope, connected display and scene output. It does not request focus
+or change Z order. The catalog reports the monitor actually observed after
+movement, not an optimistic assignment. Explicit sends persist when the scene
+closes; they are not temporary automatic tiling rules.
+
+The geometry tests cover negative origins, unequal DPI, smaller work areas,
+capture limits, disconnected output mappings and overflow. The disposable
+one-monitor CI fixture checks same-output routing and unknown-output refusal
+on its owned native window. Physical transfer between different monitors,
+application DPI responses and mixed-DPI capture continuity remain unverified.
+This implements monitor sends, not workspace/pool or private-window support.
+
 ## Status and remaining parity work
 
 | Area | Windows status |

@@ -35,6 +35,8 @@ class Desktop:
             (self.user, 'SetProcessDpiAwarenessContext', W.BOOL, [W.HANDLE]),
             (self.user, 'SetWindowPos', W.BOOL, [W.HWND, W.HWND, C.c_int, C.c_int, C.c_int, C.c_int, W.UINT]),
             (self.user, 'GetClientRect', W.BOOL, [W.HWND, C.POINTER(W.RECT)]),
+            (self.user, 'GetWindowRect', W.BOOL, [W.HWND, C.POINTER(W.RECT)]),
+            (self.user, 'GetForegroundWindow', W.HWND, []),
             (self.user, 'ClientToScreen', W.BOOL, [W.HWND, C.POINTER(W.POINT)]),
             (self.user, 'GetDC', W.HDC, [W.HWND]),
             (self.user, 'ReleaseDC', C.c_int, [W.HWND, W.HDC]),
@@ -101,6 +103,11 @@ class Desktop:
             self.gdi.DeleteDC(target)
             self.user.ReleaseDC(None, source)
 
+    def bounds(self, hwnd):
+        rect = W.RECT()
+        assert self.user.GetWindowRect(hwnd, C.byref(rect))
+        return [rect.left, rect.top, rect.right, rect.bottom]
+
 
 def png(path, picture):
     width, height, bgra = picture
@@ -153,6 +160,10 @@ def scene_source(command, generation='A'):
     fact preview_slot = -1
     event invoked ->
     event toggle_preview ->
+    event send_here
+    event send_missing
+    on send_here { send win(preview_slot) to screen.index }
+    on send_missing { send win(preview_slot) to 3 }
     box { from: 0, 0; size: screen.width, screen.height; color: __BACKGROUND__ }
     text "Native launch · Generation __GENERATION__" { at: 24, 24; size: 22; color: #eeeeee }
     box open_program { from: 24, 90; size: 260, 60; color: #36514b; label: "Open owned program __GENERATION__" }
@@ -280,6 +291,20 @@ def exercise(binary, output):
                         ask(f'fact preview_slot {slot}')
                         until(lambda: ask('get preview_slot') == slot, 'owned slot selection acknowledged')
                         trace = lambda: (folder / 'scene.log').read_text(encoding='utf-8')
+                        # This runner has one display. Verify action routing and
+                        # refusal on a real HWND, without claiming a transfer.
+                        before = desktop.bounds(child['hwnd'])
+                        foreground = desktop.user.GetForegroundWindow()
+                        ask('emit send_here')
+                        ask('emit send_missing')
+                        until(lambda: 'the destination has no live scene output' in trace(), 'unknown output refusal')
+                        assert 'window actions are unavailable' not in trace()
+                        assert desktop.bounds(child['hwnd']) == before
+                        assert desktop.user.GetForegroundWindow() == foreground
+                        (folder / 'send-routing.json').write_text(json.dumps(dict(
+                            same_output_preserves_bounds=True, missing_output_refused=True,
+                            foreground_unchanged=True, physical_transfer_tested=False,
+                            bounds=before)), encoding='utf-8')
                         assert 'capture transport =' not in trace(), 'hidden previews allocated a capture device'
                         def preview_pixels(color, name, visible=True):
                             picture = desktop.pixels(hwnd)
@@ -330,6 +355,7 @@ def exercise(binary, output):
                                               native_child=mode != 'view-only', hot_reload=mode != 'view-only', cleanup=True,
                                               lazy_capture=mode != 'view-only', idle_capture_retirement=mode != 'view-only',
                                               fresh_capture_after_reopen=mode != 'view-only',
+                                              send_routing=mode != 'view-only', physical_monitor_transfer=False,
                                               native_agent_look=mode != 'view-only'))
                 finally:
                     if process and process.poll() is None:

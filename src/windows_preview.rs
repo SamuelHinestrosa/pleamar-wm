@@ -7,6 +7,8 @@ use windows::Win32::UI::Accessibility::*;
 
 #[path = "windows_configure.rs"]
 mod configure;
+#[path = "windows_transfer.rs"]
+mod transfer;
 
 #[derive(Clone)]
 struct Scope { monitor:String, process:Option<u32>, actions:bool }
@@ -32,6 +34,16 @@ impl Outputs {
             return Err("ambiguous native scene outputs; use distinct screens: each copies".into());
         }
         Ok(Self(copies))
+    }
+    fn destination(&self, index:usize, scope:&Scope) -> Result<&str> {
+        if !scope.actions { return Err("window actions require --window-actions; this scene is view-only".into()); }
+        let mut names=self.0.iter().filter(|(i,_)|*i==index).map(|(_,name)|name.as_str());
+        let name=names.next().ok_or("the destination has no live scene output")?;
+        if names.any(|other|other!=name) { return Err("the destination scene output is ambiguous".into()); }
+        if scope.monitor!="all" && scope.monitor!=name {
+            return Err("sending to another monitor requires --preview-monitor all".into());
+        }
+        Ok(name)
     }
     fn screen(&self, source:&str, scope:&Scope) -> Option<usize> {
         self.0.iter().find(|(_,name)|name==source).map(|(index,_)|*index)
@@ -333,7 +345,7 @@ impl Preview {
                                 .and_then(|slot|slot.configure.ask(w,h)) };
                         if let Err(error)=result { eprintln!("windows preview: {error}"); }
                     },
-                    Ok(message @ (ToNest::Focus(_)|ToNest::Close(_)|ToNest::Minimize(..))) => {
+                    Ok(message @ (ToNest::Focus(_)|ToNest::Close(_)|ToNest::Minimize(..)|ToNest::Send(..))) => {
                         if let Err(error)=self.action(message) { eprintln!("windows preview: {error}"); }
                         CATALOG_DIRTY.set(true);
                     },
@@ -360,7 +372,7 @@ impl Preview {
                 let others:u64=self.slots.iter().enumerate().filter(|(k,_)|*k!=i).filter_map(|(_,s)|s.as_ref())
                     .map(Slot::pixels).sum();
                 if let Some(slot)=self.slots[i].as_mut() {
-                    if let Err(error)=slot.configure.tick(&self.scope,self.created,&slot.window.id,16_777_216u64.saturating_sub(others)) {
+                    if let Err(error)=slot.configure.tick(&self.scope,self.created,&slot.window.id,&self.outputs,16_777_216u64.saturating_sub(others)) {
                         eprintln!("windows preview: {error}");
                     }
                 }
@@ -395,7 +407,13 @@ impl Preview {
             self.waiter.wait(wait)?;
         }
     }
-    fn action(&self,message:ToNest) -> Result<()> {
+    fn action(&mut self,message:ToNest) -> Result<()> {
+        if let ToNest::Send(i,screen)=message {
+            let name=self.outputs.destination(screen,&self.scope)?;
+            let slot=self.slots.get_mut(i).and_then(Option::as_mut).ok_or("window slot is no longer open")?;
+            slot.configure.send(name.to_owned());
+            return Ok(());
+        }
         let (i,action)=match message {
             ToNest::Focus(i)=>(i,Action::Focus),
             ToNest::Close(i)=>(i,Action::Close),
@@ -467,6 +485,23 @@ mod tests {
         assert_eq!(Outputs::default().screen("SOURCE",&single),None);
         assert!(Outputs::new(vec![(0,"SAME".into()),(1,"SAME".into())]).is_err());
         assert!(Outputs::new(vec![(4,"FIFTH".into())]).is_err());
+    }
+    #[test]
+    fn send_resolves_scene_indices_and_refuses_view_only_or_ambiguous_destinations() {
+        let mut scope=Scope {monitor:"all".into(),process:None,actions:true};
+        let outputs=Outputs::new(vec![(2,"LEFT".into()),(0,"RIGHT".into())]).unwrap();
+        assert_eq!(outputs.destination(0,&scope).unwrap(),"RIGHT");
+        assert_eq!(outputs.destination(2,&scope).unwrap(),"LEFT");
+        assert!(outputs.destination(1,&scope).is_err());
+        scope.monitor="RIGHT".into();
+        assert_eq!(outputs.destination(0,&scope).unwrap(),"RIGHT");
+        assert!(outputs.destination(2,&scope).is_err());
+        scope.actions=false;
+        assert!(outputs.destination(0,&scope).unwrap_err().to_string().contains("--window-actions"));
+        scope.actions=true;scope.monitor="all".into();
+        let ambiguous=Outputs::new(vec![(0,"LEFT".into()),(0,"RIGHT".into())]).unwrap();
+        assert!(ambiguous.destination(0,&scope).is_err());
+        assert!(Outputs::default().destination(0,&scope).is_err());
     }
     #[test]
     fn each_native_window_uses_its_source_dpi_even_for_a_retained_frame() {

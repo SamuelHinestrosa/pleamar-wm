@@ -1,14 +1,18 @@
 //! Scene size requests must not block capture while an application handles them.
 use super::*;
 
-struct Pending { bounds:Bounds, ask:Option<(i32,i32)>, until:Instant }
+struct Pending { bounds:Bounds, ask:Option<(i32,i32)>, monitor:String, transfer:bool, until:Instant }
 pub(super) struct Configure {
-    wanted:Option<(i32,i32)>, pending:Option<Pending>, next:Instant, deferred:bool,
+    wanted:Option<(i32,i32)>, destination:Option<String>, pending:Option<Pending>, next:Instant, deferred:bool,
 }
 impl Default for Configure {
-    fn default() -> Self { Self { wanted:None,pending:None,next:Instant::now(),deferred:false } }
+    fn default() -> Self { Self { wanted:None,destination:None,pending:None,next:Instant::now(),deferred:false } }
 }
 impl Configure {
+    pub(super) fn send(&mut self, destination:String) {
+        self.destination=Some(destination);
+        self.deferred=false;
+    }
     pub(super) fn ask(&mut self,w:i32,h:i32) -> Result<()> {
         if w<0 || h<0 { return Err("negative native window size".into()); }
         // Match Linux's protection against a scene's transient animation sizes.
@@ -25,10 +29,10 @@ impl Configure {
         self.pending.as_ref().map_or(0,|p|p.bounds.width as u64*p.bounds.height as u64)
     }
     pub(super) fn wait(&self,now:Instant) -> Option<Duration> {
-        (self.pending.is_some() || (self.wanted.is_some() && !self.deferred))
+        (self.pending.is_some() || self.destination.is_some() || (self.wanted.is_some() && !self.deferred))
             .then(||self.next.saturating_duration_since(now))
     }
-    pub(super) fn tick(&mut self,scope:&Scope,created:Option<u64>,id:&str,budget:u64) -> Result<()> {
+    pub(super) fn tick(&mut self,scope:&Scope,created:Option<u64>,id:&str,outputs:&Outputs,budget:u64) -> Result<()> {
         let now=Instant::now();
         if self.wait(now).is_none_or(|wait|!wait.is_zero()) { return Ok(()); }
         self.next=now+Duration::from_secs_f64(1.0/30.0);
@@ -40,13 +44,33 @@ impl Configure {
         if let Some(pending)=self.pending.take() {
             let (_,window)=eligible()?;
             if window.minimized || window.maximized {
+                if pending.transfer { return Err("window state changed while sending it to another monitor".into()); }
                 if let Some(ask)=pending.ask { self.wanted.get_or_insert(ask); }
                 self.deferred=true;
                 return Ok(());
             }
-            if window.bounds!=pending.bounds {
-                if now>=pending.until { return Err(format!("{id} did not accept the requested scene size").into()); }
+            if window.bounds!=pending.bounds || window.monitor!=pending.monitor {
+                if now>=pending.until { return Err(format!("{id} did not accept the requested scene placement").into()); }
                 self.pending=Some(pending);
+                return Ok(());
+            }
+        }
+        if let Some(name)=self.destination.take() {
+            // Pin the physical display name at the time of the action. A
+            // reordered or removed output must never send it somewhere else.
+            let index=outputs.0.iter().find(|(_,n)|n==&name).map(|(i,_)|*i)
+                .ok_or("the destination scene output was removed")?;
+            if outputs.destination(index,scope)?!=name { return Err("the destination scene output changed".into()); }
+            let (hwnd,window)=eligible()?;
+            normal(&window)?;
+            let screens=monitors()?;
+            let from=screens.iter().find(|m|m.name==window.monitor).ok_or("source monitor disconnected")?;
+            let to=screens.iter().find(|m|m.name==name).ok_or("destination monitor disconnected")?;
+            if from.name!=to.name {
+                let bounds=transfer::geometry(&window.bounds,from,to,budget)?;
+                unsafe { SetWindowPos(hwnd,None,bounds.x,bounds.y,bounds.width,bounds.height,
+                    SWP_NOACTIVATE|SWP_NOZORDER|SWP_NOOWNERZORDER|SWP_ASYNCWINDOWPOS) }?;
+                self.pending=Some(Pending {bounds,ask:None,monitor:name,transfer:true,until:now+Duration::from_secs(1)});
                 return Ok(());
             }
         }
@@ -62,7 +86,7 @@ impl Configure {
         if bounds==window.bounds { return Ok(()); }
         unsafe { SetWindowPos(hwnd,None,bounds.x,bounds.y,bounds.width,bounds.height,
             SWP_NOACTIVATE|SWP_NOZORDER|SWP_NOOWNERZORDER|SWP_ASYNCWINDOWPOS) }?;
-        self.pending=Some(Pending {bounds,ask:Some(ask),until:now+Duration::from_secs(1)});
+        self.pending=Some(Pending {bounds,ask:Some(ask),monitor:window.monitor,transfer:false,until:now+Duration::from_secs(1)});
         Ok(())
     }
 }
@@ -112,5 +136,18 @@ mod tests {
         configure.deferred=true;assert!(configure.wait(Instant::now()).is_none());
         configure.wake();assert!(configure.wait(Instant::now()).is_some());
         configure.ask(0,0).unwrap();assert!(configure.wait(Instant::now()).is_none());
+    }
+    #[test]
+    fn send_coalesces_by_display_name_without_losing_the_scene_size() {
+        let mut configure=Configure::default();
+        configure.ask(640,400).unwrap();
+        configure.send("LEFT".into());
+        configure.send("RIGHT".into());
+        assert_eq!(configure.destination.as_deref(),Some("RIGHT"));
+        assert_eq!(configure.wanted,Some((640,400)));
+        configure.ask(0,0).unwrap();
+        assert!(configure.wanted.is_none());
+        assert_eq!(configure.destination.as_deref(),Some("RIGHT"));
+        assert!(configure.wait(Instant::now()).is_some());
     }
 }
