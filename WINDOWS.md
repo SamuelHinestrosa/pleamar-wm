@@ -644,12 +644,66 @@ launch is unavailable. Physical cross-monitor acceptance is still pending.
 | Live scene layouts; private/workspace rules | Pending |
 | Live window previews | Experimental native capture/render transport; one source or represented scene monitors, optional native focus/close/minimize/restore and bounded scene size requests; new multi-output mapping awaits native acceptance |
 | Marea menu/finder bridge | Module tested with real Luau, IPC and owned Windows windows; complete Marea UI acceptance pending; package lifecycle tested separately |
-| Rain, snow, ride, dock, animated window transitions | Pending native equivalents |
+| Native dock | Experimental: classic-app icons, pin/unpin, restart persistence and actual relaunch verified on secondary DISPLAY1 with named scene actions; packaged apps and OS file-drop acceptance pending |
+| Rain, snow, ride, animated window transitions | Pending native equivalents |
 | Per-monitor tide pools and overview | Pending; Windows virtual desktops are not the same model |
 | Independent agent pointer/keyboard, glow and stop UI | Pending; Marea currently uses guarded shared Windows input |
 | Agent program launch on another monitor without taking the keyboard | Pending native implementation; the upstream 0.2.19 behavior is still Linux-only |
 | Remote desktop/WebRTC and sharing integration | Pending native capture/input/encoder adapters |
 | DRM, libinput, PipeWire, Wayland protocols and login session | Linux components; Windows owns the corresponding system facilities |
+
+The native dock work is exercised by `examples/windows-dock.plm`, with an explicit
+`--screen NAME --preview-monitor NAME --window-actions` scope. Program metadata
+is read on a bounded background worker so shell extensions cannot block the
+preview frame pump. Pins are stored in `wm/windows-dock.json` under pleamar's
+Windows configuration directory, with a locked read/modify/replace operation.
+The file is separate from Linux's `session.conf` dock entries.
+
+Classic programs start directly through `CreateProcessW`, with separate executable
+and file arguments. They need no PowerShell helper and creation failures reach
+the caller immediately. Command-line encoding follows the
+[MSVC argument rules](https://learn.microsoft.com/en-us/cpp/c-language/parsing-c-command-line-arguments);
+packaged programs use Windows application/file activation. Program and file
+identities stay separate from authored scene launch commands. Applications
+activated by Windows retain their OS-managed lifetime. View-only and
+single-process preview scopes cannot pin or launch dock programs. The `dock`
+capability remains false until the actual dock rendering, interaction, persistence
+and packaged-app checks have passed; compiling this code is not acceptance.
+
+The local 2026-10-07 release run passed 48 tests (15 opt-in tests not run there),
+including concurrent pin persistence and an actual executable receiving file
+arguments with Unicode, apostrophes and shell metacharacters. A separate owned
+HWND metadata test passed on non-primary DISPLAY1 without foreground activation.
+The native scene then displayed actual icons on NVIDIA GeForce RTX 5070/D3D12:
+named actions pinned the owned app, kept it after its window closed, preserved it
+through scene restart, launched a new native instance and removed the pin again.
+Six PNG hashes were checked and four images inspected. No OS input was injected;
+no owned window held foreground at the checks, and none remained after cleanup.
+This is not a physical pointer/drag test, packaged-app acceptance or an installed
+Marea walkthrough. The initial local harness expected one HWND but a panel has
+separate composition/input HWNDs; that failed harness was corrected to select
+the composition canvas, without changing the product for the test.
+
+The direct-launch revision passes 49 ordinary tests (15 opt-in helpers excluded),
+including missing-executable errors, Unicode/quoted argument round trips and
+owned-process cleanup. The actual executable argument test still passes. The
+scene acceptance was repeated after removing the PowerShell launch helper:
+pin/restart/relaunch/unpin passed, no owned window took foreground at the checks,
+and none remained. Six PNGs were recorded; the relaunch and unpin images were
+inspected. Store activation and OS file dragging remain unverified.
+
+The reusable regression requires Python with Pillow and a non-primary monitor:
+
+```powershell
+cargo build --release --locked --bin pleamar-wm --example windows-dock-fixture
+python tests/windows-dock.py --binary target/release/pleamar-wm.exe `
+  --fixture target/release/examples/windows-dock-fixture.exe `
+  --monitor '\\.\DISPLAY1' --output C:/Temp/pleamar-dock-acceptance
+```
+
+Choose the exact non-primary name from `pleamar-wm monitors` and a fresh output
+directory. The fixture refuses the primary monitor, isolates configuration,
+uses named scene actions without OS input and cleans up its own windows.
 
 Unavailable WM commands exit with an error. `capabilities` states their status
 explicitly; no rain, independent input seat or compositor session is simulated.

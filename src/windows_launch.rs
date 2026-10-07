@@ -50,11 +50,17 @@ impl Default for Launches {
 }
 impl Launches {
     pub(super) fn start(&mut self,line:&str) -> Result<u32> {
-        let mut command=command_line(line)?;
-        self.poll(Instant::now())?;
-        if self.running.len()>=16 { return Err("at most 16 scene-launched process groups may run at once".into()); }
+        let command=command_line(line)?;
         let root=std::env::var_os("SystemRoot").ok_or("SystemRoot is unavailable")?;
         let executable=std::path::PathBuf::from(root).join("System32/WindowsPowerShell/v1.0/powershell.exe");
+        self.create(&executable,command)
+    }
+    pub(super) fn executable(&mut self,path:&str,args:&[String]) -> Result<u32> {
+        self.create(Path::new(path),executable_line(path,args)?)
+    }
+    fn create(&mut self,executable:&Path,mut command:Vec<u16>) -> Result<u32> {
+        self.poll(Instant::now())?;
+        if self.running.len()>=16 { return Err("at most 16 scene-launched process groups may run at once".into()); }
         let executable:Vec<u16>=executable.as_os_str().encode_wide().chain([0]).collect();
         let job=unsafe { own(CreateJobObjectW(None,PCWSTR::null())?) };
         let job_handle=handle(&job);
@@ -95,6 +101,29 @@ impl Launches {
     pub(super) fn wait(&self,now:Instant) -> Option<Duration> {
         (!self.running.is_empty()).then(||self.next.saturating_duration_since(now))
     }
+}
+
+fn executable_line(path:&str,args:&[String]) -> Result<Vec<u16>> {
+    if !Path::new(path).is_absolute() || path.contains(['\0','"'])
+        || !Path::new(path).extension().and_then(|e|e.to_str()).is_some_and(|e|e.eq_ignore_ascii_case("exe")) {
+        return Err("invalid native executable path".into());
+    }
+    // CreateProcess receives the executable separately. Its command line uses
+    // the MSVC argv rules, without a shell interpreting the file arguments.
+    let mut command=format!("\"{path}\"");
+    for arg in args {
+        if arg.contains('\0') { return Err("native argument contains a null character".into()); }
+        command.push_str(" \"");let mut slashes=0;
+        for c in arg.chars() {
+            if c=='\\' { slashes+=1;continue; }
+            let count=if c=='"' { slashes*2+1 } else { slashes };
+            command.extend(std::iter::repeat_n('\\',count));slashes=0;command.push(c);
+        }
+        command.extend(std::iter::repeat_n('\\',slashes*2));command.push('"');
+    }
+    let command:Vec<u16>=command.encode_utf16().chain([0]).collect();
+    if command.len()>32767 { return Err("native arguments exceed the Windows command-line limit".into()); }
+    Ok(command)
 }
 
 fn command_line(line:&str) -> Result<Vec<u16>> {

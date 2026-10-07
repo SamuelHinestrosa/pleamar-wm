@@ -56,6 +56,36 @@ fn wait_empty(commands:&mut Launches) {
 }
 
 #[test]
+fn native_arguments_round_trip_and_reject_invalid_limits() {
+    use windows::Win32::UI::Shell::CommandLineToArgvW;
+    let path="C:\\A 'ñ'\\player.exe";
+    let args:Vec<String>=["", "C:\\a folder\\", "C:\\it's 海\\$HOME; $(exit 9).txt", "quoted\"value", "slash\\\"quote", "tabs\tand\nlines"].into_iter().map(str::to_owned).collect();
+    let command=executable_line(path,&args).unwrap();let mut count=0;
+    let argv=unsafe { CommandLineToArgvW(PCWSTR(command.as_ptr()),&mut count) };
+    assert!(!argv.is_null());
+    let actual:Vec<String>=unsafe { std::slice::from_raw_parts(argv,count as usize) }.iter().map(|s|unsafe { s.to_string().unwrap() }).collect();
+    unsafe { let _=LocalFree(Some(HLOCAL(argv.cast()))); }
+    assert_eq!(actual,[vec![path.to_owned()],args].concat());
+    for bad in ["player.exe","C:\\app.ps1","C:\\bad\0.exe","C:\\bad\".exe"] { assert!(executable_line(bad,&[]).is_err()); }
+    assert!(executable_line(path,&["nul\0arg".into()]).is_err());
+    assert!(executable_line(path,&["🚀".repeat(17000)]).is_err());
+}
+
+#[test]
+fn native_launch_reports_creation_errors_and_owns_its_process() {
+    let files=Files::new();let mut commands=Launches::default();
+    let missing=files.file("missing.exe");
+    assert!(commands.executable(&missing.to_string_lossy(),&[]).is_err());
+    assert!(commands.running.is_empty(),"a failed creation must not retain a process group");
+    let executable=std::env::current_exe().unwrap();
+    let args=["--ignored","--exact","windows_backend::launch::tests::launch_leaf"].map(str::to_owned);
+    let child=process(commands.executable(&executable.to_string_lossy(),&args).unwrap());
+    assert_eq!(unsafe { WaitForSingleObject(handle(&child),0) },WAIT_TIMEOUT);
+    drop(commands);
+    assert_eq!(unsafe { WaitForSingleObject(handle(&child),5000) },WAIT_OBJECT_0);
+}
+
+#[test]
 fn scene_commands_preserve_unicode_quotes_and_validate_native_limits() {
     for bad in ["", "   ", "exit\0 0", &"x".repeat(16001), &"x".repeat(15000)] {
         assert!(command_line(bad).is_err());

@@ -31,6 +31,8 @@ mod agent;
 
 #[path = "windows_launch.rs"]
 mod launch;
+#[path = "windows_dock.rs"]
+mod dock;
 
 const HELP: &str = "pleamar-wm — experimental native Windows desktop companion
 

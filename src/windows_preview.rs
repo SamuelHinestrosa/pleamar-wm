@@ -11,6 +11,11 @@ mod configure;
 #[derive(Clone)]
 struct Scope { monitor:String, process:Option<u32>, actions:bool }
 impl Scope {
+    fn dock_actions(&self) -> Result<()> {
+        if !self.actions { return Err("dock changes require --window-actions; this scene is view-only".into()); }
+        if self.process.is_some() { return Err("dock changes are unavailable with a single-process preview scope".into()); }
+        Ok(())
+    }
     fn launch(&self, commands:&mut launch::Launches, command:&str) -> Result<u32> {
         if !self.actions { return Err("scene launch requires --window-actions; this scene is view-only".into()); }
         if self.process.is_some() { return Err("scene launch is unavailable with a single-process preview scope".into()); }
@@ -145,6 +150,9 @@ struct Preview {
     screens:Vec<Monitor>,
     outputs:Outputs,
     launches:launch::Launches,
+    dock:dock::Dock,
+    programs:std::collections::BTreeMap<String,Option<dock::Program>>,
+    metadata:dock::Lookup,
 }
 impl Preview {
     fn new(max:usize,scope:Scope,send:Sender<ToRender>,wake:std::sync::Arc<wait::Wake>) -> Result<Self> {
@@ -161,8 +169,10 @@ impl Preview {
         // A different process taking focus clears this scene's focused slot.
         hooks.add(EVENT_SYSTEM_FOREGROUND,EVENT_SYSTEM_FOREGROUND,0)?;
         let waiter=wait::Waiter::new(wake.clone())?;
+        let dock=dock::Dock::new(pleamar::config_dir().ok_or("Windows configuration directory unavailable")?.join("wm/windows-dock.json"))?;
+        let metadata=dock::Lookup::new(wake.clone())?;
         Ok(Self { scope,created,device:capture::DeviceCache::new(Some(wake)),slots:(0..max).map(|_|None).collect(),
-            send,_hooks:hooks,consumed:None,waiter,warned:HashSet::new(),focused:None,visible:HashSet::new(),screens:Vec::new(),outputs:Outputs::default(),launches:launch::Launches::default() })
+            send,_hooks:hooks,consumed:None,waiter,warned:HashSet::new(),focused:None,visible:HashSet::new(),screens:Vec::new(),outputs:Outputs::default(),launches:launch::Launches::default(),dock,programs:Default::default(),metadata })
     }
     fn tell(&self,event:NestEvent) -> Result<()> { self.send.send(ToRender::Nest(event))?; Ok(()) }
     fn order(&self) -> Result<()> {
@@ -201,6 +211,7 @@ impl Preview {
                 let scale=screens.iter().find(|m|m.name==window.monitor)?.scale;
                 Some((window,screen,scale))
             }).collect();
+        self.programs.retain(|id,_|live.iter().any(|(window,_,_)|&window.id==id));
         for i in 0..self.slots.len() {
             let remove=self.slots[i].as_ref().is_some_and(|s|!live.iter().any(|(w,_,_)|w.id==s.window.id));
             if remove {
@@ -209,10 +220,17 @@ impl Preview {
             }
         }
         for (window,screen,scale) in live {
+            let previous_app=self.programs.get(&window.id).and_then(Option::as_ref).map(|p|p.key()).unwrap_or_else(||window.app.clone());
+            if self.slots.iter().flatten().any(|slot|slot.window.id==window.id
+                && (slot.window.title!=window.title || slot.window.app!=window.app)) { self.programs.remove(&window.id); }
+            if !self.programs.contains_key(&window.id) && self.metadata.request(&window) { self.programs.insert(window.id.clone(),None); }
+            let program=self.programs.get(&window.id).cloned().flatten();
+            let app_id=program.as_ref().map(|p|p.key()).unwrap_or_else(||window.app.clone());
+            if let Some(program)=&program { self.dock.remember(program.clone()); }
             if let Some(i)=self.slots.iter().position(|s|s.as_ref().is_some_and(|s|s.window.id==window.id)) {
                 let slot=self.slots[i].as_mut().unwrap();
                 let title=slot.window.title!=window.title;
-                let app=slot.window.app!=window.app;
+                let app=previous_app!=app_id;
                 let state=slot.window.minimized!=window.minimized;
                 let minimized=window.minimized;
                 let moved=slot.screen!=screen;
@@ -225,7 +243,7 @@ impl Preview {
                 if moved { self.tell(NestEvent::Screen(i,screen))?; }
                 if let Some(frame)=retained { self.tell(frame)?; }
                 if title { self.tell(NestEvent::Title(i,self.slots[i].as_ref().unwrap().window.title.clone()))?; }
-                if app { self.tell(NestEvent::App(i,self.slots[i].as_ref().unwrap().window.app.clone()))?; }
+                if app { self.tell(NestEvent::App(i,app_id))?;if let Some(program)=&program {self.tell(program.event(i))?;} }
                 if state {
                     self.tell(NestEvent::Minimized(i,minimized))?;
                     if !minimized { self.slots[i].as_mut().unwrap().retry.reset(); self.capture(i); }
@@ -233,13 +251,15 @@ impl Preview {
                 continue;
             }
             let Some(i)=self.slots.iter().position(Option::is_none) else { break; };
-            self.tell(NestEvent::Opened {slot:i,title:window.title.clone(),app:window.app.clone(),screen})?;
+            self.tell(NestEvent::Opened {slot:i,title:window.title.clone(),app:app_id,screen})?;
+            if let Some(program)=&program { self.tell(program.event(i))?; }
             self.tell(NestEvent::Minimized(i,window.minimized))?;
             self.slots[i]=Some(Slot {window,capture:None,received:false,pixels:0,born:Instant::now(),next_frame:Instant::now(),
                 configure:configure::Configure::default(),visible:self.visible.contains(&i),retry:Retry::default(),screen,scale,last_size:None});
             self.capture(i);
         }
         self.order()?;
+        self.dock.retain(&self.programs.values().flatten().map(|p|p.key()).collect());
         self.focus()?;
         Ok(())
     }
@@ -317,9 +337,20 @@ impl Preview {
         }
     }
     fn run(&mut self,commands:mpsc::Receiver<ToNest>) -> Result<()> {
+        self.tell(self.dock.events())?;
         let mut topology=Instant::now();
         loop {
             pump();
+            for (id,result) in self.metadata.poll() {
+                let Some(slot)=self.slots.iter().position(|s|s.as_ref().is_some_and(|s|s.window.id==id)) else {continue;};
+                match result {
+                    Ok(program)=>{
+                        self.tell(NestEvent::App(slot,program.key()))?;self.tell(program.event(slot))?;
+                        self.dock.remember(program.clone());self.programs.insert(id,Some(program));
+                    },
+                    Err(error)=>eprintln!("windows dock: {id}: {error}"),
+                }
+            }
             for _ in 0..256 {
                 match commands.try_recv() {
                     Ok(ToNest::Quit)|Err(TryRecvError::Disconnected) => return Ok(()),
@@ -333,6 +364,15 @@ impl Preview {
                     Ok(ToNest::Visible(slots)) => self.visible(slots)?,
                     Ok(ToNest::Launch(command)) => {
                         if let Err(error)=self.scope.launch(&mut self.launches,&command) { eprintln!("windows launch: {error}"); }
+                    },
+                    Ok(ToNest::Pin(key,yes)) => {
+                        let result=self.scope.dock_actions().and_then(|_|self.dock.pin(&key,yes));
+                        match result { Ok(())=>self.tell(self.dock.events())?,Err(error)=>eprintln!("windows dock: {error}") }
+                    },
+                    Ok(ToNest::OpenProgram {key,files}) => {
+                        if let Err(error)=self.scope.dock_actions().and_then(|_|self.dock.open(&key,&files,&mut self.launches)) {
+                            eprintln!("windows dock: {error}");
+                        }
                     },
                     Ok(ToNest::Size(..)|ToNest::Shown {..}|ToNest::OnScreen(..)|ToNest::Gpu {..}|ToNest::Released(..)|ToNest::PointerOut|ToNest::HostFocus(..)) => {},
                     Ok(ToNest::Configure {slot,w,h}) => {
@@ -361,6 +401,10 @@ impl Preview {
                 // Display polling also detects DPI/work-area changes. Ordinary
                 // windows are enumerated only on events or a topology change.
                 refresh |= monitors()?!=self.screens;
+                match self.dock.refresh() {
+                    Ok(true)=>self.tell(self.dock.events())?,Ok(false)=>{},
+                    Err(error)=>if self.warned.insert("dock configuration") {eprintln!("windows dock: {error}");},
+                }
                 topology=Instant::now();
             }
             if refresh { self.refresh()?; }
@@ -464,6 +508,7 @@ mod tests {
         for scope in [Scope {monitor:"all".into(),process:None,actions:false},
             Scope {monitor:"all".into(),process:Some(123),actions:true}] {
             assert!(scope.launch(&mut commands,"exit 0").is_err());
+            assert!(scope.dock_actions().is_err());
         }
         assert!(commands.wait(Instant::now()).is_none());
     }

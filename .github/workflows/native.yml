@@ -10,7 +10,7 @@ on:
         required: true
       pleamar_ref:
         description: Exact pleamar revision (Windows backend required)
-        default: b2eda4e7b9e7da84ea9d7c74ae08e2bbba86f9a0
+        default: d03625cd7783c78181d4e2e446a1af7e13912430
         required: true
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.pleamar_repository || 'SamuelHinestrosa/pleamar' }}
-          ref: ${{ inputs.pleamar_ref || 'b2eda4e7b9e7da84ea9d7c74ae08e2bbba86f9a0' }}
+          ref: ${{ inputs.pleamar_ref || 'd03625cd7783c78181d4e2e446a1af7e13912430' }}
           path: pleamar
       - name: Linux system libraries
         if: runner.os == 'Linux'
@@ -58,6 +58,9 @@ jobs:
       - name: Check the preview scene
         working-directory: pleamar-wm
         run: cargo run --locked -- --check examples/windows-preview.plm
+      - name: Check the native dock scene
+        working-directory: pleamar-wm
+        run: cargo run --locked -- --check examples/windows-dock.plm
       - name: Retire and reopen idle native capture devices without desktop interaction
         if: runner.os == 'Windows'
         working-directory: pleamar-wm
