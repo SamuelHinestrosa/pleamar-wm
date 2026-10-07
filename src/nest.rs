@@ -3403,6 +3403,11 @@ impl SessionLockHandler for State {
     fn lock(&mut self, confirmation: SessionLocker) {
         println!("windows · the session is locked");
         layers::set_locked(true);
+        // On the phone, it comes back to the desk, where its lock screen is:
+        // the phone unlocks it from there (docs/phone.md).
+        if layers::monitors().iter().any(|m| m.name == layers::PHONE_NAME) {
+            layers::request_phone(None);
+        }
         confirmation.lock();
     }
 
