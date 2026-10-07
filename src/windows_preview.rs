@@ -11,6 +11,11 @@ mod configure;
 #[derive(Clone)]
 struct Scope { monitor:String, process:Option<u32>, actions:bool }
 impl Scope {
+    fn launch(&self, commands:&mut launch::Launches, command:&str) -> Result<u32> {
+        if !self.actions { return Err("scene launch requires --window-actions; this scene is view-only".into()); }
+        if self.process.is_some() { return Err("scene launch is unavailable with a single-process preview scope".into()); }
+        commands.start(command)
+    }
     fn allows(&self, window:&Window, created:Option<u64>) -> bool {
         (self.monitor=="all" || window.monitor==self.monitor) && self.process.is_none_or(|pid|window.process==pid)
             && created.is_none_or(|stamp|window.id.ends_with(&format!(":{stamp:x}")))
@@ -129,6 +134,7 @@ struct Preview {
     visible:HashSet<usize>,
     screens:Vec<Monitor>,
     outputs:Outputs,
+    launches:launch::Launches,
 }
 impl Preview {
     fn new(max:usize,scope:Scope,send:Sender<ToRender>,wake:std::sync::Arc<wait::Wake>) -> Result<Self> {
@@ -146,7 +152,7 @@ impl Preview {
         hooks.add(EVENT_SYSTEM_FOREGROUND,EVENT_SYSTEM_FOREGROUND,0)?;
         let waiter=wait::Waiter::new(wake.clone())?;
         Ok(Self { scope,created,device:capture::Device::new(Some(wake))?,slots:(0..max).map(|_|None).collect(),
-            send,_hooks:hooks,consumed:None,waiter,warned:HashSet::new(),focused:None,visible:HashSet::new(),screens:Vec::new(),outputs:Outputs::default() })
+            send,_hooks:hooks,consumed:None,waiter,warned:HashSet::new(),focused:None,visible:HashSet::new(),screens:Vec::new(),outputs:Outputs::default(),launches:launch::Launches::default() })
     }
     fn tell(&self,event:NestEvent) -> Result<()> { self.send.send(ToRender::Nest(event))?; Ok(()) }
     fn order(&self) -> Result<()> {
@@ -317,6 +323,9 @@ impl Preview {
                         CATALOG_DIRTY.set(true);
                     },
                     Ok(ToNest::Visible(slots)) => self.visible(slots)?,
+                    Ok(ToNest::Launch(command)) => {
+                        if let Err(error)=self.scope.launch(&mut self.launches,&command) { eprintln!("windows launch: {error}"); }
+                    },
                     Ok(ToNest::Size(..)|ToNest::Shown {..}|ToNest::OnScreen(..)|ToNest::Gpu {..}|ToNest::Released(..)|ToNest::PointerOut|ToNest::HostFocus(..)) => {},
                     Ok(ToNest::Configure {slot,w,h}) => {
                         if !self.scope.actions && (w,h)==(0,0) { continue; }
@@ -367,7 +376,9 @@ impl Preview {
             }
             if self.consumed.is_none() { self.frames()?; }
             let now=Instant::now();
+            if let Err(error)=self.launches.poll(now) { eprintln!("windows launch: {error}"); }
             let mut wait=(topology+Duration::from_secs(2)).saturating_duration_since(now);
+            if let Some(launch)=self.launches.wait(now) { wait=wait.min(launch); }
             for slot in self.slots.iter().flatten() {
                 if let Some(resize)=slot.configure.wait(now) { wait=wait.min(resize); }
                 if let Some(retry)=slot.retry_wait(now) { wait=wait.min(retry); }
@@ -430,6 +441,15 @@ fn act(scope:&Scope,created:Option<u64>,id:&str,action:Action) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn view_only_and_process_scopes_cannot_launch_programs() {
+        let mut commands=launch::Launches::default();
+        for scope in [Scope {monitor:"all".into(),process:None,actions:false},
+            Scope {monitor:"all".into(),process:Some(123),actions:true}] {
+            assert!(scope.launch(&mut commands,"exit 0").is_err());
+        }
+        assert!(commands.wait(Instant::now()).is_none());
+    }
     #[test]
     fn source_outputs_follow_scene_names_and_keep_cross_display_single_previews() {
         let all=Scope {monitor:"all".into(),process:None,actions:false};

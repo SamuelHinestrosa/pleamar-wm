@@ -71,6 +71,37 @@ program launch remain unavailable here. They return errors. These limits do
 not prevent named actions on pleamar scenes. The matching engine documents
 the [protocol and interaction guards](https://github.com/SamuelHinestrosa/pleamar/blob/codex/windows-native-026/docs/windows-scene-commands.md).
 
+## Launching from a scene
+
+The authored `launch "..."` action now starts a native PowerShell command when
+the preview has `--window-actions`. It rejects view-only and single-process
+preview scopes. See `examples/windows-launch.plm`; its button and Alt+Return
+open Notepad. For a quoted executable path, use PowerShell's call operator:
+`launch "& 'C:\\Program Files\\Example\\app.exe' '--option'"`.
+The monitor option selects capture sources; it does not promise that a newly
+launched application will open on that monitor or avoid taking focus.
+
+Each command enters a private Windows Job Object at creation. Its ordinary
+descendants remain owned after the shell exits, and end when this preview
+closes or its process terminates. Existing app instances and processes started
+through a separate system broker are not made part of that group. Save work
+before closing a scene whose commands started applications. This is distinct
+from Marea's application service and its persistent app-launcher behavior.
+At most sixteen launch groups run concurrently. Completed groups release their
+handles; polling stops when no group remains. Blank, NUL-containing and oversized
+commands fail before execution. A nonzero shell exit is reported in the log.
+`capabilities` reports `scene_launch: true` and `agent_background_launch: false`;
+this provides no independent agent seat, background typing or Unix shell.
+
+The ordinary Windows suite tests real native process creation with accented
+and supplementary Unicode, quotes, spaces, a surviving child after its shell
+exits, group cleanup, unaffected sibling processes and forced owner termination.
+Its helpers create no windows and send no desktop input. The example is compile
+checked; pressing its button and visual launch acceptance remain pending.
+Process ownership uses Microsoft's
+[creation-time job assignment](https://devblogs.microsoft.com/oldnewthing/20230209-00/?p=107812)
+and [nested job lifetime](https://learn.microsoft.com/en-us/windows/win32/procthread/nested-jobs).
+
 ## Explicit window layouts
 
 The matching Marea profile includes a paged **Window overview** on its selected
@@ -78,7 +109,8 @@ monitor. The session advertises `window_overview`; `capabilities` advertises
 `visible_window_capture`. The renderer sends demand independently of input
 placement, including before a window's first image. Hidden pages stop native
 capture and clear retained pictures, while keeping window identities and
-titles. The GPU atlas may retain its capacity for reuse. The Linux compositor
+titles. The paired Windows renderer releases its peak texture capacity once
+all demand and retained pictures are gone; page switches retain it. The Linux compositor
 ignores this resource-demand message and keeps its existing client-buffer and
 input-placement behavior.
 

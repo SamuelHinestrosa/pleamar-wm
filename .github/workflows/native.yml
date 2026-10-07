@@ -76,6 +76,9 @@ jobs:
       - name: Check the per-monitor preview scene
         working-directory: pleamar-wm
         run: cargo run --locked -- --check examples/windows-monitors.plm
+      - name: Check the native launch scene
+        working-directory: pleamar-wm
+        run: cargo run --locked -- --check examples/windows-launch.plm
       - name: Build the Windows background host
         if: runner.os == 'Windows'
         working-directory: pleamar-wm
@@ -92,6 +95,7 @@ jobs:
           if (!$caps.visible_window_capture -or $caps.preview_redirected_input -or ($caps.preview_window_actions -join ',') -ne 'focus,close,minimize,restore,configure') {
             throw 'Incorrect native preview action capabilities'
           }
+          if (!$caps.scene_launch -or $caps.agent_background_launch) { throw 'Incorrect native launch capabilities' }
           & ./target/debug/pleamar-wm.exe remote
           if ($LASTEXITCODE -eq 0) { throw 'An unavailable remote desktop reported success' }
           exit 0

@@ -27,6 +27,9 @@ mod preview;
 #[path = "windows_agent.rs"]
 mod agent;
 
+#[path = "windows_launch.rs"]
+mod launch;
+
 const HELP: &str = "pleamar-wm — experimental native Windows desktop companion
 
   capabilities                     machine-readable support status
@@ -47,7 +50,7 @@ const HELP: &str = "pleamar-wm — experimental native Windows desktop companion
   --scene FILE [OPTIONS]            a native pleamar scene, including Luau and live reload
           --preview-monitor NAME   view-only live native windows in the scene (experimental)
           --preview-process PID    restrict those pictures to one current process
-          --window-actions         allow native focus, close, minimize, restore and scene size requests
+          --window-actions         allow native focus, close, minimize, restore, scene size and launch
 
 Layouts: left, right, columns, rows, grid. MONITOR is a display name or number
 from `monitors`. IDs come from `windows`. Coordinates are physical pixels.
@@ -312,6 +315,7 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
             "monitors": true, "windows": true, "explicit_layouts": true, "minimize_restore": true,
             "native_scenes_luau": true, "read_only_window_previews": true, "visible_window_capture": true,
             "preview_window_actions": ["focus", "close", "minimize", "restore", "configure"], "preview_redirected_input": false,
+            "scene_launch": true, "agent_background_launch": false,
             "window_rules": ["app", "title", "float", "size", "monitor"], "private_window_rules": false, "workspace_window_rules": false,
             "window_scene_provider": false, "automatic_session": true, "rain": false, "snow": false,
             "ride": false, "dock": false, "pools": false, "remote": false, "independent_agent_seat": false,
