@@ -27,6 +27,13 @@ use tungstenite::protocol::Role;
 use tungstenite::{Message, WebSocket};
 
 const PAGE: &str = include_str!("remote.html");
+/// The page's version: a page left open —an app on a phone's home screen
+/// lives for days— that hears another one from its server is older than it.
+const PAGE_VERSION: u64 = fnv(PAGE.as_bytes());
+/// Its icon on a home screen (the orb it greets with).
+const ICON_180: &[u8] = include_bytes!("../assets/remote/icon-180.png");
+const ICON_192: &[u8] = include_bytes!("../assets/remote/icon-192.png");
+const ICON_512: &[u8] = include_bytes!("../assets/remote/icon-512.png");
 const PORT: u16 = 8765;
 const TILE: usize = 64;
 /// How long a session lasts without being used, and at most.
@@ -167,6 +174,8 @@ struct Gate {
     phone_on: bool,
     phone_pages: u32,
     phone_left: Option<Instant>,
+    /// A newer program is installed: the pages are told, and one asks to start again.
+    newer: bool,
 }
 
 impl Gate {
@@ -276,8 +285,18 @@ fn serve(view_only: bool) -> Result<(), String> {
     // One left from before (a session that ended, one started by hand) goes:
     // this is the one the session started now.
     take_over(port);
-    let mut gate = Gate { config, sessions: HashMap::new(), saved: 0, failures: HashMap::new(), all_failures: Vec::new(), last_step: 0, present: HashMap::new(), next_page: 0, kicked: 0, phone_on: false, phone_pages: 0, phone_left: None };
+    let mut gate = Gate { config, sessions: HashMap::new(), saved: 0, failures: HashMap::new(), all_failures: Vec::new(), last_step: 0, present: HashMap::new(), next_page: 0, kicked: 0, phone_on: false, phone_pages: 0, phone_left: None, newer: false };
     gate.restore();
+    // Started again (an update) with the session on the phone: it waits there
+    // for the phone's page as if it had just left.
+    if crate::agent_cli::monitors().is_ok_and(|m| phone_index(&m).is_some()) {
+        gate.phone_on = true;
+        gate.phone_left = Some(Instant::now());
+    }
+    if let Ok(path) = std::env::current_exe() {
+        let id = exe_id(&path);
+        let _ = EXE.set((path, id));
+    }
     let gate = Arc::new(Mutex::new(gate));
     // The session is told who is in (it marks it on the monitors), and this
     // computer can send everyone away (`pleamar-wm remote stop`).
@@ -287,6 +306,8 @@ fn serve(view_only: bool) -> Result<(), String> {
     std::thread::spawn(move || control(door));
     let keeper = gate.clone();
     std::thread::spawn(move || keep_phone(keeper));
+    let watcher = gate.clone();
+    std::thread::spawn(move || watch_binary(watcher));
     let hands = Arc::new(Mutex::new(None::<Hands>));
     let mut tries = 0;
     let listener = loop {
@@ -376,7 +397,74 @@ fn who(req: &Request, stream: &TcpStream) -> String {
 
 fn page(signed_in: bool, error: &str) -> String {
     let (login, app) = if signed_in { ("none", "block") } else { ("flex", "none") };
-    PAGE.replace("{{LOGIN}}", login).replace("{{APP}}", app).replace("{{ERROR}}", error)
+    PAGE.replace("{{LOGIN}}", login).replace("{{APP}}", app).replace("{{ERROR}}", error).replace("{{VERSION}}", &format!("{PAGE_VERSION:016x}"))
+}
+
+const fn fnv(bytes: &[u8]) -> u64 {
+    let mut h = 0xcbf2_9ce4_8422_2325u64;
+    let mut i = 0;
+    while i < bytes.len() {
+        h ^= bytes[i] as u64;
+        h = h.wrapping_mul(0x0100_0000_01b3);
+        i += 1;
+    }
+    h
+}
+
+/// What makes the page an app on a phone's home screen: all of the screen,
+/// held any way, with its own icon.
+fn manifest() -> String {
+    let host = std::fs::read_to_string("/etc/hostname").map(|h| h.trim().to_owned()).unwrap_or_default();
+    let name = if host.is_empty() { "pleamar".to_owned() } else { format!("pleamar · {}", host.replace(['"', '\\'], "")) };
+    format!(
+        r##"{{"name":"{name}","short_name":"pleamar","id":"/","start_url":"/","scope":"/","display":"fullscreen","display_override":["fullscreen","standalone"],"orientation":"any","background_color":"#071014","theme_color":"#071014","icons":[{{"src":"/icon-192.png","sizes":"192x192","type":"image/png","purpose":"any maskable"}},{{"src":"/icon-512.png","sizes":"512x512","type":"image/png","purpose":"any maskable"}}]}}"##
+    )
+}
+
+/// This program on disk, as it was when it started: when it changes (an
+/// update installed), the one running starts again from it —at once if no
+/// page is connected, or when a page asks (`update`)—.
+static EXE: std::sync::OnceLock<(std::path::PathBuf, Option<(u64, u64, SystemTime)>)> = std::sync::OnceLock::new();
+
+fn exe_id(path: &std::path::Path) -> Option<(u64, u64, SystemTime)> {
+    use std::os::unix::fs::MetadataExt;
+    let m = std::fs::metadata(path).ok()?;
+    Some((m.ino(), m.len(), m.modified().ok()?))
+}
+
+fn watch_binary(gate: Arc<Mutex<Gate>>) {
+    let Some((path, Some(first))) = EXE.get() else { return };
+    let mut last = *first;
+    loop {
+        std::thread::sleep(Duration::from_secs(5));
+        let Some(now) = exe_id(path) else { continue };
+        // Changed, and the same for a moment: written whole.
+        let settled = now == last;
+        last = now;
+        if now == *first || !settled {
+            continue;
+        }
+        let mut g = gate.lock().unwrap();
+        if !g.newer {
+            g.newer = true;
+            println!("remote · a newer pleamar-wm is installed");
+        }
+        if g.present.is_empty() {
+            drop(g);
+            again();
+        }
+    }
+}
+
+/// Started again from the program on disk now, in place (the same process,
+/// its arguments, its environment). The pages come back to it on their own
+/// —their sessions are on disk—, and a phone keeps its monitor meanwhile.
+fn again() {
+    use std::os::unix::process::CommandExt;
+    let Some((path, _)) = EXE.get() else { return };
+    println!("remote · starting again from the new one");
+    let e = std::process::Command::new(path).args(std::env::args_os().skip(1)).exec();
+    eprintln!("remote · could not start again: {e}");
 }
 
 fn connection(mut stream: TcpStream, gate: &Arc<Mutex<Gate>>, hands: &Arc<Mutex<Option<Hands>>>, view_only: bool) -> Result<(), String> {
@@ -417,6 +505,12 @@ fn connection(mut stream: TcpStream, gate: &Arc<Mutex<Gate>>, hands: &Arc<Mutex<
             }
             respond(&mut stream, "303 See Other", html, "Set-Cookie: pleamar_remote=; Path=/; HttpOnly; Secure; SameSite=Strict; Max-Age=0\r\nLocation: /\r\n", b"")
         }
+        // A home screen's app: what it is and its icon. Nothing of this desktop in
+        // them, so before signing in (a browser asks for them without the cookie).
+        ("GET", "/manifest.webmanifest") => respond(&mut stream, "200 OK", "application/manifest+json", "", manifest().as_bytes()),
+        ("GET", "/icon-180.png") => respond(&mut stream, "200 OK", "image/png", "", ICON_180),
+        ("GET", "/icon-192.png") => respond(&mut stream, "200 OK", "image/png", "", ICON_192),
+        ("GET", "/icon-512.png") => respond(&mut stream, "200 OK", "image/png", "", ICON_512),
         ("GET", "/ws") => {
             if !signed_in {
                 return respond(&mut stream, "401 Unauthorized", "text/plain", "", b"sign in first");
@@ -955,6 +1049,7 @@ fn viewer(stream: TcpStream, token: String, from: String, gate: &Arc<Mutex<Gate>
         }
         list
     };
+    ws.send(Message::Text(format!("version {PAGE_VERSION:016x}").into())).map_err(|e| e.to_string())?;
     ws.send(Message::Text(mons(&monitors).into())).map_err(|e| e.to_string())?;
 
     let (mut want_tx, want_rx) = mpsc::channel::<Want>();
@@ -1001,11 +1096,17 @@ fn viewer(stream: TcpStream, token: String, from: String, gate: &Arc<Mutex<Gate>
     let mut used = Instant::now();
     // (`PLEAMAR_REMOTE_UNUSED`, in seconds: to check it without waiting.)
     let unused = std::env::var("PLEAMAR_REMOTE_UNUSED").ok().and_then(|v| v.parse().ok()).map_or(UNUSED, Duration::from_secs);
+    let mut told_newer = false;
     loop {
         // Sent away from this computer: at once.
         if gate.lock().unwrap().kicked != kicked {
             let _ = ws.send(Message::Text("bye".into()));
             break;
+        }
+        // A newer program installed: the page offers to start it.
+        if !told_newer && gate.lock().unwrap().newer {
+            told_newer = true;
+            let _ = ws.send(Message::Text("newer".into()));
         }
         // Nobody's hands for a long while: signed out (see UNUSED).
         if used.elapsed() > unused {
@@ -1109,6 +1210,12 @@ fn viewer(stream: TcpStream, token: String, from: String, gate: &Arc<Mutex<Gate>
                     used = Instant::now();
                 }
                 match (verb, &n[..]) {
+                    // Asked to start the newer program installed.
+                    ("update", _) if !view_only && gate.lock().unwrap().newer => {
+                        drop(guard);
+                        again();
+                        break;
+                    }
                     // A phone: the session comes to a monitor of its size.
                     ("phone", [w, hh, scale]) if !view_only => {
                         // Already there and turned on its side: it takes the new

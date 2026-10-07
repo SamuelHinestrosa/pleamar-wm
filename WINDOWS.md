@@ -25,9 +25,15 @@ not a native remote-session acceptance test. The new phone session includes
 its virtual output, gestures, return curtain and Linux session-lock behavior.
 Those implementations use the Linux compositor and remain Linux-only here;
 `phone_monitor: false` makes this explicit in the native capabilities. Windows
-still needs a remote transport, native application input and virtual-output
-integration before it can offer the same phone session. Merging the sources
+still needs a remote transport, remote input routing and virtual-output
+integration before it can offer the same phone session. Its local, opt-in
+foreground input broker does not supply those remote interfaces. Merging the sources
 and checking the session scene does not establish that feature on Windows.
+
+Upstream `d9f571c` adds the remote page's home-screen manifest, icons and update
+handoff. These remain part of the Linux remote server: its executable watching
+and in-place restart use Unix APIs. The Windows `remote` command still reports
+that the service is unavailable; the browser assets alone do not provide it.
 
 ## Build and run from PowerShell
 

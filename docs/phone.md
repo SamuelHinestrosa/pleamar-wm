@@ -103,6 +103,23 @@ note on top, the phone's keyboard types the password there (each character
 as the key of the desk's own layout), and the session comes the moment it
 is unlocked.
 
+## An app on the home screen
+
+The page is an app too: «Add to Home Screen» (Safari's share menu on an
+iPhone or an iPad; «Install app» in Chrome on Android) leaves the orb on the
+home screen, and from it the session opens with all of the screen, without
+the browser's bars. On an iPhone or an iPad the app keeps a session of its
+own: it is signed in once more, the first time.
+
+**Updates.** The page knows its own version and the server says its own on
+connecting: a page left open for days that hears another one offers to load
+the new one. And `pleamar-wm remote` watches its own binary: when an update
+is installed, it starts again from it by itself if no page is connected, or
+the pages show «pleamar was updated at home» with an Update button, which
+starts it again and loads the new page. Either way the session stays on the
+phone meanwhile (the phone's monitor waits for its page as when the network
+goes a moment), and the page brings it back by itself.
+
 ## Settings
 
 `session.conf`: `phone lock COMMAND` is what locks the session when it comes

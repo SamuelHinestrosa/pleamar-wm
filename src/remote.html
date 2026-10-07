@@ -6,7 +6,10 @@
 <meta name="theme-color" content="#071014">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-title" content="pleamar">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-180.png">
 <meta name="robots" content="noindex">
 <title>pleamar remote</title>
 <style>
@@ -87,6 +90,11 @@
   #ph-veil.on { opacity: 1; pointer-events: auto; }
   #ph-net { position: absolute; top: calc(8px + env(safe-area-inset-top)); left: 50%; transform: translate(-50%, -60px); padding: 6px 14px; border-radius: 16px; background: #0d1519ee; color: #e8c26a; font-size: 12.5px; transition: transform .3s; }
   #ph-net.on { transform: translate(-50%, 0); }
+  /* A newer page, or a newer program at home: asked before it is loaded again. */
+  #update { position: absolute; top: calc(10px + env(safe-area-inset-top)); left: 50%; z-index: 6; transform: translate(-50%, -140%); display: flex; gap: 12px; align-items: center; padding: 8px 8px 8px 16px; border-radius: 22px; background: #0d1519f2; border: 1px solid #9ed6bd55; backdrop-filter: blur(14px); color: var(--ink); font-size: 13.5px; white-space: nowrap; box-shadow: 0 8px 30px #0008; transition: transform .4s cubic-bezier(.2,.8,.2,1); }
+  #update.on { transform: translate(-50%, 0); }
+  #update button { border: 0; border-radius: 16px; padding: 7px 14px; background: #9ed6bd; color: #062421; font: inherit; font-weight: 650; cursor: pointer; }
+  #update button:disabled { opacity: .6; }
   #ph-lock { position: absolute; left: 12px; right: 12px; top: calc(12px + env(safe-area-inset-top)); padding: 14px 16px; border-radius: 20px; background: #0d1519f0; border: 1px solid #e8c26a55; backdrop-filter: blur(14px); display: grid; gap: 10px; pointer-events: auto; transform: translateY(-160%); transition: transform .4s cubic-bezier(.2,.8,.2,1); }
   #ph-lock.on { transform: translateY(0); }
   #ph-lock b { color: #e8c26a; font-weight: 650; }
@@ -121,6 +129,7 @@
   <div id="stage"><canvas id="screen" tabindex="0"></canvas><video id="direct" autoplay muted playsinline disablepictureinpicture></video></div>
   <textarea id="keys" aria-hidden="true"></textarea>
   <div id="toast"></div>
+  <div id="update"><span id="update-what">A new version is ready</span><button id="update-go">Update</button></div>
   <div id="ph">
     <div class="ph-sheet" id="ph-start">
       <div class="ph-orb"><i></i><i></i><i></i></div>
@@ -174,6 +183,11 @@
   const TABLET = PHONE && SHORT >= 600;
   if (PHONE) document.body.classList.add('phone');
   if (TABLET) document.body.classList.add('tablet');
+  // This page's own version: the server says its own on connecting, and
+  // a page left open (an app on the home screen lives for days) that hears
+  // another one is older than its server.
+  const VERSION = '{{VERSION}}';
+  let updating = false;
   // Asked for (the button pressed): the session is on its way here, or here.
   let phoneWanted = false, phoneSize = null, phoneMon = -1, phoneHere = false;
   let rtt = 0, kbps = 0, rate = 0, net = 0;
@@ -281,7 +295,13 @@
       }
       const [verb, ...rest] = e.data.split(' ');
       const arg = e.data.slice(verb.length + 1);
-      if (verb === 'mons') {
+      if (verb === 'version') {
+        // Asked to update and back: the new page, with the session coming back by itself.
+        if (updating) reloadKeeping();
+        else if (arg !== VERSION) offerUpdate(false);
+      } else if (verb === 'newer') {
+        offerUpdate(true);
+      } else if (verb === 'mons') {
         monitors = rest.map((m) => { const [name, x, y, w, h] = m.split(','); return { name, x: +x, y: +y, w: +w, h: +h }; });
         drawMonitors();
         // (On a phone, the server says which one is the phone's.)
@@ -853,8 +873,36 @@
   $('ph-m-desk').onclick = () => { closeMenu(); send('unphone'); phoneWanted = false; phoneBack('You gave it back: it is on your desk, as you left it.'); };
   $('ph-m-out').onclick = () => { closeMenu(); fetch('/logout', { method: 'POST' }).finally(() => location.href = '/'); };
 
+  // ── updates ──
+  // Two kinds: this page is older than its server (loading it again is
+  // enough), or the program at home was updated on disk while it ran (it is
+  // asked to start again from it, and then the page is loaded again). Either
+  // way the session, if it was here, comes back by itself.
+  let serverNewer = false;
+  function offerUpdate(server) {
+    serverNewer = serverNewer || server;
+    $('update-what').textContent = server ? 'pleamar was updated at home' : 'A new version of this page is ready';
+    $('update').classList.add('on');
+  }
+  function reloadKeeping() {
+    try { if (phoneWanted) sessionStorage.setItem('pleamar-resume', '1'); } catch (_) {}
+    location.reload();
+  }
+  $('update-go').onclick = () => {
+    if (!serverNewer) return reloadKeeping();
+    updating = true;
+    $('update-go').disabled = true;
+    $('update-what').textContent = 'Updating…';
+    send('update');
+    // (If it does not come back in a while, the page is loaded again all the same.)
+    setTimeout(reloadKeeping, 15000);
+  };
+
   if (!PHONE) keys.focus({ preventScroll: true });
-  connect();
+  // Loaded again by an update while the session was here: it comes back by itself.
+  let resume = false;
+  try { resume = sessionStorage.getItem('pleamar-resume') === '1'; sessionStorage.removeItem('pleamar-resume'); } catch (_) {}
+  if (PHONE && resume) bringHere(); else connect();
 })();
 </script>
 </body>

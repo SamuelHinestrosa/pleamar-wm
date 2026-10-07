@@ -423,7 +423,7 @@ def exercise(binary, tests, folder):
                               'new-file capture and process scope refusal', 'stop, expiry and process exit close broker',
                               'explicit modal identity, disabled owner refusal and actual dialog button',
                               'tool-window capture and button input without owner substitution',
-                              'incomplete, timed-out and protected captures create no file or input permit'],
+                              'timed-out and protected captures create no file or input permit'],
                       clean_exit=True)
     finally:
         for process, directory in fixtures:
