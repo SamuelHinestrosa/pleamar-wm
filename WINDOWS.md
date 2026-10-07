@@ -723,10 +723,18 @@ real application identity, persisted its pin and reopened it. File activation
 then failed: `SHCreateItemFromParsingName` rejects the verbatim path prefix
 returned by Rust's canonicalization. The conversion now supplies an equivalent
 DOS/UNC path and refuses namespaces or suffixes that would change file identity.
-The release run passes 50 ordinary tests, including a real shell item for a
-canonical Unicode filename; 16 opt-in tests are excluded. The secondary-monitor
+The release run passes 51 ordinary tests, including a real shell item for a
+canonical Unicode filename and refusal to substitute another application's
+file association; 16 opt-in tests are excluded. The shell-item regression
+compares canonical identities, allowing Windows to expand an 8.3 directory name.
+The secondary-monitor
 dock regression also passed with no injected input, no owned foreground window
 at its checks and no remaining owned windows. Two captured images were inspected.
+The next CI run passed shell-item creation but exposed `0x80270254`: packaged
+desktop apps can lack UWP's file-activation contract. That specific refusal now
+uses the registered Open With handler whose AppUserModelID matches the selected
+dock application, rather than substituting the file's default application.
+This follows the documented [association-handler API](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iassochandler-invoke).
 The complete packaged file-activation rerun is still pending. This owned desktop
 MSIX fixture does not establish support for every Store/UWP app. The ordinary
 secondary-monitor fixture refuses a primary output without an explicit CI mode.

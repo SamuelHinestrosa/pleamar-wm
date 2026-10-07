@@ -75,13 +75,19 @@ fn native_packaged_dock_activation() -> Result<()> {
         let reloaded=Dock::new(path)?;assert_eq!(reloaded.pins.len(),1);
         launches=launch::Launches::default();reloaded.open(&pin.key(),&[],&mut launches)?;
         let second=arrival(&root,&mut seen,&mut owned)?;events.push(json!({"stage":"restart-pinned-application","window":second}));close(&second)?;
-        let file=root.join("owned ñ 海 ' $HOME.plmdock");std::fs::write(&file,"owned package activation file")?;
-        reloaded.open(&pin.key(),&[file.to_string_lossy().into_owned()],&mut launches)?;
-        let third=arrival(&root,&mut seen,&mut owned)?;
-        let args=third["args"].as_array().ok_or("package argument report missing")?;
-        assert!(args.iter().any(|arg|arg.as_str().is_some_and(|s|std::fs::canonicalize(s).ok().as_ref()==Some(&file))),
-            "file activation did not identify the requested Unicode file: {args:?}");
-        events.push(json!({"stage":"native-file-activation","window":third}));close(&third)?;
+        let files=[root.join("owned ñ 海 ' $HOME.plmdock"),root.join("second $(exit 9).plmdock")];
+        for file in &files {std::fs::write(file,"owned package activation file")?;}
+        reloaded.open(&pin.key(),&files.iter().map(|p|p.to_string_lossy().into_owned()).collect::<Vec<_>>(),&mut launches)?;
+        let mut received=HashSet::new();
+        for _ in &files {
+            let value=arrival(&root,&mut seen,&mut owned)?;
+            let args=value["args"].as_array().ok_or("package argument report missing")?;
+            for arg in args {
+                if let Some(path)=arg.as_str().and_then(|s|std::fs::canonicalize(s).ok()) {received.insert(path);}
+            }
+            events.push(json!({"stage":"native-file-activation","window":value}));close(&value)?;
+        }
+        assert_eq!(received,files.into_iter().collect(),"file activation must preserve both requested file identities");
         Ok(())
     })();
     let report=json!({"passed":result.is_ok(),"aumid":id,"events":events,"physical_input":false,"actual_os_file_drag":false,

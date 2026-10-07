@@ -43,9 +43,10 @@ try {
 <?xml version="1.0" encoding="utf-8"?>
 <Package xmlns="http://schemas.microsoft.com/appx/manifest/foundation/windows10"
  xmlns:uap="http://schemas.microsoft.com/appx/manifest/uap/windows10"
+ xmlns:uap3="http://schemas.microsoft.com/appx/manifest/uap/windows10/3"
  xmlns:uap10="http://schemas.microsoft.com/appx/manifest/uap/windows10/10"
  xmlns:rescap="http://schemas.microsoft.com/appx/manifest/foundation/windows10/restrictedcapabilities"
- IgnorableNamespaces="uap uap10 rescap">
+ IgnorableNamespaces="uap uap3 uap10 rescap">
  <Identity Name="Pleamar.NativeDockTest" Publisher="CN=Pleamar Native Dock CI" Version="1.0.0.0" ProcessorArchitecture="x64" />
  <Properties><DisplayName>Pleamar owned package</DisplayName><PublisherDisplayName>Pleamar CI</PublisherDisplayName><Logo>logo50.png</Logo></Properties>
  <Resources><Resource Language="en-us" /></Resources>
@@ -53,7 +54,7 @@ try {
  <Applications>
   <Application Id="Fixture" Executable="fixture.exe" uap10:RuntimeBehavior="packagedClassicApp" uap10:TrustLevel="mediumIL">
    <uap:VisualElements DisplayName="Pleamar owned package" Description="Disposable dock activation fixture" Square150x150Logo="logo150.png" Square44x44Logo="logo44.png" BackgroundColor="transparent" />
-   <Extensions><uap:Extension Category="windows.fileTypeAssociation"><uap:FileTypeAssociation Name="pleamar-dock-fixture"><uap:SupportedFileTypes><uap:FileType>.plmdock</uap:FileType></uap:SupportedFileTypes></uap:FileTypeAssociation></uap:Extension></Extensions>
+   <Extensions><uap:Extension Category="windows.fileTypeAssociation"><uap3:FileTypeAssociation Name="pleamar-dock-fixture" Parameters="&quot;%1&quot;" MultiSelectModel="Document"><uap:SupportedFileTypes><uap:FileType>.plmdock</uap:FileType></uap:SupportedFileTypes></uap3:FileTypeAssociation></uap:Extension></Extensions>
   </Application>
  </Applications>
  <Capabilities><rescap:Capability Name="runFullTrust" /></Capabilities>

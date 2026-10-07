@@ -5,6 +5,7 @@ on:
       - '.github/workflows/dock-package.yml'
       - 'tests/windows-dock-package.ps1'
       - 'src/windows_dock_package_tests.rs'
+      - 'src/windows_dock.rs'
       - 'examples/windows-dock-fixture.rs'
   workflow_dispatch:
     inputs:

@@ -5,6 +5,7 @@ use std::{collections::BTreeMap, io::{Read, Write}, os::windows::fs::OpenOptions
 use windows::Win32::{Storage::{FileSystem::*, Packaging::Appx::GetApplicationUserModelId},
     System::Com::{*, StructuredStorage::{PropVariantClear, PropVariantToStringAlloc}},
     UI::Shell::{*, PropertiesSystem::{IPropertyStore, SHGetPropertyStoreForWindow}}};
+use windows::core::Interface;
 
 const APP_ID: PROPERTYKEY = PROPERTYKEY { fmtid: GUID::from_u128(0x9f4c2855_9f79_4b39_a8d0_e1d42de1d5f3), pid: 5 };
 const MAX_FILE: u64 = 128 * 1024;
@@ -165,7 +166,8 @@ impl Dock {
             Target::Executable(path)=>{ launches.executable(path,files)?; },
             Target::Application(id)=>{
                 let _apartment=Apartment::new()?;
-                let id=wide(id);
+                let app_id=id;
+                let id=wide(app_id);
                 unsafe {
                     let activation:IApplicationActivationManager=CoCreateInstance(&ApplicationActivationManager,None,CLSCTX_LOCAL_SERVER)?;
                     if files.is_empty() { activation.ActivateApplication(PCWSTR(id.as_ptr()),w!(""),AO_NONE)?; }
@@ -176,8 +178,17 @@ impl Dock {
                             let item=file_item(file)?;
                             let items:IShellItemArray=SHCreateShellItemArrayFromShellItem(&item)
                                 .map_err(|e|format!("Windows shell file array: {e}"))?;
-                            activation.ActivateForFile(PCWSTR(id.as_ptr()),&items,w!("open"))
-                                .map_err(|e|format!("Windows packaged file activation: {e}"))?;
+                            match activation.ActivateForFile(PCWSTR(id.as_ptr()),&items,w!("open")) {
+                                Ok(_)=>{},
+                                // Packaged desktop apps can register file associations
+                                // without implementing UWP's Windows.File contract.
+                                Err(error) if error.code().0 as u32==0x80270254=>{
+                                    let handler=file_handler(app_id,file)?;
+                                    let data:IDataObject=item.BindToHandler(None,&BHID_DataObject)?;
+                                    handler.Invoke(&data).map_err(|e|format!("Windows registered file handler: {e}"))?;
+                                },
+                                Err(error)=>return Err(format!("Windows packaged file activation: {error}").into()),
+                            }
                         }
                     }
                 }
@@ -185,6 +196,27 @@ impl Dock {
         }
         Ok(())
     }
+}
+
+fn file_handler(app_id:&str,path:&str) -> Result<IAssocHandler> {
+    let extension=Path::new(path).extension().and_then(|s|s.to_str()).filter(|s|!s.is_empty())
+        .ok_or("the selected application has no registered handler for this file")?;
+    let extension=wide(&format!(".{extension}"));
+    let handlers=unsafe {SHAssocEnumHandlers(PCWSTR(extension.as_ptr()),ASSOC_FILTER_NONE)}?;
+    // Open With's handler preserves the selected app and its package identity.
+    // Never use the default association as a substitute for a dock target.
+    for _ in 0..256 {
+        let mut next=[None];let mut fetched=0;
+        unsafe {handlers.Next(&mut next,Some(&mut fetched))}?;
+        if fetched==0 {break;}
+        let Some(handler)=next[0].take() else {break;};
+        let id=handler.cast::<IObjectWithAppUserModelID>().ok()
+            .and_then(|object|unsafe {object.GetAppID().and_then(take_string).ok()});
+        let name=unsafe {handler.GetName().and_then(take_string)}.ok();
+        if id.as_deref().is_some_and(|id|id.eq_ignore_ascii_case(app_id))
+            || name.as_deref().is_some_and(|name|name.eq_ignore_ascii_case(app_id)) {return Ok(handler);}
+    }
+    Err("the selected packaged application has no registered handler for this file type".into())
 }
 
 fn shell_path(path:&str) -> Result<std::borrow::Cow<'_,str>> {
@@ -257,10 +289,16 @@ mod tests {
         let canonical=std::fs::canonicalize(&file)?;
         let result=file_item(&canonical.to_string_lossy()).and_then(|item|unsafe {
             item.GetDisplayName(SIGDN_FILESYSPATH).and_then(take_string).map_err(Into::into)
-        });
+        }).and_then(|displayed|std::fs::canonicalize(displayed).map_err(Into::into));
         std::fs::remove_file(&file)?;
-        let displayed=result?;
-        assert_eq!(displayed,file.to_string_lossy());
+        assert_eq!(result?,canonical);
+        Ok(())
+    }
+    #[test]
+    fn file_handler_never_substitutes_the_default_application() -> Result<()> {
+        let _apartment=Apartment::new()?;
+        assert!(file_handler("Pleamar.DoesNotExist!Missing",r"C:\owned.txt").is_err());
+        assert!(file_handler("Pleamar.DoesNotExist!Missing",r"C:\without-extension").is_err());
         Ok(())
     }
     unsafe extern "system" fn fixture(hwnd:HWND,message:u32,w:WPARAM,l:LPARAM) -> LRESULT {
