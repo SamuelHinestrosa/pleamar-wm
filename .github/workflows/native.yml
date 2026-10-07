@@ -278,9 +278,10 @@ jobs:
           if ($LASTEXITCODE -ne 0 -or $caps.platform -ne 'windows' -or !$caps.explicit_layouts) {
             throw 'Native capability query failed'
           }
-          if (!$caps.visible_window_capture -or $caps.preview_redirected_input -or ($caps.preview_window_actions -join ',') -ne 'focus,close,minimize,restore,configure,send') {
+          if (!$caps.visible_window_capture -or $caps.preview_redirected_input -or ($caps.preview_window_actions -join ',') -ne 'focus,close,minimize,restore,configure,send,fullscreen') {
             throw 'Incorrect native preview action capabilities'
           }
+          if ($caps.session_shortcuts -notcontains 'fullscreen') { throw 'Missing native fullscreen shortcut capability' }
           if (!$caps.scene_launch -or $caps.agent_background_launch) { throw 'Incorrect native launch capabilities' }
           if (!$caps.agent_window_send) { throw 'Missing native agent send capability' }
           & ./target/debug/pleamar-wm.exe remote
