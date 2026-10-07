@@ -6,6 +6,8 @@ const HELP: &str = "pleamar-wm agent — native Windows scene commands
   scenes                         running pleamar scenes, their PIDs and command endpoints (JSON)
   windows                        ordinary native windows, with a scene name where known (JSON)
   monitors                       native monitor catalog (JSON)
+  look PID|WINDOW_ID [FILE]       capture one visible ordinary window to a new PNG
+                                 use window.id from windows when a process has several windows
   tree PID [json]                visible elements, labels, states and logical geometry
   press PID NAME [right|middle] [COUNT]
                                  press a named scene element and report what changed
@@ -18,7 +20,9 @@ PID comes from scenes or windows. PID.N also addresses that process's scene.
 If one process has several endpoints, use scene:ENDPOINT to select one.
 Panels such as Marea may appear only in scenes, not the ordinary window catalog.
 This does not provide Linux's independent pointer, keyboard seat or cursor glide.
-Arbitrary applications, look/click/open/send and remote control remain unavailable.
+Look uses native WGC without activating or restoring the window. Hidden/minimized
+windows and ambiguous PIDs are rejected. The output file must not exist.
+Arbitrary-application input, click/open/send and remote control remain unavailable.
 All commands use the current logon's scene namespace.";
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -61,11 +65,91 @@ fn select<'a>(scenes: &'a [Scene], selector: &str) -> Result<&'a Scene> {
     Ok(first)
 }
 
+fn capture_target<'a>(catalog: &'a [Window], selector: &str) -> Result<&'a Window> {
+    if selector.contains(':') {
+        return catalog.iter().find(|w| w.id == selector).ok_or_else(|| "window identity is no longer in the visible native catalog".into());
+    }
+    let pid = selector.parse::<u32>().ok().filter(|n| *n > 0)
+        .ok_or("look requires a PID or exact window.id from agent windows; PID.N is not a native window identity")?;
+    let mut matches = catalog.iter().filter(|w| w.process == pid);
+    let first = matches.next().ok_or("process has no visible ordinary window")?;
+    if matches.next().is_some() { return Err("process has several windows; use the exact window.id from agent windows".into()); }
+    Ok(first)
+}
+
+fn png(picture: capture::Picture) -> Result<Vec<u8>> {
+    use image::ImageEncoder;
+    let (width,height) = picture.size;
+    if width == 0 || height == 0 || width > 8192 || height > 8192 { return Err("invalid native capture dimensions".into()); }
+    let length = u64::from(width)*u64::from(height)*4;
+    if length > 16_777_216*4 || length != picture.pixels.len() as u64 || picture.shared.is_some() {
+        return Err("invalid native capture pixel buffer".into());
+    }
+    let mut rgba = picture.pixels;
+    for p in rgba.chunks_exact_mut(4) { p.swap(0,2); }
+    let mut encoded = Vec::new();
+    image::codecs::png::PngEncoder::new(&mut encoded).write_image(&rgba,width,height,image::ExtendedColorType::Rgba8)?;
+    Ok(encoded)
+}
+
+fn write_picture(path: &Path, encoded: &[u8]) -> Result<()> {
+    use std::io::Write;
+    // Never replace a previous capture or an unrelated user file.
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(path)?;
+    file.write_all(encoded)?;
+    file.sync_all()?;
+    Ok(())
+}
+
+fn look(selector: &str, output: Option<&str>) -> Result<()> {
+    let catalog = windows()?;
+    let window = capture_target(&catalog,selector)?;
+    if window.minimized { return Err("window is minimized; look does not restore or focus it".into()); }
+    let (hwnd,_) = target(&window.id)?;
+    let mut affinity = 0;
+    if unsafe { GetWindowDisplayAffinity(hwnd,&mut affinity) }.is_ok() && affinity != WDA_NONE.0 {
+        return Err("window excludes itself from capture".into());
+    }
+    let wake = wait::Wake::new()?;
+    let waiter = wait::Waiter::new(wake.clone())?;
+    let device = capture::Device::new(Some(wake))?;
+    let mut source = capture::Capture::new(device,hwnd,16_777_216)?;
+    let deadline = Instant::now()+Duration::from_secs(6);
+    let picture = loop {
+        if let Some(picture) = source.next(16_777_216)? { break picture; }
+        let now = Instant::now();
+        if now >= deadline { return Err("native window capture timed out without a frame".into()); }
+        let delay = if source.pending() { Duration::from_millis(8).min(deadline-now) } else { deadline-now };
+        waiter.wait(delay)?;
+        let mut message = MSG::default();
+        while unsafe { PeekMessageW(&mut message,None,0,0,PM_REMOVE) }.as_bool() {
+            unsafe { let _=TranslateMessage(&message);DispatchMessageW(&message); }
+        }
+    };
+    let (_,current) = target(&window.id)?;
+    if source.closed() || current.minimized { return Err("window closed or became minimized during capture".into()); }
+    let size = picture.size;
+    drop(source);
+    let encoded = png(picture)?;
+    let path = match output {
+        Some(path) => std::path::PathBuf::from(path),
+        None => {
+            let stamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
+            std::env::temp_dir().join(format!("pleamar-agent-look-{}-{stamp}.png",std::process::id()))
+        },
+    };
+    write_picture(&path,&encoded)?;
+    println!("{} {}x{}",path.display(),size.0,size.1);
+    Ok(())
+}
+
 pub(super) fn execute(args: &[&str]) -> Result<Option<Value>> {
     match args {
         [] | ["help" | "--help" | "-h"] => { println!("{HELP}"); Ok(None) },
         ["scenes"] => Ok(Some(serde_json::to_value(scenes()?)?)),
         ["monitors"] => Ok(Some(serde_json::to_value(monitors()?)?)),
+        ["look", selector] => { look(selector,None)?; Ok(None) },
+        ["look", selector, file] => { look(selector,Some(file))?; Ok(None) },
         ["windows"] => {
             let scenes = scenes()?;
             let list = windows()?.into_iter().map(|w| {
@@ -116,5 +200,39 @@ mod tests {
         scenes.push(Scene {pid:123,scene:"Second".into(),endpoint:"Second".into()});
         assert!(select(&scenes,"123").is_err());
         assert_eq!(select(&scenes,"scene:Marea").unwrap().scene,"Marea");
+    }
+    #[test]
+    fn native_capture_selection_requires_an_unambiguous_current_identity() {
+        let first = Window { id:"123:4:500:abc".into(),title:"First ñ".into(),app:"owned.exe".into(),class:"test".into(),
+            process:123,monitor:"DISPLAY2".into(),bounds:Bounds{x:0,y:0,width:100,height:100},minimized:false,maximized:false,resizable:true };
+        let mut catalog = vec![first.clone()];
+        assert_eq!(capture_target(&catalog,"123").unwrap().id,first.id);
+        for selector in ["0","-1","123.1","123:4:500:old","456","scene:panel"] {
+            assert!(capture_target(&catalog,selector).is_err(),"{selector}");
+        }
+        let mut second=first.clone();second.id="123:5:600:abc".into();catalog.push(second);
+        assert!(capture_target(&catalog,"123").is_err());
+        assert_eq!(capture_target(&catalog,&first.id).unwrap().title,"First ñ");
+        catalog.remove(0);
+        assert!(capture_target(&catalog,&first.id).is_err());
+    }
+    #[test]
+    fn png_keeps_native_color_channels_and_never_replaces_a_file() {
+        let encoded=png(capture::Picture {size:(2,1),pixels:vec![0x60,0xc0,0x20,255,0x80,0x30,0xd0,255],shared:None}).unwrap();
+        let decoded=image::load_from_memory(&encoded).unwrap().to_rgba8();
+        assert_eq!(decoded.dimensions(),(2,1));
+        assert_eq!(decoded.into_raw(),[0x20,0xc0,0x60,255,0xd0,0x30,0x80,255]);
+        for (size,pixels) in [((0,1),vec![]),((2,1),vec![0;4]),((u32::MAX,u32::MAX),vec![])] {
+            assert!(png(capture::Picture{size,pixels,shared:None}).is_err());
+        }
+        let stamp=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+        let folder=std::env::temp_dir().join(format!("wm-look-{}-{stamp}",std::process::id()));
+        std::fs::create_dir(&folder).unwrap();
+        let file=folder.join("Picture ñ 海.png");
+        write_picture(&file,&encoded).unwrap();
+        assert!(write_picture(&file,b"replacement").is_err());
+        assert_eq!(std::fs::read(&file).unwrap(),encoded);
+        assert!(write_picture(&folder.join("missing").join("picture.png"),&encoded).is_err());
+        std::fs::remove_file(file).unwrap();std::fs::remove_dir(folder).unwrap();
     }
 }

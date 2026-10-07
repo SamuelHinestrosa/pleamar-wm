@@ -45,6 +45,7 @@ futures-lite = "2"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 base64 = "0.22"
+image = { version = "0.25", default-features = false, features = ["png"] }
 serde = { version = "1", features = ["derive"] }
 windows = { version = "0.62", features = [
     "Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi",

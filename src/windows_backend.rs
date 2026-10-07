@@ -316,6 +316,7 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
             "native_scenes_luau": true, "read_only_window_previews": true, "visible_window_capture": true,
             "preview_window_actions": ["focus", "close", "minimize", "restore", "configure"], "preview_redirected_input": false,
             "scene_launch": true, "agent_background_launch": false,
+            "agent_window_capture": true, "agent_native_input": false,
             "window_rules": ["app", "title", "float", "size", "monitor"], "private_window_rules": false, "workspace_window_rules": false,
             "window_scene_provider": false, "automatic_session": true, "rain": false, "snow": false,
             "ride": false, "dock": false, "pools": false, "remote": false, "phone_monitor": false, "independent_agent_seat": false,

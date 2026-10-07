@@ -9,6 +9,8 @@ fn unsupported_capabilities_do_not_report_success() {
     let caps = execute(&["capabilities".into()]).unwrap().unwrap();
     assert_eq!(caps["scene_launch"],true);
     assert_eq!(caps["agent_background_launch"],false);
+    assert_eq!(caps["agent_window_capture"],true);
+    assert_eq!(caps["agent_native_input"],false);
     for feature in ["window_scene_provider", "rain", "snow", "ride", "dock", "pools", "remote", "phone_monitor", "independent_agent_seat"] {
         assert_eq!(caps[feature], false);
     }

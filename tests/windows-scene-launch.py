@@ -245,6 +245,26 @@ def exercise(binary, output):
                         assert desktop.pid(child['hwnd']) == child['pid'] and desktop.user.IsWindowVisible(child['hwnd'])
                         child_handle = desktop.kernel.OpenProcess(0x00100000, False, child['pid'])
                         assert child_handle and desktop.kernel.WaitForSingleObject(child_handle, 0) == 258
+                        catalog = json.loads(run(['agent', 'windows']))
+                        native_id = next(entry['window']['id'] for entry in catalog if entry['window']['process'] == child['pid'])
+
+                        def look(selector, name):
+                            path = folder / name
+                            reply = run(['agent', 'look', selector, str(path)])
+                            data = path.read_bytes()
+                            assert reply.startswith(str(path) + ' ') and data[:8] == b'\x89PNG\r\n\x1a\n'
+                            width, height = struct.unpack('>II', data[16:24])
+                            assert 100 <= width <= 500 and 50 <= height <= 400
+                            return data
+
+                        initial_look = look(str(child['pid']), 'native-look-initial.png')
+                        try:
+                            run(['agent', 'look', native_id, str(folder / 'native-look-initial.png')])
+                        except RuntimeError:
+                            pass
+                        else:
+                            raise AssertionError('look replaced an existing file')
+                        assert (folder / 'native-look-initial.png').read_bytes() == initial_look
                         # Resolve the owned child's title before enabling one
                         # slot. The child stays alive throughout capture checks.
                         def owned_slot():
@@ -280,6 +300,7 @@ def exercise(binary, output):
                         run(['agent', 'press', str(process.pid), 'preview_toggle'])
                         until(lambda: preview_pixels((0xd0,0x30,0x80), 'preview-reopened.png'), 'fresh source pixels after device recreation')
                         assert trace().count('capture transport =') > allocations, 'preview did not recreate its device'
+                        assert look(native_id, 'native-look-updated.png') != initial_look
                         scene.write_text(scene_source(command, 'B'), encoding='utf-8')
                         until(lambda: 'Open owned program B' in run(['agent', 'tree', str(process.pid), 'json']), 'scene hot reload')
                         until(lambda: rendered('B'), 'reloaded GPU scene pixels')
@@ -294,10 +315,18 @@ def exercise(binary, output):
                         assert process.returncode == 0
                     if child_handle:
                         assert desktop.kernel.WaitForSingleObject(child_handle, 5000) == 0, 'scene left an owned child running'
+                        try:
+                            run(['agent', 'look', native_id, str(folder / 'closed-window.png')])
+                        except RuntimeError:
+                            pass
+                        else:
+                            raise AssertionError('look accepted a closed native window identity')
+                        assert not (folder / 'closed-window.png').exists()
                     report['cases'].append(dict(mode=mode, rendered=True, luau=True,
                                               native_child=mode != 'view-only', hot_reload=mode != 'view-only', cleanup=True,
                                               lazy_capture=mode != 'view-only', idle_capture_retirement=mode != 'view-only',
-                                              fresh_capture_after_reopen=mode != 'view-only'))
+                                              fresh_capture_after_reopen=mode != 'view-only',
+                                              native_agent_look=mode != 'view-only'))
                 finally:
                     if process and process.poll() is None:
                         process.kill()

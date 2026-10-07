@@ -64,6 +64,20 @@ catalog excludes them. Use its current PID and the element names in its tree:
 ```
 
 Replace `1234` and the example element/fact names with those from your scene.
+For an ordinary native application, `agent look 1234 'C:\Pictures\Window ñ.png'`
+captures its visible window through Windows Graphics Capture without focusing
+or restoring it. When the process has several windows, pass the exact
+`window.id` returned by `agent windows` instead of the PID. `PID.N` is a scene
+selector and is not accepted for native capture. Omitting the output path creates
+a PNG in the current user's temporary directory; the command prints its path
+and dimensions. Existing files are never replaced.
+
+Hidden, minimized, closed and capture-excluded windows are refused. Capture
+is bounded to six seconds, 8192 pixels per dimension and 16,777,216 pixels in
+total; the target identity is checked again before writing. This does not
+capture an entire desktop or panels excluded from the ordinary window catalog.
+`capabilities` reports `agent_window_capture: true` and `agent_native_input: false`.
+
 `agent say` also supports named drag, wheel, hold and key commands. Commands
 use the scene's own input and Luau logic; they do not inject the OS mouse or
 keyboard. A watch streams while other commands continue. The matching engine
