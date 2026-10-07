@@ -301,8 +301,22 @@ def exercise(binary, output):
                         assert 'window actions are unavailable' not in trace()
                         assert desktop.bounds(child['hwnd']) == before
                         assert desktop.user.GetForegroundWindow() == foreground
+                        monitors = json.loads(run(['agent', 'monitors']))
+                        entry = next(entry['window'] for entry in catalog if entry['window']['id'] == native_id)
+                        monitor_index = next(i for i, m in enumerate(monitors) if m['name'] == entry['monitor'])
+                        sent = json.loads(run(['agent', 'send', native_id, str(monitor_index)]))
+                        assert sent['id'] == native_id and sent['monitor'] == entry['monitor']
+                        try:
+                            run(['agent', 'send', str(child['pid']), '999'])
+                        except RuntimeError as error:
+                            assert 'destination is not connected' in str(error)
+                        else:
+                            raise AssertionError('native send accepted a missing monitor')
+                        assert desktop.bounds(child['hwnd']) == before
+                        assert desktop.user.GetForegroundWindow() == foreground
                         (folder / 'send-routing.json').write_text(json.dumps(dict(
                             same_output_preserves_bounds=True, missing_output_refused=True,
+                            native_agent_send=True, native_agent_missing_output_refused=True,
                             foreground_unchanged=True, physical_transfer_tested=False,
                             bounds=before)), encoding='utf-8')
                         assert 'capture transport =' not in trace(), 'hidden previews allocated a capture device'
@@ -356,6 +370,7 @@ def exercise(binary, output):
                                               lazy_capture=mode != 'view-only', idle_capture_retirement=mode != 'view-only',
                                               fresh_capture_after_reopen=mode != 'view-only',
                                               send_routing=mode != 'view-only', physical_monitor_transfer=False,
+                                              native_agent_send=mode != 'view-only',
                                               native_agent_look=mode != 'view-only'))
                 finally:
                     if process and process.poll() is None:

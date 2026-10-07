@@ -483,6 +483,25 @@ on its owned native window. Physical transfer between different monitors,
 application DPI responses and mixed-DPI capture continuity remain unverified.
 This implements monitor sends, not workspace/pool or private-window support.
 
+The same placement geometry is available to the native CLI:
+
+```powershell
+./target/release/pleamar-wm.exe agent monitors
+./target/release/pleamar-wm.exe agent windows
+./target/release/pleamar-wm.exe agent send 1234 1
+```
+
+Use the exact `window.id` instead of a PID when an application has several
+windows. Unlike scene output indices, this monitor number comes from the
+current `agent monitors` list; a native display name is also accepted. The
+command revalidates identity and normal window state, waits for Windows to
+confirm placement and returns actual bounds/monitor JSON. It does not request
+foreground activation. A request for the current monitor preserves position
+and size. Disconnected destinations and ambiguous PIDs fail explicitly.
+`agent_window_send` advertises this command independently of native input or
+background launch, which remain unavailable through this CLI. Physical
+cross-monitor acceptance is still pending.
+
 ## Status and remaining parity work
 
 | Area | Windows status |

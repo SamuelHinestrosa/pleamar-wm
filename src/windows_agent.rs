@@ -8,6 +8,8 @@ const HELP: &str = "pleamar-wm agent — native Windows scene commands
   monitors                       native monitor catalog (JSON)
   look PID|WINDOW_ID [FILE]       capture one visible ordinary window to a new PNG
                                  use window.id from windows when a process has several windows
+  send PID|WINDOW_ID MONITOR      send a normal window to a connected monitor number/name
+                                 preserves logical size and requests no activation
   tree PID [json]                visible elements, labels, states and logical geometry
   press PID NAME [right|middle] [COUNT]
                                  press a named scene element and report what changed
@@ -22,7 +24,7 @@ Panels such as Marea may appear only in scenes, not the ordinary window catalog.
 This does not provide Linux's independent pointer, keyboard seat or cursor glide.
 Look uses native WGC without activating or restoring the window. Hidden/minimized
 windows and ambiguous PIDs are rejected. The output file must not exist.
-Arbitrary-application input, click/open/send and remote control remain unavailable.
+Arbitrary-application input, click/open and remote control remain unavailable.
 All commands use the current logon's scene namespace.";
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -65,16 +67,38 @@ fn select<'a>(scenes: &'a [Scene], selector: &str) -> Result<&'a Scene> {
     Ok(first)
 }
 
-fn capture_target<'a>(catalog: &'a [Window], selector: &str) -> Result<&'a Window> {
+fn select_window<'a>(catalog: &'a [Window], selector: &str) -> Result<&'a Window> {
     if selector.contains(':') {
         return catalog.iter().find(|w| w.id == selector).ok_or_else(|| "window identity is no longer in the visible native catalog".into());
     }
     let pid = selector.parse::<u32>().ok().filter(|n| *n > 0)
-        .ok_or("look requires a PID or exact window.id from agent windows; PID.N is not a native window identity")?;
+        .ok_or("use a PID or exact window.id from agent windows; PID.N is not a native window identity")?;
     let mut matches = catalog.iter().filter(|w| w.process == pid);
     let first = matches.next().ok_or("process has no visible ordinary window")?;
     if matches.next().is_some() { return Err("process has several windows; use the exact window.id from agent windows".into()); }
     Ok(first)
+}
+
+fn send_monitor<'a>(screens:&'a [Monitor],selector:&str) -> Result<&'a Monitor> {
+    screens.iter().enumerate().find(|(i,m)|m.name==selector || i.to_string()==selector)
+        .map(|(_,m)|m).ok_or_else(||"destination is not connected; use agent monitors".into())
+}
+
+fn send_window(selector:&str,monitor:&str) -> Result<Value> {
+    let catalog=windows()?;
+    let selected=select_window(&catalog,selector)?;
+    let screens=monitors()?;
+    let to=send_monitor(&screens,monitor)?;
+    let (_,window)=target(&selected.id)?;
+    normal(&window)?;
+    let from=screens.iter().find(|m|m.name==window.monitor).ok_or("source monitor disconnected")?;
+    if from.name!=to.name {
+        let bounds=transfer::geometry(&window.bounds,from,to,16_777_216)?;
+        place(&window.id,&bounds)?;
+    }
+    let (_,current)=target(&window.id)?;
+    if current.monitor!=to.name { return Err("window did not reach the requested monitor".into()); }
+    Ok(json!({"id":current.id,"monitor":current.monitor,"bounds":current.bounds}))
 }
 
 fn png(picture: capture::Picture) -> Result<Vec<u8>> {
@@ -103,7 +127,7 @@ fn write_picture(path: &Path, encoded: &[u8]) -> Result<()> {
 
 fn look(selector: &str, output: Option<&str>) -> Result<()> {
     let catalog = windows()?;
-    let window = capture_target(&catalog,selector)?;
+    let window = select_window(&catalog,selector)?;
     if window.minimized { return Err("window is minimized; look does not restore or focus it".into()); }
     let (hwnd,_) = target(&window.id)?;
     let mut affinity = 0;
@@ -150,6 +174,7 @@ pub(super) fn execute(args: &[&str]) -> Result<Option<Value>> {
         ["monitors"] => Ok(Some(serde_json::to_value(monitors()?)?)),
         ["look", selector] => { look(selector,None)?; Ok(None) },
         ["look", selector, file] => { look(selector,Some(file))?; Ok(None) },
+        ["send", selector, monitor] => send_window(selector,monitor).map(Some),
         ["windows"] => {
             let scenes = scenes()?;
             let list = windows()?.into_iter().map(|w| {
@@ -206,15 +231,25 @@ mod tests {
         let first = Window { id:"123:4:500:abc".into(),title:"First ñ".into(),app:"owned.exe".into(),class:"test".into(),
             process:123,monitor:"DISPLAY2".into(),bounds:Bounds{x:0,y:0,width:100,height:100},minimized:false,maximized:false,resizable:true };
         let mut catalog = vec![first.clone()];
-        assert_eq!(capture_target(&catalog,"123").unwrap().id,first.id);
+        assert_eq!(select_window(&catalog,"123").unwrap().id,first.id);
         for selector in ["0","-1","123.1","123:4:500:old","456","scene:panel"] {
-            assert!(capture_target(&catalog,selector).is_err(),"{selector}");
+            assert!(select_window(&catalog,selector).is_err(),"{selector}");
         }
         let mut second=first.clone();second.id="123:5:600:abc".into();catalog.push(second);
-        assert!(capture_target(&catalog,"123").is_err());
-        assert_eq!(capture_target(&catalog,&first.id).unwrap().title,"First ñ");
+        assert!(select_window(&catalog,"123").is_err());
+        assert_eq!(select_window(&catalog,&first.id).unwrap().title,"First ñ");
         catalog.remove(0);
-        assert!(capture_target(&catalog,&first.id).is_err());
+        assert!(select_window(&catalog,&first.id).is_err());
+    }
+    #[test]
+    fn native_send_uses_the_current_monitor_catalog_and_refuses_missing_outputs() {
+        let screen=|name:&str,x|Monitor{name:name.into(),bounds:Bounds{x,y:0,width:1920,height:1080},
+            work:Bounds{x,y:0,width:1920,height:1040},scale:1.0,primary:false,refresh_hz:60};
+        let screens=[screen(r"\\.\DISPLAY2",-1920),screen(r"\\.\DISPLAY1",0)];
+        assert_eq!(send_monitor(&screens,"0").unwrap().name,r"\\.\DISPLAY2");
+        assert_eq!(send_monitor(&screens,r"\\.\DISPLAY1").unwrap().name,r"\\.\DISPLAY1");
+        for selector in ["", "-1", "2", "999", "1.0", r"\\.\DISPLAY9"] { assert!(send_monitor(&screens,selector).is_err()); }
+        assert!(send_monitor(&[],"0").is_err());
     }
     #[test]
     fn png_keeps_native_color_channels_and_never_replaces_a_file() {

@@ -7,8 +7,6 @@ use windows::Win32::UI::Accessibility::*;
 
 #[path = "windows_configure.rs"]
 mod configure;
-#[path = "windows_transfer.rs"]
-mod transfer;
 
 #[derive(Clone)]
 struct Scope { monitor:String, process:Option<u32>, actions:bool }
