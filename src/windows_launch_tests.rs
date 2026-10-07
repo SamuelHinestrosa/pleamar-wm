@@ -37,6 +37,23 @@ fn leaf_command(path:&Path) -> String {
 fn process(pid:u32) -> OwnedHandle {
     unsafe { own(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION|PROCESS_SYNCHRONIZE,false,pid).unwrap()) }
 }
+fn wait_empty(commands:&mut Launches) {
+    // A signalled process handle does not require job accounting to have
+    // reached zero yet. Exercise the production deadline, not a future Instant
+    // followed by an immediate assertion about asynchronous Windows teardown.
+    let deadline=Instant::now()+Duration::from_secs(5);
+    loop {
+        let now=Instant::now();
+        commands.poll(now).unwrap();
+        if commands.running.is_empty() {
+            assert!(commands.wait(now).is_none());
+            return;
+        }
+        assert!(now<deadline,"terminated launch groups did not retire: {:?}",
+            commands.running.iter().map(|item|(item.pid,item.active(),item.process.is_none())).collect::<Vec<_>>());
+        std::thread::sleep(commands.wait(now).unwrap().min(Duration::from_millis(25)));
+    }
+}
 
 #[test]
 fn scene_commands_preserve_unicode_quotes_and_validate_native_limits() {
@@ -50,15 +67,15 @@ fn scene_commands_preserve_unicode_quotes_and_validate_native_limits() {
     let running=process(pid);
     assert_eq!(unsafe { WaitForSingleObject(handle(&running),20_000) },WAIT_OBJECT_0);
     assert_eq!(wait_file(&files.file("result.txt")),expected);
-    commands.poll(Instant::now()+Duration::from_secs(1)).unwrap();
-    assert!(commands.running.is_empty());
-    assert!(commands.wait(Instant::now()).is_none());
+    drop(running);
+    wait_empty(&mut commands);
     let failed=process(commands.start("exit 23").unwrap());
     assert_eq!(unsafe { WaitForSingleObject(handle(&failed),20_000) },WAIT_OBJECT_0);
     assert_eq!(commands.running[0].exit().unwrap(),Some(23));
+    assert!(commands.running[0].process.is_none(),"exit must release the shell handle while retaining the job");
     assert_eq!(commands.running[0].exit().unwrap(),None);
-    commands.poll(Instant::now()+Duration::from_secs(1)).unwrap();
-    assert!(commands.running.is_empty());
+    drop(failed);
+    wait_empty(&mut commands);
 }
 
 #[test]
@@ -73,6 +90,7 @@ fn scene_launch_retains_descendants_and_closes_only_its_own_group() {
     assert_eq!(unsafe { WaitForSingleObject(handle(&parent),20_000) },WAIT_OBJECT_0);
     commands.poll(Instant::now()+Duration::from_secs(1)).unwrap();
     assert_eq!(commands.running.len(),1,"the child's job must survive its shell");
+    assert!(commands.running[0].process.is_none(),"only the job owns the surviving descendant");
     assert_eq!(unsafe { WaitForSingleObject(handle(&child),0) },WAIT_TIMEOUT);
     drop(commands);
     assert_eq!(unsafe { WaitForSingleObject(handle(&child),5000) },WAIT_OBJECT_0);

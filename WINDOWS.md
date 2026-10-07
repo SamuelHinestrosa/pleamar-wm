@@ -99,6 +99,11 @@ from Marea's application service and its persistent app-launcher behavior.
 At most sixteen launch groups run concurrently. Completed groups release their
 handles; polling stops when no group remains. Blank, NUL-containing and oversized
 commands fail before execution. A nonzero shell exit is reported in the log.
+The shell process handle is released after its exit code is read. The job stays
+alive for descendants and retires only after Windows reports no active member.
+The native test waits for that bounded transition; a signalled shell alone is
+not evidence that all job accounting has completed. This follows the separate
+[job accounting lifetime](https://learn.microsoft.com/en-us/windows/win32/api/winnt/ns-winnt-jobobject_basic_accounting_information).
 `capabilities` reports `scene_launch: true` and `agent_background_launch: false`;
 this provides no independent agent seat, background typing or Unix shell.
 

@@ -253,7 +253,8 @@ def exercise(binary, output):
                                     return str(slot)
                             return None
                         slot = until(owned_slot, 'owned child in the native catalog')
-                        ask(f'set preview_slot {slot}')
+                        ask(f'fact preview_slot {slot}')
+                        until(lambda: ask('get preview_slot') == slot, 'owned slot selection acknowledged')
                         trace = lambda: (folder / 'scene.log').read_text(encoding='utf-8')
                         assert 'capture transport =' not in trace(), 'hidden previews allocated a capture device'
                         def preview_pixels(color, name, visible=True):

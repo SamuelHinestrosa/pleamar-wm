@@ -24,7 +24,7 @@ impl Attributes {
 }
 impl Drop for Attributes { fn drop(&mut self) { unsafe { DeleteProcThreadAttributeList(self.list); } } }
 
-struct Launch { job:OwnedHandle, process:OwnedHandle, pid:u32, reported:bool }
+struct Launch { job:OwnedHandle, process:Option<OwnedHandle>, pid:u32 }
 impl Launch {
     fn active(&self) -> Result<bool> {
         let mut accounting=JOBOBJECT_BASIC_ACCOUNTING_INFORMATION::default();
@@ -33,10 +33,13 @@ impl Launch {
         Ok(accounting.ActiveProcesses!=0)
     }
     fn exit(&mut self) -> Result<Option<u32>> {
-        if self.reported || unsafe { WaitForSingleObject(handle(&self.process),0) }!=WAIT_OBJECT_0 { return Ok(None); }
+        let Some(process)=&self.process else { return Ok(None); };
+        if unsafe { WaitForSingleObject(handle(process),0) }!=WAIT_OBJECT_0 { return Ok(None); }
         let mut code=0;
-        unsafe { GetExitCodeProcess(handle(&self.process),&mut code) }?;
-        self.reported=true;
+        unsafe { GetExitCodeProcess(handle(process),&mut code) }?;
+        // Job accounting can lag process signalling. The exit code is consumed
+        // once; release our process reference while waiting for the whole job.
+        self.process=None;
         Ok(Some(code))
     }
 }
@@ -70,7 +73,7 @@ impl Launches {
             CREATE_NO_WINDOW|EXTENDED_STARTUPINFO_PRESENT,None,PCWSTR::null(),&startup.StartupInfo,&mut info) }?;
         let process=unsafe { own(info.hProcess) };
         let _thread=unsafe { own(info.hThread) };
-        self.running.push(Launch {job,process,pid:info.dwProcessId,reported:false});
+        self.running.push(Launch {job,process:Some(process),pid:info.dwProcessId});
         self.next=Instant::now()+Duration::from_millis(250);
         Ok(info.dwProcessId)
     }
