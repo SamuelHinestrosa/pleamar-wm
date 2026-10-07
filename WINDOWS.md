@@ -102,6 +102,16 @@ Process ownership uses Microsoft's
 [creation-time job assignment](https://devblogs.microsoft.com/oldnewthing/20230209-00/?p=107812)
 and [nested job lifetime](https://learn.microsoft.com/en-us/windows/win32/procthread/nested-jobs).
 
+`tests/windows-scene-launch.py` is a separate visible integration fixture for
+the disposable GitHub-hosted Windows runner. Its explicit workflow step checks
+presented scene pixels, a named button reaching Luau and native process launch,
+view-only refusal, hot reload and child cleanup after normal or forced scene
+exit. It keeps PNGs, command logs and a case report as the
+`wm-native-scene-launch` artifact. The guard rejects ordinary local execution;
+it is not an installer or a test to run on somebody's active desktop. A pending
+or failed workflow is not evidence that these cases pass. Even a pass does not
+cover physical input, mixed-DPI monitors or the full Marea walkthrough.
+
 ## Explicit window layouts
 
 The matching Marea profile includes a paged **Window overview** on its selected

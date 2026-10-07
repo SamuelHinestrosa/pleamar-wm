@@ -67,6 +67,44 @@ jobs:
           name: wm-recovery-acceptance
           path: ${{ runner.temp }}/wm-recovery-acceptance
           if-no-files-found: warn
+      - uses: actions/setup-python@v5
+        if: runner.os == 'Windows'
+        with:
+          python-version: '3.13'
+      - name: Verified shader compiler for the native scene fixture
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        shell: pwsh
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'wm-scene-dxc'
+          New-Item -ItemType Directory -Path $stage | Out-Null
+          $archive = Join-Path $stage 'dxc.zip'
+          Invoke-WebRequest -Uri 'https://github.com/microsoft/DirectXShaderCompiler/releases/download/v1.9.2609/dxc_2026_09_29.zip' -OutFile $archive
+          if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne 'AD31B1FC8443175D204F77A611FDB3EF2EC42759BDC2F1167368DE24A4A7E7F1') { throw 'DXC checksum mismatch' }
+          $unpacked = Join-Path $stage 'unpacked'
+          Expand-Archive -LiteralPath $archive -DestinationPath $unpacked
+          foreach ($name in @('dxcompiler.dll', 'dxil.dll')) {
+            Copy-Item -LiteralPath (Join-Path $unpacked "bin/x64/$name") -Destination (Join-Path 'target/debug' $name)
+          }
+          $licenses = Join-Path 'target/debug' 'licenses/dxc'
+          New-Item -ItemType Directory -Path $licenses | Out-Null
+          foreach ($name in @('LICENCE-MIT.txt', 'LICENSE-LLVM.txt', 'LICENSE-MS.txt')) {
+            Copy-Item -LiteralPath (Join-Path $unpacked $name) -Destination $licenses
+          }
+      - name: Rendered scene launch, Luau, reload and owned child cleanup
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        timeout-minutes: 6
+        env:
+          PLEAMAR_WM_CI_SCENE_LAUNCH: '1'
+        run: python tests/windows-scene-launch.py --binary target/debug/pleamar-wm.exe --output "${{ runner.temp }}/wm native scene ñ"
+      - name: Keep native scene launch evidence
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wm-native-scene-launch
+          path: ${{ runner.temp }}/wm native scene ñ
+          if-no-files-found: warn
       - name: Check the overview scene
         working-directory: pleamar-wm
         run: cargo run --locked -- --check examples/windows-overview.plm
