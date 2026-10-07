@@ -44,6 +44,7 @@ const HELP: &str = "pleamar-wm — experimental native Windows desktop companion
                                    --process PID scopes automatic management to one application
   --say wm COMMAND                status, toggle MONITOR, layout MONITOR KIND, free MONITOR, quit
                                    emit minimize, emit restore_last, emit toggle_free
+                                   emit focus_next, emit focus_previous, emit close
   hyprctl monitors|activewindow     compatibility queries for existing scenes
   tile MONITOR LAYOUT --save FILE ID...
                                    tile these normal windows on their current monitor;
@@ -344,7 +345,7 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
             "agent_window_capture": true, "agent_window_send": true, "agent_native_input": true, "agent_input_mode": "opt-in-foreground",
             "window_rules": ["app", "title", "float", "size", "monitor"], "private_window_rules": false, "workspace_window_rules": false,
             "window_scene_provider": false, "automatic_session": true, "rain": false, "snow": false,
-            "session_shortcuts": ["minimize", "restore_last", "toggle_free"],
+            "session_shortcuts": ["minimize", "restore_last", "toggle_free", "focus_next", "focus_previous", "close"],
             "ride": false, "dock": false, "pools": false, "remote": false, "phone_monitor": false, "independent_agent_seat": false,
             "agent_scene_commands": ["scenes", "tree", "press", "wait", "watch", "say"]}))),
         ["agent", rest @ ..] => agent::execute(rest),
@@ -353,7 +354,8 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
         ["session", rest @ ..] => session::run(&rest.iter().map(|s|(*s).to_owned()).collect::<Vec<_>>()).map(Some),
         ["--say", "wm", command] => {
             let endpoint = ipc::Endpoint::current()?;
-            if command.split_whitespace().eq(["emit", "restore_last"]) { endpoint.ask_with_focus(command).map(Some) }
+            let words:Vec<_>=command.split_whitespace().collect();
+            if matches!(words.as_slice(),["emit","restore_last"|"focus_next"|"focus_previous"]) { endpoint.ask_with_focus(command).map(Some) }
             else { endpoint.ask(command).map(Some) }
         },
         ["window", id, "minimize"] => state(id, true).map(Some),

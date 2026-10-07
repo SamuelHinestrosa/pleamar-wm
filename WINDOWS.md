@@ -70,6 +70,19 @@ never substituted for the requested window. Restoration preserves Windows'
 restore-to-maximized behavior and requests activation under normal foreground
 rules. An empty history or native failure is reported to Marea.
 
+`emit focus_next` and `emit focus_previous` cycle eligible application windows
+on the active window's managed monitor. Tiled mode follows its layout order;
+free mode keeps a stable cycle despite activation changing the Windows Z order.
+Minimized, hidden, disabled and out-of-scope identities are excluded. Navigation
+does not leave an active owned dialog. It supports up to 256 live windows per
+monitor and reports foreground denial instead of injecting input to bypass it.
+
+`emit close` posts a normal close request to the active window, including an
+explicit owned dialog. Applications retain their unsaved-work prompts and can
+decline; the result reports `close_requested`, not a completed close. Neither
+command substitutes another process when its target changes. Marea's dedicated
+Win layer maps Left/Up and Right/Down to previous/next, and Win+Q to close.
+
 The native CLI discovers pleamar scenes through logon-scoped named pipes.
 Panels such as Marea appear in `agent scenes` even when the ordinary window
 catalog excludes them. Use its current PID and the element names in its tree:

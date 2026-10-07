@@ -105,6 +105,9 @@ def main():
         wm('emit restore_last', fail='no recently minimized window')
         assert desktop.user.SetForegroundWindow(other_hwnd), 'owned outside bootstrap'
         wm('emit minimize', fail='outside this WM session')
+        for command in ('focus_next', 'focus_previous', 'close'):
+            wm('emit ' + command, fail='outside this WM session')
+            assert desktop.user.GetForegroundWindow() == other_hwnd
         assert not desktop.user.IsIconic(other_hwnd) and not desktop.user.IsIconic(hwnd)
         control(outside_path, 'allow-parent')
         assert desktop.user.SetForegroundWindow(hwnd)
@@ -112,6 +115,9 @@ def main():
         capture(identity, '01-before-minimize')
         control(target_path, 'allow-parent')
         assert desktop.user.AllowSetForegroundWindow(service.pid)
+        for command in ('focus_next', 'focus_previous'):
+            assert wm('emit ' + command)['focused_window'] == identity
+            assert desktop.user.GetForegroundWindow() == hwnd
         status = wm('emit minimize')
         assert status['last_minimized'] == identity and desktop.user.IsIconic(hwnd)
         assert desktop.user.GetForegroundWindow() != hwnd

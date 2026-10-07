@@ -89,8 +89,20 @@ impl Journal {
     }
 }
 
-struct Mode { tiled: bool, layout: Layout, order: Vec<String>, error: Option<String> }
-impl Default for Mode { fn default() -> Self { Self { tiled:false, layout:Layout::Left, order:Vec::new(), error:None } } }
+struct Mode { tiled: bool, layout: Layout, order: Vec<String>, navigation: Vec<String>, error: Option<String> }
+impl Default for Mode { fn default() -> Self { Self { tiled:false, layout:Layout::Left, order:Vec::new(), navigation:Vec::new(), error:None } } }
+
+fn neighbor(order:&mut Vec<String>, live:&[String], current:&str, forward:bool) -> Result<String> {
+    if live.len()>256 { return Err("window navigation supports at most 256 windows per monitor".into()); }
+    order.retain(|id|live.contains(id));
+    // Activation changes EnumWindows' Z order. Preserve the cycle so repeated
+    // next commands reach every window instead of bouncing between two.
+    let mut added:Vec<_> = live.iter().filter(|id|!order.contains(id)).cloned().collect();
+    added.sort();added.dedup();order.extend(added);
+    let at=order.iter().position(|id|id==current).ok_or("active window left the navigation scope")?;
+    let next=if forward {(at+1)%order.len()} else {(at+order.len()-1)%order.len()};
+    Ok(order[next].clone())
+}
 
 #[derive(Default)]
 struct Minimized(Vec<String>);
@@ -197,6 +209,7 @@ impl Manager {
             "pending_recovery":self.originals.values().filter(|w|self.modes.get(&w.monitor).is_none_or(|m|!m.tiled)).count(),
             "catalog_scans":self.scans,"geometry_changes":self.changes,
             "minimize_shortcuts":true,"last_minimized":self.minimized.0.last(),
+            "navigation_shortcuts":true,"close_shortcut":true,
             "rules_file":self.rules.path,"window_rules":self.rules.entries.len(),
             "ruled_windows":self.rules.applied.len(),"rule_errors":self.rules.errors,
             "rule_limit_reached":self.rules.applied.len()+self.rules.errors.len()>=256,
@@ -352,16 +365,57 @@ impl Manager {
             }
         }
     }
-    fn minimize_focused(&mut self) -> Result<Value> {
+    fn active(&self, include_owned:bool) -> Result<(HWND,Window)> {
         let hwnd = unsafe { GetForegroundWindow() };
-        let window = inspect(hwnd).ok_or("the active window is not an eligible application window")?;
+        let window = inspect_kind(hwnd,include_owned).ok_or("the active window is not an eligible application window")?;
         if !self.owns(&window) || !self.modes.contains_key(&window.monitor) {
             return Err("the active window is outside this WM session".into());
         }
-        if self.modes[&window.monitor].tiled { return Err("switch this monitor to free windows before minimizing".into()); }
         if window.minimized || !unsafe { windows::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled(hwnd) }.as_bool() {
             return Err("the active window is minimized or blocked by a dialog".into());
         }
+        if !monitors()?.iter().any(|m|m.name==window.monitor) { return Err("the active window's monitor disconnected".into()); }
+        Ok((hwnd,window))
+    }
+    fn focus_relative(&mut self, forward:bool) -> Result<Value> {
+        let (source,current)=self.active(false)?;
+        let live:Vec<_>=windows()?.into_iter().filter(|w|self.owns(w) && w.monitor==current.monitor && !w.minimized)
+            .filter(|w|target(&w.id).is_ok_and(|(hwnd,_)|unsafe { windows::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled(hwnd) }.as_bool()))
+            .map(|w|w.id).collect();
+        let mode=self.modes.get_mut(&current.monitor).unwrap();
+        if mode.tiled { mode.navigation=mode.order.clone(); }
+        let id=neighbor(&mut mode.navigation,&live,&current.id,forward)?;
+        let (hwnd,window)=target(&id)?;
+        if !self.owns(&window) || window.monitor!=current.monitor || window.minimized
+            || !unsafe { windows::Win32::UI::Input::KeyboardAndMouse::IsWindowEnabled(hwnd) }.as_bool()
+            || unsafe { GetForegroundWindow() }!=source || target(&current.id).is_err() {
+            return Err("window or foreground changed during navigation".into());
+        }
+        if !unsafe { SetForegroundWindow(hwnd) }.as_bool() {
+            return Err("Windows denied foreground activation".into());
+        }
+        let until=Instant::now()+Duration::from_millis(500);
+        loop {
+            pump();
+            if unsafe { GetForegroundWindow() }==hwnd && target(&id).is_ok() { break; }
+            if Instant::now()>=until { return Err("window did not confirm foreground activation".into()); }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        let mut status=self.status();status["focused_window"]=json!(id);Ok(status)
+    }
+    fn close_focused(&self) -> Result<Value> {
+        let (hwnd,window)=self.active(true)?;
+        if target_kind(&window.id,true).is_err() || unsafe { GetForegroundWindow() }!=hwnd {
+            return Err("window or foreground changed before closing".into());
+        }
+        // Ask the application to close: it retains its unsaved-work prompt and
+        // can decline. A posted request is not proof that its window disappeared.
+        unsafe { PostMessageW(Some(hwnd),WM_CLOSE,WPARAM(0),LPARAM(0)) }?;
+        let mut status=self.status();status["close_requested"]=json!(window.id);Ok(status)
+    }
+    fn minimize_focused(&mut self) -> Result<Value> {
+        let (_,window)=self.active(false)?;
+        if self.modes[&window.monitor].tiled { return Err("switch this monitor to free windows before minimizing".into()); }
         window_state(&window.id, true, true)?;
         self.minimized.remember(window.id);
         self.minimized_events();
@@ -398,6 +452,9 @@ impl Manager {
             ["free", name] => self.set_mode(name,false,None)?,
             ["emit", "minimize"] => self.minimize_focused()?,
             ["emit", "restore_last"] => self.restore_last()?,
+            ["emit", "focus_next"] => self.focus_relative(true)?,
+            ["emit", "focus_previous"] => self.focus_relative(false)?,
+            ["emit", "close"] => self.close_focused()?,
             ["emit", "toggle_free"] => {
                 let mut point = POINT::default();
                 unsafe { GetCursorPos(&mut point) }?;
@@ -521,8 +578,28 @@ pub(super) fn run(args:&[String]) -> Result<Value> {
 mod recovery_tests;
 
 #[cfg(test)]
+#[path = "windows_navigation_tests.rs"]
+mod navigation_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn navigation_reaches_each_window_despite_z_order_changes_and_retires_old_identities() {
+        let mut order=Vec::new();
+        let live=|names:&[&str]|names.iter().map(|s|s.to_string()).collect::<Vec<_>>();
+        assert_eq!(neighbor(&mut order,&live(&["a","b","c"]),"a",true).unwrap(),"b");
+        assert_eq!(neighbor(&mut order,&live(&["b","a","c"]),"b",true).unwrap(),"c");
+        assert_eq!(neighbor(&mut order,&live(&["c","b","a"]),"c",true).unwrap(),"a");
+        assert_eq!(neighbor(&mut order,&live(&["a","c","b"]),"a",false).unwrap(),"c");
+        assert_eq!(neighbor(&mut order,&live(&["a","new"]),"a",true).unwrap(),"new");
+        assert_eq!(order,live(&["a","new"]));
+        assert_eq!(neighbor(&mut order,&live(&["a"]),"a",false).unwrap(),"a");
+        assert!(neighbor(&mut order,&[],"a",true).is_err());
+        assert!(order.is_empty());
+        assert!(neighbor(&mut order,&(0..257).map(|n|n.to_string()).collect::<Vec<_>>(),"0",true).is_err());
+    }
 
     #[test]
     fn minimized_history_is_ordered_bounded_and_forgets_reused_handles() {
