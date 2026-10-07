@@ -33,9 +33,11 @@
 #touchpad tap on natural on
 
 # idle  off-after SECONDS  (the monitors go dark; any input wakes them)
-# phone lock COMMAND  (what locks the session when it comes back from the phone to
-#                      the desk: `marea lock` if unsaid; `none`, nothing — docs/phone.md)
 #idle off-after 600
+
+# phone lock COMMAND  what locks the session when it comes back from the phone
+# to the desk: `marea lock` if unsaid; `none`, nothing (docs/phone.md)
+#phone lock marea lock
 
 # agent on|off  a computer-use agent (Cua Driver) may use the windows with a
 # pointer and a keyboard of its own: your mouse and your focus stay yours, and
