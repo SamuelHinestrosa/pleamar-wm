@@ -283,6 +283,46 @@ scene Session {
     // The cards (and what to open) instead of an app: asked for, or nothing in front.
     let ph.home = phone >= 0 and (ph.cards > 0.5 or ph.n < 1 or ph.front < 0)
     follow pc = if(ph.home, 1, 0)
+    // A tablet lying down (see `phone`): room for two apps side by side,
+    // the one in front and another, with a line between them that a finger
+    // moves. Taller than wide —or a phone—, one at a time.
+    let ph.wide = W.ph >= 900 and H.ph >= 560
+    // Lying down, the cards go along in a row instead of a deck.
+    let ph.row = W.ph > H.ph
+    // The one beside (-1: by itself, the one before it in the deck), which
+    // side the one in front is on, where the line is (of the width), and
+    // whether it was asked to be alone.
+    fact ph.side = -1
+    fact ph.fl = 1
+    fact ph.ratio = 0.5
+    fact ph.solo = 0
+    let ph.ka = if(ph.kf > 0, ph.kf - 1, 1)
+    let ph.adj.0 = ph.on.0 and ph.front != 0 and ph.k.0 == ph.ka
+    let ph.adj.1 = ph.on.1 and ph.front != 1 and ph.k.1 == ph.ka
+    let ph.adj.2 = ph.on.2 and ph.front != 2 and ph.k.2 == ph.ka
+    let ph.adj.3 = ph.on.3 and ph.front != 3 and ph.k.3 == ph.ka
+    let ph.adj.4 = ph.on.4 and ph.front != 4 and ph.k.4 == ph.ka
+    let ph.adj.5 = ph.on.5 and ph.front != 5 and ph.k.5 == ph.ka
+    let ph.adj.6 = ph.on.6 and ph.front != 6 and ph.k.6 == ph.ka
+    let ph.adj.7 = ph.on.7 and ph.front != 7 and ph.k.7 == ph.ka
+    let ph.adj.8 = ph.on.8 and ph.front != 8 and ph.k.8 == ph.ka
+    let ph.adj.9 = ph.on.9 and ph.front != 9 and ph.k.9 == ph.ka
+    let ph.adj.10 = ph.on.10 and ph.front != 10 and ph.k.10 == ph.ka
+    let ph.adj.11 = ph.on.11 and ph.front != 11 and ph.k.11 == ph.ka
+    let ph.adj.12 = ph.on.12 and ph.front != 12 and ph.k.12 == ph.ka
+    let ph.adj.13 = ph.on.13 and ph.front != 13 and ph.k.13 == ph.ka
+    let ph.adj.14 = ph.on.14 and ph.front != 14 and ph.k.14 == ph.ka
+    let ph.adj.15 = ph.on.15 and ph.front != 15 and ph.k.15 == ph.ka
+    let ph.auto = -1 + 1 * ph.adj.0 + 2 * ph.adj.1 + 3 * ph.adj.2 + 4 * ph.adj.3 + 5 * ph.adj.4 + 6 * ph.adj.5 + 7 * ph.adj.6 + 8 * ph.adj.7 + 9 * ph.adj.8 + 10 * ph.adj.9 + 11 * ph.adj.10 + 12 * ph.adj.11 + 13 * ph.adj.12 + 14 * ph.adj.13 + 15 * ph.adj.14 + 16 * ph.adj.15
+    let ph.sok = ph.side >= 0 and ph.side != ph.front and pick(max(ph.side, 0), ph.on.0, ph.on.1, ph.on.2, ph.on.3, ph.on.4, ph.on.5, ph.on.6, ph.on.7, ph.on.8, ph.on.9, ph.on.10, ph.on.11, ph.on.12, ph.on.13, ph.on.14, ph.on.15)
+    let ph.sd = if(ph.sok, ph.side, ph.auto)
+    let ph.split = phone >= 0 and ph.wide and ph.solo < 0.5 and ph.front >= 0 and ph.sd >= 0
+    // The line held (a pointer, or a finger held first), or moved by a
+    // finger sideways (the wheel): where it is while it moves.
+    fact ph.dv = 0
+    fact ph.wl = -1
+    let ph.lv = if(ph.dv > 0.5, clamp(mouse.x / max(W.ph, 1), 0.04, 0.96), ph.wl)
+    let ph.xr = W.ph * ph.ratio
 
     // ── rain: on the windows, as if they were glass, and falling in front of
     // everything. Marea turns it on and off (`emit toggle_rain`); it comes
@@ -6341,23 +6381,31 @@ scene Session {
         // On the phone: all of it under the status line; the ones that are
         // not in front wait beside it, the earlier ones to the left.
         let ph.rel = ph.k.$i - ph.kf
-        let ph.gx = if(ph.front == i or ph.front < 0, 0, if(ph.rel > 0, W.ph + 40, 0 - W.ph - 40))
+        // Two side by side (a tablet lying down): the one in front on its
+        // side of the line, the other on the other.
+        let ph.pair = ph.split and (ph.front == i or ph.sd == i)
+        let ph.lft = (ph.front == i) == (ph.fl > 0.5)
+        let ph.px = if(ph.lft, 0, ph.xr + 4)
+        let ph.pw = if(ph.lft, ph.xr - 4, W.ph - ph.xr - 4)
+        let ph.gx = if(ph.pair, ph.px, if(ph.front == i or ph.front < 0, 0, if(ph.rel > 0, W.ph + 40, 0 - W.ph - 40)))
         let goal.x = if(onph, ph.gx, if(win.$i.minimized, mx.$i, if(fr, fgx, if(tm, x0 + gap, txv))))
         let goal.y = if(onph, ph.sb, if(win.$i.minimized, my.$i, if(fr, fgy, if(tm, y0, tyv))))
-        let goal.w = if(onph, W.ph, if(win.$i.minimized, mw.$i, if(fr, fgw, if(tm, Ws - 2 * gap, twv))))
+        let goal.w = if(onph, if(ph.pair, ph.pw, W.ph), if(win.$i.minimized, mw.$i, if(fr, fgw, if(tm, Ws - 2 * gap, twv))))
         let goal.h = if(onph, H.ph - ph.sb - ph.hb, if(win.$i.minimized, mh.$i, if(fr, fgh, if(tm, ah, thv))))
         // As a card, in a deck: each one a step below the one before, the
         // one at `ph.at` whole near the top, the ones behind it piled up
-        // above, a little smaller.
+        // above, a little smaller. Lying down, in a row: the one at `ph.at`
+        // in the middle, the others beside it, a little smaller.
         let ph.d = ph.k.$i - ph.at
-        let ph.cs = 0.84 * (1 - 0.06 * clamp(0 - ph.d, 0, 4))
+        let ph.r0 = min(0.62, (H.ph - ph.sb - ph.hb - 200) / max(H.ph - ph.sb - ph.hb, 1))
+        let ph.cs = if(ph.row, ph.r0 * (1 - 0.08 * min(abs(ph.d), 1)), 0.84 * (1 - 0.06 * clamp(0 - ph.d, 0, 4)))
         let ph.cw = W.ph * ph.cs
         let ph.ch = (H.ph - ph.sb - ph.hb) * ph.cs
-        let ph.cx = (W.ph - ph.cw) / 2
-        let ph.cy = ph.sb + 96 + if(ph.d < 0, max(ph.d, -4) * 26, ph.d * 150)
+        let ph.cx = if(ph.row, (W.ph - ph.cw) / 2 + ph.d * (W.ph * ph.r0 + 36), (W.ph - ph.cw) / 2)
+        let ph.cy = if(ph.row, (ph.sb + H.ph - ph.hb - 62) / 2 - ph.ch / 2, ph.sb + 96 + if(ph.d < 0, max(ph.d, -4) * 26, ph.d * 150))
         let card = onph and ph.home
         // Over the others: on the phone, the app in front; as cards, each over the one before.
-        let zz = if(onph, if(card, 100000 + ph.k.$i * 10, if(ph.front == i, 100500, 100000)), stamp.$i)
+        let zz = if(onph, if(card, 100000 + ph.k.$i * 10, if(ph.front == i or ph.pair, 100500, 100000)), stamp.$i)
         // How far into the island: 0 here, 1 put away.
         prop mini.$i = 0 ~720ms
         follow mini.$i = if(win.$i.minimized, 1, 0)
@@ -6632,7 +6680,7 @@ scene Session {
             show: seen.$i > 0.01 and sc == screen.index and ws.vis and dragging != i and not (landing == i and sc != landing.to) and not win.$i.dialog and mini.$i <= 0.02
             // Born, it grows out of the drop: the same size as the black that
             // spreads, showing through it as the black clears.
-            opacity: seen.$i * smooth(0.2, 0.5, swell.$i) * (1 - 0.25 * ovcarry.$i) * if(card, clamp(1 + 0.2 * ph.d, 0.3, 1), 1)
+            opacity: seen.$i * smooth(0.2, 0.5, swell.$i) * (1 - 0.25 * ovcarry.$i) * if(card, if(ph.row, clamp(1.2 - 0.35 * abs(ph.d), 0.4, 1), clamp(1 + 0.2 * ph.d, 0.3, 1)), 1)
             pivot: x + w / 2, y + h / 2
             move: (nb.cx - x - w / 2) * (1 - nb.g) * (swell.$i < 0.999), (nb.cy - y - h / 2) * (1 - nb.g) * (swell.$i < 0.999)
             scale: (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F)) * (1 + 0.012 * sin(180 * wave.$i)) * (1 + 0.03 * sin(180 * smooth(0.8, 1, swell.$i))) * nb.sx * (1 - 0.6 * ovcarry.$i), (0.92 + 0.08 * seen.$i + 0.025 * choose.$i.hover * ov) * (1 + 0.05 * (lift.$i - F)) * (1 + 0.012 * sin(180 * wave.$i)) * (1 + 0.03 * sin(180 * smooth(0.8, 1, swell.$i))) * nb.sy * (1 - 0.6 * ovcarry.$i)
@@ -6758,26 +6806,46 @@ scene Session {
         }
         // ── on the phone, as a card: its name over it and a cross to close
         // it; pressed, it opens. The ones piled behind show only their edge. ──
+        // (On a tablet lying down, another button: beside the one in front.)
+        let ph.besides = card and ph.wide and ph.front >= 0 and ph.front != i and win.$i.open and (ph.d > -0.5 or ph.row)
         group {
             z: zz + 0.7
-            zone box phcard.$i { from: x, y - 30; size: w, if(ph.d < -0.5, 14, h + 30); active: card and sc == screen.index and win.$i.open and pc > 0.9; label: "{win.$i.title}"; role: item }
-            zone ellipse phx.$i { at: x + w - 14, y - 17; radius: 16; active: card and sc == screen.index and win.$i.open and pc > 0.9 and ph.d > -0.5; label: "Close {win.$i.title}"; role: button }
+            zone box phcard.$i { from: x, y - 30; size: w, if(ph.d < -0.5 and not ph.row, 14, h + 30); active: card and sc == screen.index and win.$i.open and pc > 0.9; label: "{win.$i.title}"; role: item }
+            zone ellipse phx.$i { at: x + w - 14, y - 17; radius: 16; active: card and sc == screen.index and win.$i.open and pc > 0.9 and (ph.d > -0.5 or ph.row); label: "Close {win.$i.title}"; role: button }
+            zone ellipse phsd.$i { at: x + w - 46, y - 17; radius: 16; active: ph.besides and sc == screen.index and pc > 0.9; label: "Beside {win.$i.title}"; role: button }
         }
         group {
             z: zz + 0.6
-            show: card and sc == screen.index and win.$i.open and pc > 0.02 and ph.d > -0.5
+            show: card and sc == screen.index and win.$i.open and pc > 0.02 and (ph.d > -0.5 or ph.row)
             opacity: smooth(0.4, 1, pc)
-            text win.$i.title { at: x + 4, y - 17; anchor: left center; size: 13; weight: 650; width: w - 50; lines: 1; color: ink; opacity: 92% }
+            text win.$i.title { at: x + 4, y - 17; anchor: left center; size: 13; weight: 650; width: w - if(ph.besides, 84, 50); lines: 1; color: ink; opacity: 92% }
             ellipse { at: x + w - 14, y - 17; radius: 12; color: #ffffff; opacity: 10% + 14% * phx.$i.hover }
             box { at: x + w - 14, y - 17; size: 11, 1.8; corner: 1; rotate: 45deg; color: ink }
             box { at: x + w - 14, y - 17; size: 11, 1.8; corner: 1; rotate: -45deg; color: ink }
+            group {
+                show: ph.besides
+                ellipse { at: x + w - 46, y - 17; radius: 12; color: mint; opacity: 12% + 18% * phsd.$i.hover }
+                box { at: x + w - 50, y - 17; size: 6, 11; corner: 1.5; stroke: 1.4; color: ink }
+                box { at: x + w - 42, y - 17; size: 6, 11; corner: 1.5; color: mint }
+            }
         }
         on release phx.$i { close win.$i }
-        on release phcard.$i while not phx.$i.hover {
+        on release phsd.$i while ph.besides {
+            ph.side = i
+            ph.solo = 0
+            ph.cards = 0
+        }
+        on release phcard.$i while not phx.$i.hover and not phsd.$i.hover {
+            // (The one beside, pressed: the two change places in front.)
+            ph.fl = if(ph.split and ph.sd == i, 1 - ph.fl, ph.fl)
+            ph.side = if(ph.split and ph.sd == i, ph.front, ph.side)
             focus win.$i
             ph.front = i
             ph.cards = 0
         }
+        // In front, it has the keyboard (put in front by the line between
+        // two, a swipe, a card).
+        on change ph.front while onph and ph.front == i and win.$i.open and win.focus != i { focus win.$i }
         // Along the bottom edge, to the next app and the one before.
         on phone_next while onph and win.$i.open and not ph.home and ph.k.$i == ph.kf + 1 {
             focus win.$i
@@ -7691,6 +7759,10 @@ scene Session {
         ph.front = if(win.focus >= 0, win.focus, -1)
         ph.cards = 1
         ph.intro = 1
+        ph.side = -1
+        ph.solo = 0
+        ph.fl = 1
+        ph.ratio = 0.5
         ph.at = clamp(ph.kf, 0, max(ph.n - 1, 0))
     }
     on still phone for 1300ms while ph.intro > 0.5 and phone >= 0 {
@@ -7703,6 +7775,10 @@ scene Session {
     }
     // The one with the keyboard on the phone is the one in front.
     on change win.focus while phone >= 0 and win.focus >= 0 and fscreen == phone and not focus.dialog {
+        // Two side by side and the other one touched: it is in front now,
+        // and the one that was, beside it (each stays on its side).
+        ph.fl = if(ph.split and win.focus == ph.sd, 1 - ph.fl, ph.fl)
+        ph.side = if(ph.split and win.focus == ph.sd, ph.front, ph.side)
         ph.front = win.focus
     }
     // The deck goes along with a finger (the wheel, from the page), and
@@ -7712,6 +7788,68 @@ scene Session {
     on release ph_bar {
         ph.cards = if(ph.home and ph.front >= 0 and ph.n > 0, 0, 1)
         ph.at = clamp(ph.kf, 0, max(ph.n - 1, 0))
+    }
+    // Two side by side: the line between them. Held and moved (a pointer, or
+    // a finger held a moment first) or moved by a finger sideways, it makes
+    // one wider; while it moves, the two wait under a veil with their names.
+    let ph.lx = if(ph.lv >= 0, W * ph.lv, ph.xr)
+    prop ph.veil = 0 ~220ms
+    follow ph.veil = if(ph.lv >= 0, 1, 0)
+    group {
+        show: is.ph and ph.split and pc < 0.99
+        z: 100600
+        opacity: 1 - pc
+        group {
+            show: ph.veil > 0.01
+            opacity: ph.veil
+            box { from: 0, ph.sb; size: max(ph.lx - 4, 0), H - ph.sb - ph.hb; corner: 16; color: #0b1518; opacity: 92% }
+            box { from: ph.lx + 4, ph.sb; size: max(W - ph.lx - 4, 0), H - ph.sb - ph.hb; corner: 16; color: #0b1518; opacity: 92% }
+            group {
+                show: ph.lx > 150
+                opacity: smooth(150, 260, ph.lx)
+                text pick(max(ph.front, 0), win.0.title, win.1.title, win.2.title, win.3.title, win.4.title, win.5.title, win.6.title, win.7.title, win.8.title, win.9.title, win.10.title, win.11.title, win.12.title, win.13.title, win.14.title, win.15.title) { at: ph.lx / 2, H / 2; anchor: center; size: 17; weight: 600; width: max(ph.lx - 60, 20); lines: 2; align: center; color: ink; show: ph.fl > 0.5 }
+                text pick(max(ph.sd, 0), win.0.title, win.1.title, win.2.title, win.3.title, win.4.title, win.5.title, win.6.title, win.7.title, win.8.title, win.9.title, win.10.title, win.11.title, win.12.title, win.13.title, win.14.title, win.15.title) { at: ph.lx / 2, H / 2; anchor: center; size: 17; weight: 600; width: max(ph.lx - 60, 20); lines: 2; align: center; color: ink; show: ph.fl < 0.5 }
+            }
+            group {
+                show: W - ph.lx > 150
+                opacity: smooth(150, 260, W - ph.lx)
+                text pick(max(ph.sd, 0), win.0.title, win.1.title, win.2.title, win.3.title, win.4.title, win.5.title, win.6.title, win.7.title, win.8.title, win.9.title, win.10.title, win.11.title, win.12.title, win.13.title, win.14.title, win.15.title) { at: (ph.lx + W) / 2, H / 2; anchor: center; size: 17; weight: 600; width: max(W - ph.lx - 60, 20); lines: 2; align: center; color: ink; show: ph.fl > 0.5 }
+                text pick(max(ph.front, 0), win.0.title, win.1.title, win.2.title, win.3.title, win.4.title, win.5.title, win.6.title, win.7.title, win.8.title, win.9.title, win.10.title, win.11.title, win.12.title, win.13.title, win.14.title, win.15.title) { at: (ph.lx + W) / 2, H / 2; anchor: center; size: 17; weight: 600; width: max(W - ph.lx - 60, 20); lines: 2; align: center; color: ink; show: ph.fl < 0.5 }
+            }
+            // Near an edge, the one about to go fades out.
+            box { from: 0, ph.sb; size: max(ph.lx - 4, 0), H - ph.sb - ph.hb; corner: 16; color: #05090b; opacity: 70% * (1 - smooth(0.08, 0.2, ph.lv)) }
+            box { from: ph.lx + 4, ph.sb; size: max(W - ph.lx - 4, 0), H - ph.sb - ph.hb; corner: 16; color: #05090b; opacity: 70% * smooth(0.8, 0.92, ph.lv) }
+        }
+        // The line's handle, and which of the two has the keyboard.
+        group {
+            blur: 10
+            box { at: ph.lx, (ph.sb + H - ph.hb) / 2; size: 8, 70; corner: 4; color: mint; opacity: 50% * ph.veil }
+        }
+        box { at: ph.lx, (ph.sb + H - ph.hb) / 2; size: 5, 52 + 18 * ph_div.hover + 18 * ph.veil; corner: 3; color: ink; opacity: 70% + 20% * ph_div.hover }
+        box { at: ph.lx, (ph.sb + H - ph.hb) / 2; size: 5, 52 + 18 * ph_div.hover + 18 * ph.veil; corner: 3; color: mint; opacity: 90% * ph.veil }
+        box { at: if(ph.fl > 0.5, ph.xr / 2, (ph.xr + W) / 2), ph.sb + 3; size: 40, 3; corner: 2; color: mint; opacity: 70% * (1 - ph.veil) }
+        // (While it moves, all of the screen: the line goes from under the finger.)
+        zone box ph_div { from: if(ph.lv >= 0, 0, ph.lx - 18), ph.sb; size: if(ph.lv >= 0, W, 36), H - ph.sb - ph.hb; cursor: grab; active: is.ph and ph.split and not ph.home; label: "The line between the two apps"; role: slider }
+    }
+    on press ph_div { ph.dv = 1 }
+    on release ph_div while ph.dv > 0.5 {
+        // To an edge, the other goes and the one left has all of it; else
+        // the line settles at a third, the middle or two thirds.
+        ph.front = if(ph.lv > 0.88, if(ph.fl > 0.5, ph.front, ph.sd), if(ph.lv < 0.12, if(ph.fl > 0.5, ph.sd, ph.front), ph.front))
+        ph.solo = if(ph.lv > 0.88 or ph.lv < 0.12, 1, ph.solo)
+        ph.side = if(ph.lv > 0.88 or ph.lv < 0.12, -1, ph.side)
+        ph.ratio = if(ph.lv > 0.88 or ph.lv < 0.12, ph.ratio, if(ph.lv < 0.42, 0.34, if(ph.lv > 0.58, 0.66, 0.5)))
+        ph.dv = 0
+    }
+    on scroll ph_div while ph.split { ph.wl = clamp(if(ph.wl < 0, ph.ratio, ph.wl) + wheel * 41 / max(W.ph, 1), 0.04, 0.96) }
+    on still ph.wl for 380ms while ph.wl >= 0 and ph.dv < 0.5 {
+        // To an edge, the other goes and the one left has all of it; else
+        // the line settles at a third, the middle or two thirds.
+        ph.front = if(ph.lv > 0.88, if(ph.fl > 0.5, ph.front, ph.sd), if(ph.lv < 0.12, if(ph.fl > 0.5, ph.sd, ph.front), ph.front))
+        ph.solo = if(ph.lv > 0.88 or ph.lv < 0.12, 1, ph.solo)
+        ph.side = if(ph.lv > 0.88 or ph.lv < 0.12, -1, ph.side)
+        ph.ratio = if(ph.lv > 0.88 or ph.lv < 0.12, ph.ratio, if(ph.lv < 0.42, 0.34, if(ph.lv > 0.58, 0.66, 0.5)))
+        ph.wl = -1
     }
     // The water behind: three soft lights that drift, now and then.
     prop phb.x.0 = 0.2 ~spring(8, 6)

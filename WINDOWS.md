@@ -17,8 +17,11 @@ opening-window keyboard fixes remain part of the Linux compositor. Native scene 
 expose the latest element labels, roles, values and states; their validation
 and the remaining capabilities are described below.
 
-The subsequent upstream changes through `74413be` are also integrated, paired
-with pleamar's `4d35565` pool-return correction. The new phone session includes
+The subsequent upstream changes through `987c85b` are also integrated, paired
+with pleamar's `a248e1e2` press-position correction. Tablet rotation, horizontal
+scrolling and side-by-side remote apps are preserved in the Linux implementation.
+The shared session scene is checked on both platforms; this is language validation,
+not a native remote-session acceptance test. The new phone session includes
 its virtual output, gestures, return curtain and Linux session-lock behavior.
 Those implementations use the Linux compositor and remain Linux-only here;
 `phone_monitor: false` makes this explicit in the native capabilities. Windows

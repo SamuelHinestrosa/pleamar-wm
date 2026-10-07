@@ -71,6 +71,15 @@
   #ph-kbd.on { display: block; }
   #ph-menu { position: absolute; left: 10px; right: 10px; bottom: calc(10px + env(safe-area-inset-bottom)); padding: 10px; border-radius: 24px; background: #0d1519f2; border: 1px solid #ffffff18; backdrop-filter: blur(16px); display: grid; gap: 6px; transform: translateY(130%); transition: transform .35s cubic-bezier(.2,.8,.2,1); pointer-events: auto; }
   #ph-menu.open { transform: translateY(0); }
+  body.tablet #ph-menu { left: 50%; right: auto; width: min(420px, calc(100% - 20px)); margin-left: max(-210px, calc(10px - 50%)); }
+  body.tablet #ph-lock { left: 50%; right: auto; width: min(460px, calc(100% - 24px)); margin-left: max(-230px, calc(12px - 50%)); }
+  body.tablet .ph-sheet p { max-width: 380px; }
+  /* Turned on its side: the old picture blurs while the session takes the new shape. */
+  body.phone #stage.turning { filter: blur(14px) brightness(.7) saturate(1.3); transition: filter .25s ease, transform .32s cubic-bezier(.2,.8,.2,1); }
+  body.phone #stage { transition: transform .32s cubic-bezier(.2,.8,.2,1), filter .5s ease; }
+  #ph-turn { position: absolute; left: 50%; top: 50%; width: 74px; height: 74px; margin: -37px 0 0 -37px; border-radius: 50%; border: 1.5px solid #9ed6bd; opacity: 0; transform: scale(.6) rotate(-90deg); transition: opacity .25s, transform .5s cubic-bezier(.2,.8,.2,1); }
+  #ph-turn::after { content: ""; position: absolute; inset: 18px 26px; border-radius: 6px; border: 2px solid #e6f1f0; }
+  #ph-turn.on { opacity: .9; transform: scale(1) rotate(0); }
   #ph-menu button { border: 0; border-radius: 16px; padding: 14px; font: inherit; font-size: 15px; text-align: left; color: var(--ink); background: #ffffff0c; }
   #ph-menu button.warn { color: #ef7a66; }
   #ph-menu .ph-info { color: #8aa0a6; font-size: 12px; padding: 4px 8px 2px; }
@@ -116,7 +125,7 @@
     <div class="ph-sheet" id="ph-start">
       <div class="ph-orb"><i></i><i></i><i></i></div>
       <h1>pleamar</h1>
-      <p>Your desktop, with everything open, as a phone.</p>
+      <p id="ph-what">Your desktop, with everything open, as a phone.</p>
       <button class="ph-go" id="ph-go">Bring my session here</button>
       <p class="ph-small">Your monitors at home are covered while it is here.</p>
     </div>
@@ -128,6 +137,7 @@
     </div>
     <div id="ph-lock"><b>Locked at the desk</b><p>Unlock it from here: type your password, then Enter. The session comes as soon as it opens.</p><button id="ph-lock-kbd">Type password</button></div>
     <div id="ph-edge"></div>
+    <div id="ph-turn"></div>
     <div id="ph-net">reconnecting…</div>
     <button id="ph-kbd" aria-label="Keyboard">⌨</button>
     <div id="ph-veil"></div>
@@ -152,13 +162,20 @@
   const statusEl = document.getElementById('status');
   const bar = document.getElementById('bar');
   const toastEl = document.getElementById('toast');
-  // A phone (docs/phone.md): the session comes to it as a phone, not the
-  // desk shrunk into it. `?phone=0` or `?phone=1` to say so.
+  // A phone or a tablet (docs/phone.md): the session comes to it in its
+  // shape, not the desk shrunk into it. `?phone=0` or `?phone=1` to say so.
+  // (An iPad's Safari says it is a Mac: it is told by its fingers.)
   const want = new URLSearchParams(location.search).get('phone');
-  const PHONE = want === '1' || (want !== '0' && matchMedia('(pointer: coarse)').matches && Math.min(screen.width, screen.height) <= 900);
+  const APPLE_TOUCH = /Macintosh|iPad|iPhone/.test(navigator.userAgent) && navigator.maxTouchPoints > 1;
+  const TOUCH = matchMedia('(pointer: coarse)').matches || APPLE_TOUCH;
+  const SHORT = Math.min(screen.width, screen.height);
+  const PHONE = want === '1' || (want !== '0' && TOUCH && SHORT <= 1400);
+  // A tablet: room for the apps as they are at the desk, two side by side when it lies down.
+  const TABLET = PHONE && SHORT >= 600;
   if (PHONE) document.body.classList.add('phone');
+  if (TABLET) document.body.classList.add('tablet');
   // Asked for (the button pressed): the session is on its way here, or here.
-  let phoneWanted = false, phoneSize = null, phoneMon = -1;
+  let phoneWanted = false, phoneSize = null, phoneMon = -1, phoneHere = false;
   let rtt = 0, kbps = 0, rate = 0, net = 0;
   // The network alone, there and back (without decoding or painting).
   setInterval(() => send('ping ' + performance.now().toFixed(1)), 2000);
@@ -301,9 +318,10 @@
         statusEl.textContent = 'error';
         toast(arg);
       } else if (verb === 'phoneon') {
+        const again = phoneMon === Number(arg) && turning;
         phoneMon = current = Number(arg);
         $('ph-lock').classList.remove('on');
-        phoneArrived();
+        if (again) turnedDone(); else phoneArrived();
       } else if (verb === 'phonelocked') {
         // The desk, as it is (its lock screen), to unlock it from here.
         current = 0;
@@ -410,7 +428,8 @@
   });
   stage.addEventListener('pointerdown', (e) => {
     if (finger(e)) return;
-    e.preventDefault(); keys.focus({ preventScroll: true });
+    // (On a phone or a tablet, a trackpad's click does not bring up the on-screen keyboard.)
+    e.preventDefault(); if (!PHONE) keys.focus({ preventScroll: true });
     stage.setPointerCapture(e.pointerId);
     hand('m ' + at(e).join(' ')); hand('b ' + e.button + ' 1');
   });
@@ -427,8 +446,23 @@
   // clipboard along.
   let pasteThen = null;
   const down = new Set();
+  // On an iPad's keyboard, ⌘ is what Ctrl is at home: ⌘C copies, ⌘T a tab.
+  const codeOf = (e) => APPLE_TOUCH && PHONE && (e.code === 'MetaLeft' || e.code === 'MetaRight') ? (e.code === 'MetaLeft' ? 29 : 97) : CODES[e.code];
+  // A keyboard of its own on a phone or a tablet: its keys go home as they
+  // are, from the first one, without opening the one on the screen.
+  if (PHONE) window.addEventListener('keydown', (e) => {
+    if (e.target === keys || !phoneHere || !codeOf(e) || e.target.closest('button, input')) return;
+    keys.value = SENTINEL; typed = SENTINEL;
+    keys.focus({ preventScroll: true });
+    keys.dispatchEvent(new KeyboardEvent('keydown', e));
+    // (The first one, a character, pressed and let go at once: its own
+    // letting go may come late, while the browser moves the focus, and home
+    // would take it for one held and repeat it.)
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) keys.dispatchEvent(new KeyboardEvent('keyup', e));
+    e.preventDefault();
+  });
   keys.addEventListener('keydown', (e) => {
-    const code = CODES[e.code];
+    const code = codeOf(e);
     if (!code) return;
     if ((e.ctrlKey || e.metaKey) && !e.altKey && e.code === 'KeyV') return; // the paste event follows
     e.preventDefault();
@@ -436,13 +470,13 @@
     down.add(code); hand('k ' + code + ' 1');
   });
   keys.addEventListener('keyup', (e) => {
-    const code = CODES[e.code];
+    const code = codeOf(e);
     if (!code) return;
     e.preventDefault();
     if (!down.has(code)) return;
     down.delete(code); hand('k ' + code + ' 0');
     // Copying at home: bring it here too.
-    if (e.ctrlKey && (e.code === 'KeyC' || e.code === 'KeyX')) setTimeout(() => send('copy'), 250);
+    if ((e.ctrlKey || (APPLE_TOUCH && e.metaKey)) && (e.code === 'KeyC' || e.code === 'KeyX')) setTimeout(() => send('copy'), 250);
   });
   keys.addEventListener('paste', (e) => {
     e.preventDefault();
@@ -535,15 +569,9 @@
   async function bringHere() {
     // All of the screen, standing up, and kept on while it is here.
     try { if (!document.fullscreenElement && document.documentElement.requestFullscreen) await document.documentElement.requestFullscreen({ navigationUI: 'hide' }); } catch (_) {}
-    try { if (screen.orientation && screen.orientation.lock) await screen.orientation.lock('portrait'); } catch (_) {}
     try { if (navigator.wakeLock) awake = await navigator.wakeLock.request('screen'); } catch (_) {}
     await new Promise((r) => setTimeout(r, 280));
-    const dpr = window.devicePixelRatio || 1;
-    // Its own pixels, even (the video wants them so); a scale that gives it
-    // about 440 points across: a little more room than a phone's own apps.
-    const w = Math.round(innerWidth * dpr / 2) * 2, h = Math.round(innerHeight * dpr / 2) * 2;
-    const scale = Math.min(3.5, Math.max(1.25, Math.round(w / 440 * 20) / 20));
-    phoneSize = [w, h, scale.toFixed(2)];
+    phoneSize = measure();
     phoneWanted = true;
     startSheet.classList.add('ph-arriving');
     backSheet.classList.add('gone');
@@ -553,19 +581,59 @@
       if (!pc) startDirect();
     } else connect();
   }
+  // Its own pixels, even (the video wants them so), and a scale that stays
+  // the same however it is held. A phone: about 440 points across its short
+  // side, a little more room than its own apps. A tablet: a point a little
+  // larger than its own, so the apps have the room they have at the desk
+  // (an iPad: about 750 × 1070) and fingers still find what they press.
+  function measure() {
+    const dpr = window.devicePixelRatio || 1;
+    const w = Math.round(innerWidth * dpr / 2) * 2, h = Math.round(innerHeight * dpr / 2) * 2;
+    const scale = TABLET
+      ? Math.min(3.5, Math.max(1, Math.round(dpr * 1.1 * 20) / 20))
+      : Math.min(3.5, Math.max(1.25, Math.round(Math.min(w, h) / 440 * 20) / 20));
+    return [w, h, scale.toFixed(2)];
+  }
+  // Turned (or a window of the browser resized): the session takes the new
+  // shape where it is —its windows stay, and move to their new places—.
+  let turnTimer = null, turning = false;
+  function turned() {
+    if (!PHONE || !phoneWanted || !phoneHere) return;
+    const now = measure();
+    if (phoneSize && now.join(' ') === phoneSize.join(' ')) return;
+    turning = true;
+    stage.classList.add('turning'); $('ph-turn').classList.add('on');
+    clearTimeout(turnTimer);
+    turnTimer = setTimeout(() => {
+      phoneSize = measure();
+      zoom = { k: 1, x: 0, y: 0 }; applyZoom();
+      send('phone ' + phoneSize.join(' '));
+      // (Not answered: it shows what there is.)
+      setTimeout(() => { if (turning) turnedDone(); }, 4000);
+    }, 350);
+  }
+  function turnedDone() {
+    turning = false;
+    setTimeout(() => { stage.classList.remove('turning'); $('ph-turn').classList.remove('on'); }, 260);
+  }
+  window.addEventListener('resize', () => { if (!document.activeElement || document.activeElement !== keys) turned(); });
+  if (screen.orientation) screen.orientation.addEventListener('change', turned);
   function phoneArrived() {
+    phoneHere = true;
     // The orb dives into the water and the session rises out of it.
     setTimeout(() => { startSheet.classList.add('gone'); backSheet.classList.add('gone'); }, 450);
     setTimeout(() => startSheet.classList.remove('ph-arriving'), 1400);
     if (navigator.vibrate) navigator.vibrate([8, 40, 14]);
   }
   function phoneBack(why) {
+    phoneHere = false;
     $('ph-back-why').textContent = why;
     kbd.classList.remove('on');
     keys.blur();
     backSheet.classList.remove('gone');
     if (awake) { try { awake.release(); } catch (_) {} awake = null; }
   }
+  if (TABLET) $('ph-what').textContent = 'Your desktop, with everything open, as a tablet: two apps side by side when it lies down.';
   $('ph-go').onclick = bringHere;
   $('ph-lock-kbd').onclick = () => kbdOpen();
   $('ph-again').onclick = bringHere;
