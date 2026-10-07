@@ -187,22 +187,22 @@ fn activate_package_sta(app_id:&str,files:&[String]) -> Result<()> {
         let activation:IApplicationActivationManager=CoCreateInstance(&ApplicationActivationManager,None,CLSCTX_LOCAL_SERVER)?;
         if files.is_empty() {activation.ActivateApplication(PCWSTR(id.as_ptr()),w!(""),AO_NONE)?;}
         else {
-            // Windows owns this app lifetime. Preserve individual file identities.
-            for file in files {
-                let item=file_item(file)?;
-                let items:IShellItemArray=SHCreateShellItemArrayFromShellItem(&item)
-                    .map_err(|e|format!("Windows shell file array: {e}"))?;
-                match activation.ActivateForFile(PCWSTR(id.as_ptr()),&items,w!("open")) {
-                    Ok(_)=>{},
-                    // Packaged desktop apps can register associations without
-                    // implementing UWP's Windows.File contract.
-                    Err(error) if error.code().0 as u32==0x80270254=>{
-                        let handler=file_handler(app_id,file)?;
+            let shell_files=files.iter().map(|file|file_item(file)).collect::<Result<Vec<_>>>()?;
+            let items=file_array(&shell_files)?;
+            // One drop is one Windows.File activation. Retrying that contract
+            // between classic-handler launches can disrupt the preceding app.
+            match activation.ActivateForFile(PCWSTR(id.as_ptr()),&items,w!("open")) {
+                Ok(_)=>{},
+                // Packaged desktop apps can register associations without
+                // implementing UWP's Windows.File contract.
+                Err(error) if error.code().0 as u32==0x80270254=>{
+                    let handlers=files.iter().map(|file|file_handler(app_id,file)).collect::<Result<Vec<_>>>()?;
+                    for (item,handler) in shell_files.iter().zip(handlers) {
                         let data:IDataObject=item.BindToHandler(None,&BHID_DataObject)?;
                         handler.Invoke(&data).map_err(|e|format!("Windows registered file handler: {e}"))?;
-                    },
-                    Err(error)=>return Err(format!("Windows packaged file activation: {error}").into()),
-                }
+                    }
+                },
+                Err(error)=>return Err(format!("Windows packaged file activation: {error}").into()),
             }
         }
     }
@@ -248,6 +248,18 @@ fn file_item(path:&str) -> Result<IShellItem> {
         .map_err(|e|format!("Windows shell file item: {e}").into())
 }
 
+fn file_array(items:&[IShellItem]) -> Result<IShellItemArray> {
+    struct IdList(*mut Common::ITEMIDLIST);
+    impl Drop for IdList {
+        fn drop(&mut self) { unsafe {CoTaskMemFree(Some(self.0.cast()));} }
+    }
+    let ids=items.iter().map(|item|unsafe {SHGetIDListFromObject(item).map(IdList)})
+        .collect::<windows::core::Result<Vec<_>>>()?;
+    let pointers=ids.iter().map(|id|id.0 as *const _).collect::<Vec<_>>();
+    unsafe {SHCreateShellItemArrayFromIDLists(&pointers)}
+        .map_err(|e|format!("Windows shell file array: {e}").into())
+}
+
 fn read(path:&Path) -> Result<Vec<Program>> {
     let mut bytes=Vec::new();
     match std::fs::File::open(path) {
@@ -286,6 +298,29 @@ mod package_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn shell_file_array_keeps_every_file_identity_and_order() -> Result<()> {
+        let _apartment=Apartment::new()?;
+        let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
+        let directory=std::env::temp_dir().join(format!("pleamar file selection {}-{nonce}",std::process::id()));
+        std::fs::create_dir(&directory)?;
+        let files=[directory.join("owned ñ 海 ' $HOME.txt"),directory.join("second $(exit 9).txt")];
+        let result=(|| -> Result<()> {
+            for file in &files {std::fs::write(file,"owned shell selection")?;}
+            let items=files.iter().map(|file|file_item(&file.to_string_lossy())).collect::<Result<Vec<_>>>()?;
+            let selection=file_array(&items)?;
+            drop(items);
+            assert_eq!(unsafe {selection.GetCount()}?,2);
+            for (index,file) in files.iter().enumerate() {
+                let displayed=unsafe {selection.GetItemAt(index as u32)?.GetDisplayName(SIGDN_FILESYSPATH).and_then(take_string)}?;
+                assert_eq!(std::fs::canonicalize(displayed)?,std::fs::canonicalize(file)?);
+            }
+            Ok(())
+        })();
+        for file in files {if file.exists() {std::fs::remove_file(file)?;}}
+        std::fs::remove_dir(directory)?;
+        result
+    }
     #[test]
     fn canonical_file_paths_resolve_to_real_shell_items_without_aliasing() -> Result<()> {
         assert_eq!(shell_path(r"\\?\C:\folder\a.txt")?,r"C:\folder\a.txt");

@@ -649,7 +649,7 @@ launch is unavailable. Physical cross-monitor acceptance is still pending.
 | Live scene layouts; private/workspace rules | Pending |
 | Live window previews | Experimental native capture/render transport; one source or represented scene monitors, optional native focus/close/minimize/restore and bounded scene size requests; new multi-output mapping awaits native acceptance |
 | Marea menu/finder bridge | Module tested with real Luau, IPC and owned Windows windows; complete Marea UI acceptance pending; package lifecycle tested separately |
-| Native dock | Experimental: classic-app icons, pin/unpin, restart persistence and actual relaunch verified on secondary DISPLAY1 with named scene actions; packaged apps and OS file-drop acceptance pending |
+| Native dock | Experimental: classic-app icons, pin/unpin, restart persistence and relaunch verified on secondary DISPLAY1; actual OS file drop verified in Windows CI; packaged multi-file activation and Marea integration pending |
 | Rain, snow, ride, animated window transitions | Pending native equivalents |
 | Per-monitor tide pools and overview | Pending; Windows virtual desktops are not the same model |
 | Independent agent pointer/keyboard, glow and stop UI | Pending; Marea currently uses guarded shared Windows input |
@@ -657,47 +657,47 @@ launch is unavailable. Physical cross-monitor acceptance is still pending.
 | Remote desktop/WebRTC and sharing integration | Pending native capture/input/encoder adapters |
 | DRM, libinput, PipeWire, Wayland protocols and login session | Linux components; Windows owns the corresponding system facilities |
 
-The native dock work is exercised by `examples/windows-dock.plm`, with an explicit
+The native dock is exercised by `examples/windows-dock.plm`, with an explicit
 `--screen NAME --preview-monitor NAME --window-actions` scope. Program metadata
-is read on a bounded background worker so shell extensions cannot block the
-preview frame pump. Pins are stored in `wm/windows-dock.json` under pleamar's
-Windows configuration directory, with a locked read/modify/replace operation.
-The file is separate from Linux's `session.conf` dock entries.
+runs on a bounded background worker. Pins use a locked atomic read/modify/replace
+of `wm/windows-dock.json` in pleamar's Windows configuration directory, separate
+from Linux's `session.conf`. View-only and process-scoped previews refuse changes.
 
-Classic programs start directly through `CreateProcessW`, with separate executable
-and file arguments. They need no PowerShell helper and creation failures reach
-the caller immediately. Command-line encoding follows the
-[MSVC argument rules](https://learn.microsoft.com/en-us/cpp/c-language/parsing-c-command-line-arguments);
-packaged programs use Windows application/file activation. Program and file
-identities stay separate from authored scene launch commands. Applications
-activated by Windows retain their OS-managed lifetime. View-only and
-single-process preview scopes cannot pin or launch dock programs. The `dock`
-capability remains false until the actual dock rendering, interaction, persistence
-and packaged-app checks have passed; compiling this code is not acceptance.
+Classic programs use `CreateProcessW` with typed executable/file arguments and
+creation-time Job Object ownership. Package launches retain their OS-managed
+lifetime. Packaged file activation uses one shell item array per drop. If the app
+lacks UWP's `Windows.File` contract, its exact registered Open With handler runs
+on a separate STA thread. The file's default app is never substituted. Shell
+paths preserve file identity while converting canonical DOS/UNC prefixes; paths
+that would alias another file are refused. The native [file activation API](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iapplicationactivationmanager-activateforfile)
+accepts the entire selection in one call. The current change stops retrying an
+unsupported contract between classic-handler launches.
 
-The local 2026-10-07 release run passed 48 tests (15 opt-in tests not run there),
-including concurrent pin persistence and an actual executable receiving file
-arguments with Unicode, apostrophes and shell metacharacters. A separate owned
-HWND metadata test passed on non-primary DISPLAY1 without foreground activation.
-The native scene then displayed actual icons on NVIDIA GeForce RTX 5070/D3D12:
-named actions pinned the owned app, kept it after its window closed, preserved it
-through scene restart, launched a new native instance and removed the pin again.
-Six PNG hashes were checked and four images inspected. No OS input was injected;
-no owned window held foreground at the checks, and none remained after cleanup.
-This is not a physical pointer/drag test, packaged-app acceptance or an installed
-Marea walkthrough. The initial local harness expected one HWND but a panel has
-separate composition/input HWNDs; that failed harness was corrected to select
-the composition canvas, without changing the product for the test.
+The 2026-10-07 local scene acceptance rendered icons on NVIDIA GeForce RTX
+5070/D3D12 on secondary DISPLAY1. Named actions passed pin, close, scene restart,
+actual relaunch and unpin. Captures were inspected; no OS input was injected,
+no owned window held foreground at checks, and cleanup left none behind.
 
-The direct-launch revision passes 49 ordinary tests (15 opt-in helpers excluded),
-including missing-executable errors, Unicode/quoted argument round trips and
-owned-process cleanup. The actual executable argument test still passes. The
-scene acceptance was repeated after removing the PowerShell launch helper:
-pin/restart/relaunch/unpin passed, no owned window took foreground at the checks,
-and none remained. Six PNGs were recorded; the relaunch and unpin images were
-inspected. Store activation and OS file dragging remain unverified.
+[Windows/Linux CI at `fc03d3b`](https://github.com/SamuelHinestrosa/pleamar-wm/actions/runs/37671672948)
+passed with default Luau. Its actual OLE test used `DoDragDrop`, accepted a COPY,
+and verified both Unicode/metacharacter file paths in the destination app's
+arguments. The drag took 549 ms, including the fixture's deliberate movement
+and release delays; this is not a UI performance benchmark. Pin/restart/unpin
+also passed, and no owned windows remained. Only this explicit disposable CI
+step may inject OS input; local invocations refuse it. The initial OLE fixture
+needed to process its own queued mouse-down before starting the drag.
 
-The reusable regression requires Python and a non-primary monitor:
+[Packaged-app CI at `fc03d3b`](https://github.com/SamuelHinestrosa/pleamar-wm/actions/runs/37671673007)
+registered the owned MSIX app, resolved its identity and reopened its persisted
+pin. Both files reached native app instances, but one window was no longer
+catalogued before timeout: multi-file acceptance failed. The current single-array
+activation correction awaits that rerun. Earlier failures exposed canonical
+shell paths, the missing UWP contract and STA requirements. The package and its
+test certificate were removed. No machine policy, local package registration,
+Store account or download is involved. This fixture does not establish support
+for every Store/UWP app, and the broad `dock` capability remains false.
+
+To run the local scene regression on an explicitly named non-primary output:
 
 ```powershell
 cargo build --release --locked --bin pleamar-wm --example windows-dock-fixture
@@ -706,53 +706,9 @@ python tests/windows-dock.py --binary target/release/pleamar-wm.exe `
   --monitor '\\.\DISPLAY1' --output C:/Temp/pleamar-dock-acceptance
 ```
 
-Choose the exact non-primary name from `pleamar-wm monitors` and a fresh output
-directory. The fixture refuses the primary monitor, isolates configuration,
-uses named scene actions without OS input and cleans up its own windows.
-
-`Native packaged dock acceptance` is a separate workflow, run on fixture changes
-or manual dispatch. It creates a
-signed, owned MSIX fixture on a disposable Windows runner and exercises the
-actual application identity, persisted pin, reactivation and file-activation
-path. Its test signer and package are removed afterward; machine deployment
-policy is not changed.
-The scripts refuse local execution; no Store account or download is involved.
-The first CI attempt failed on an unnecessary machine-policy write, which has
-been removed. The next run successfully registered the package, resolved its
-real application identity, persisted its pin and reopened it. File activation
-then failed: `SHCreateItemFromParsingName` rejects the verbatim path prefix
-returned by Rust's canonicalization. The conversion now supplies an equivalent
-DOS/UNC path and refuses namespaces or suffixes that would change file identity.
-The release run passes 51 ordinary tests, including a real shell item for a
-canonical Unicode filename and refusal to substitute another application's
-file association; 16 opt-in tests are excluded. The shell-item regression
-compares canonical identities, allowing Windows to expand an 8.3 directory name.
-The secondary-monitor
-dock regression also passed with no injected input, no owned foreground window
-at its checks and no remaining owned windows. Two captured images were inspected.
-The next CI run passed shell-item creation but exposed `0x80270254`: packaged
-desktop apps can lack UWP's file-activation contract. That specific refusal now
-uses the registered Open With handler whose AppUserModelID matches the selected
-dock application, rather than substituting the file's default application.
-This follows the documented [association-handler API](https://learn.microsoft.com/en-us/windows/win32/api/shobjidl_core/nf-shobjidl_core-iassochandler-invoke).
-The handler lookup succeeded on CI, but invoking it from the capture thread's
-MTA failed because its `IContextMenu` interface has no proxy. Packaged activation
-now constructs, invokes and releases its shell objects on a separate STA thread.
-The complete packaged file-activation rerun is still pending. This owned desktop
-MSIX fixture does not establish support for every Store/UWP app. The ordinary
-secondary-monitor fixture refuses a primary output without an explicit CI mode.
-
-The native workflow also has an OLE file-drop fixture. It uses an owned source,
-the real `DoDragDrop` loop and two actual files, then checks the reopened dock
-application's argument report. Only its explicit GitHub-hosted step may move the
-OS pointer; local runs refuse this mode before creating windows. This new
-end-to-end check has not yet passed. The existing in-memory OLE tests cover
-localhost file URIs, commented URI lists, UNC/extended paths and Unicode.
-The first OS run returned a completed drag with no accepted copy. The source
-fixture now processes its own button-down message before entering `DoDragDrop`:
-asynchronous key state alone can precede the thread's queued key state. The
-rerun records the drag duration and still requires an accepted copy and both
-file arguments in the destination application's report.
+Choose the monitor name from `pleamar-wm monitors` and a fresh output directory.
+The harness isolates configuration and cleans up its own windows. This does not
+replace an installed Marea walkthrough or physical multi-monitor acceptance.
 
 Unavailable WM commands exit with an error. `capabilities` states their status
 explicitly; no rain, independent input seat or compositor session is simulated.

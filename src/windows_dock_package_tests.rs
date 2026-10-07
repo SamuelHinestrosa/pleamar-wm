@@ -19,7 +19,8 @@ fn await_value<T>(what:&str,mut read:impl FnMut()->Result<Option<T>>) -> Result<
     }
 }
 fn arrival(root:&Path,seen:&mut HashSet<u32>,owned:&mut Owned) -> Result<Value> {
-    await_value("packaged fixture window",|| {
+    let mut rejected=BTreeMap::new();
+    let result=await_value("packaged fixture window",|| {
         for entry in std::fs::read_dir(root)? {
             let path=entry?.path();
             if !path.file_name().unwrap_or_default().to_string_lossy().starts_with("launch-") {continue;}
@@ -27,12 +28,23 @@ fn arrival(root:&Path,seen:&mut HashSet<u32>,owned:&mut Owned) -> Result<Value> 
             let pid=value["pid"].as_u64().ok_or("fixture PID missing")? as u32;
             if seen.contains(&pid) {continue;}
             let hwnd=HWND(value["hwnd"].as_u64().ok_or("fixture HWND missing")? as usize as _);
-            let Some(window)=inspect(hwnd) else {continue;};
+            let Some(window)=inspect(hwnd) else {
+                let mut actual_pid=0;let mut cloaked=0u32;
+                unsafe {
+                    GetWindowThreadProcessId(hwnd,Some(&mut actual_pid));
+                    let cloak=DwmGetWindowAttribute(hwnd,DWMWA_CLOAKED,&mut cloaked as *mut _ as _,size_of::<u32>() as u32);
+                    rejected.insert(pid,json!({"hwnd":hwnd.0 as usize,"actual_pid":actual_pid,
+                        "exists":IsWindow(Some(hwnd)).as_bool(),"visible":IsWindowVisible(hwnd).as_bool(),
+                        "cloaked":cloak.is_ok().then_some(cloaked)}));
+                }
+                continue;
+            };
             if window.process!=pid {return Err("fixture HWND was reused".into());}
             seen.insert(pid);owned.0.push((hwnd,pid));return Ok(Some(value));
         }
         Ok(None)
-    })
+    });
+    result.map_err(|error|format!("{error}; rejected fixture windows: {}",json!(rejected)).into())
 }
 fn close(value:&Value) -> Result<()> {
     let hwnd=HWND(value["hwnd"].as_u64().ok_or("fixture HWND missing")? as usize as _);
