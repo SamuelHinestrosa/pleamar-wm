@@ -10,7 +10,7 @@ on:
         required: true
       pleamar_ref:
         description: Exact pleamar revision (Windows backend required)
-        default: 8387d5441a778cba568b7267fab4792883399b3a
+        default: f8933e91a77b5ddcce3545637a0fb5ba0519cb46
         required: true
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.pleamar_repository || 'SamuelHinestrosa/pleamar' }}
-          ref: ${{ inputs.pleamar_ref || '8387d5441a778cba568b7267fab4792883399b3a' }}
+          ref: ${{ inputs.pleamar_ref || 'f8933e91a77b5ddcce3545637a0fb5ba0519cb46' }}
           path: pleamar
       - name: Linux system libraries
         if: runner.os == 'Linux'

@@ -125,10 +125,10 @@ def exercise(binary, tests, folder):
         assert result.returncode == 0, result.stderr
         return json.loads(result.stdout)
 
-    def fixture(directory, name, dialog=False):
+    def fixture(directory, name, dialog=False, tool=False):
         directory.mkdir()
         child_env = dict(env, PLEAMAR_OWNED_INPUT_FIXTURE=str(directory), PLEAMAR_INPUT_TEST_PARENT=str(os.getpid()),
-                         PLEAMAR_INPUT_TEST_DIALOG='1' if dialog else '0')
+                         PLEAMAR_INPUT_TEST_DIALOG='tool' if tool else '1' if dialog else '0')
         child = spawn([tests, '--ignored', '--exact', 'platform::windows_desktop::ci_input_tests::owned_input_fixture', '--nocapture'], name, child_env)
         fixtures.append((child, directory))
         wait(lambda: read(directory / 'state.json').get('ready'), 'owned Win32 controls')
@@ -175,6 +175,9 @@ def exercise(binary, tests, folder):
             while True:
                 result = subprocess.run([str(binary), 'agent', 'look', identity, str(path)], env=env, capture_output=True,
                                         text=True, encoding='utf-8', timeout=18, creationflags=subprocess.CREATE_NO_WINDOW)
+                report['commands'].append(dict(args=['look', identity, str(path)], exit=result.returncode,
+                                               stdout=result.stdout, stderr=result.stderr))
+                save()
                 if result.returncode == 0:
                     data = json.loads(result.stdout)
                     break
@@ -312,13 +315,48 @@ def exercise(binary, tests, folder):
         report['modal'] = dict(pid=target.pid, owner=owner_id, dialog=identity, clicks=state()['clicks'], implicit_redirection=False)
         run('stop')
         assert modal_service.wait(timeout=5) == 0
+        control(target_folder, 'allow-parent')
+        control(target_folder, 'quit')
+        assert target.wait(timeout=5) == 0
+        # Keep the tool-window case that exposed the WGC limitation. It must
+        # never silently capture its owner or leave an unseen input permit.
+        target_folder = folder.with_name(folder.name + '-tool')
+        target, hwnd = fixture(target_folder, 'tool', tool=True)
+        state = lambda: read(target_folder / 'state.json')
+        window = next(entry['window'] for entry in run('windows')
+                      if entry['window']['process'] == target.pid and entry['window']['title'].startswith('Pleamar input fixture '))
+        identity, monitor = window['id'], window['monitor']
+        tool_service = broker(monitor, target.pid, 'tool-broker')
+        tool_path = folder / 'tool-window.png'
+        result = subprocess.run([str(binary), 'agent', 'look', identity, str(tool_path)], env=env,
+                                capture_output=True, text=True, encoding='utf-8', timeout=18,
+                                creationflags=subprocess.CREATE_NO_WINDOW)
+        report['commands'].append(dict(args=['look', identity, str(tool_path)], exit=result.returncode,
+                                       stdout=result.stdout, stderr=result.stderr))
+        if result.returncode != 0:
+            assert 'CreateForWindow' in result.stderr and '0x80070057' in result.stderr, result.stderr
+            assert not tool_path.exists()
+            run('type', identity, 'no unseen tool-window input', fail='desktop.look must precede input')
+            assert state()['text'] == ''
+            report['tool_window'] = dict(capture=False, input=False, limitation=result.stderr.strip())
+        else:
+            data = json.loads(result.stdout)
+            png = tool_path.read_bytes()
+            assert data['window'] == identity and png[:8] == b'\x89PNG\r\n\x1a\n'
+            width, height = struct.unpack('>II', png[16:24])
+            assert (width, height) == (data['width'], data['height'])
+            report['images'].append(dict(file=tool_path.name, width=width, height=height, sha256=hashlib.sha256(png).hexdigest()))
+            report['tool_window'] = dict(capture=True, input_tested=False)
+        run('stop')
+        assert tool_service.wait(timeout=5) == 0
         control(target_folder, 'quit')
         assert target.wait(timeout=5) == 0
         report.update(passed=True, seconds=time.monotonic() - started,
                       checks=['real CLI hover/click/Unicode/selection/keys/wheels/drag/right/middle',
                               'single-use and done revoke input permits', 'stale geometry refusal',
                               'new-file capture and process scope refusal', 'stop, expiry and process exit close broker',
-                              'explicit modal identity, disabled owner refusal and actual dialog button'],
+                              'explicit modal identity, disabled owner refusal and actual dialog button',
+                              'tool-window capture reports actual support without owner fallback or unseen permits'],
                       clean_exit=True)
     finally:
         for process, directory in fixtures:

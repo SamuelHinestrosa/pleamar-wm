@@ -162,6 +162,15 @@ Validation of this new CLI path is still in progress. Engine input acceptance
 does not by itself prove this broker/CLI integration; native end-to-end evidence
 must be recorded before treating it as verified.
 
+The current Windows Server 2022 native test cannot capture an owned floating
+tool window (`WS_EX_TOOLWINDOW`): Windows returns `0x80070057`. Such a refusal
+provides no picture and permits no input. The fixture keeps this case separate
+from an ordinary modal dialog with a disabled owner. Neither capture of the owner
+nor changing another application's window styles is used as a substitute.
+Tool-window capture/input remains a limitation of this implementation, even if
+ordinary modal acceptance passes. The [`CreateForWindow` API](https://learn.microsoft.com/en-us/windows/win32/api/windows.graphics.capture.interop/nf-windows-graphics-capture-interop-igraphicscaptureiteminterop-createforwindow)
+targets the selected HWND; its failure is now identified in the diagnostic.
+
 ## Launching from a scene
 
 The authored `launch "..."` action now starts a native PowerShell command when
