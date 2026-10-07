@@ -124,6 +124,120 @@ scene Session {
     let ph.hb = 28
     // The app in front: the last one on the phone to take the keyboard.
     fact ph.front = -1
+    // Each window going to the phone: the monitor and the place it left, and
+    // how far it has poured into the phone on the curtain (1: all of it).
+    fact sc.last.0 = 0
+    fact gx.0 = 0
+    fact gy.0 = 0
+    fact gw.0 = 0
+    fact gh.0 = 0
+    fact was.ph.0 = 0
+    prop pour.0 = 1 ~0ms
+    fact sc.last.1 = 0
+    fact gx.1 = 0
+    fact gy.1 = 0
+    fact gw.1 = 0
+    fact gh.1 = 0
+    fact was.ph.1 = 0
+    prop pour.1 = 1 ~0ms
+    fact sc.last.2 = 0
+    fact gx.2 = 0
+    fact gy.2 = 0
+    fact gw.2 = 0
+    fact gh.2 = 0
+    fact was.ph.2 = 0
+    prop pour.2 = 1 ~0ms
+    fact sc.last.3 = 0
+    fact gx.3 = 0
+    fact gy.3 = 0
+    fact gw.3 = 0
+    fact gh.3 = 0
+    fact was.ph.3 = 0
+    prop pour.3 = 1 ~0ms
+    fact sc.last.4 = 0
+    fact gx.4 = 0
+    fact gy.4 = 0
+    fact gw.4 = 0
+    fact gh.4 = 0
+    fact was.ph.4 = 0
+    prop pour.4 = 1 ~0ms
+    fact sc.last.5 = 0
+    fact gx.5 = 0
+    fact gy.5 = 0
+    fact gw.5 = 0
+    fact gh.5 = 0
+    fact was.ph.5 = 0
+    prop pour.5 = 1 ~0ms
+    fact sc.last.6 = 0
+    fact gx.6 = 0
+    fact gy.6 = 0
+    fact gw.6 = 0
+    fact gh.6 = 0
+    fact was.ph.6 = 0
+    prop pour.6 = 1 ~0ms
+    fact sc.last.7 = 0
+    fact gx.7 = 0
+    fact gy.7 = 0
+    fact gw.7 = 0
+    fact gh.7 = 0
+    fact was.ph.7 = 0
+    prop pour.7 = 1 ~0ms
+    fact sc.last.8 = 0
+    fact gx.8 = 0
+    fact gy.8 = 0
+    fact gw.8 = 0
+    fact gh.8 = 0
+    fact was.ph.8 = 0
+    prop pour.8 = 1 ~0ms
+    fact sc.last.9 = 0
+    fact gx.9 = 0
+    fact gy.9 = 0
+    fact gw.9 = 0
+    fact gh.9 = 0
+    fact was.ph.9 = 0
+    prop pour.9 = 1 ~0ms
+    fact sc.last.10 = 0
+    fact gx.10 = 0
+    fact gy.10 = 0
+    fact gw.10 = 0
+    fact gh.10 = 0
+    fact was.ph.10 = 0
+    prop pour.10 = 1 ~0ms
+    fact sc.last.11 = 0
+    fact gx.11 = 0
+    fact gy.11 = 0
+    fact gw.11 = 0
+    fact gh.11 = 0
+    fact was.ph.11 = 0
+    prop pour.11 = 1 ~0ms
+    fact sc.last.12 = 0
+    fact gx.12 = 0
+    fact gy.12 = 0
+    fact gw.12 = 0
+    fact gh.12 = 0
+    fact was.ph.12 = 0
+    prop pour.12 = 1 ~0ms
+    fact sc.last.13 = 0
+    fact gx.13 = 0
+    fact gy.13 = 0
+    fact gw.13 = 0
+    fact gh.13 = 0
+    fact was.ph.13 = 0
+    prop pour.13 = 1 ~0ms
+    fact sc.last.14 = 0
+    fact gx.14 = 0
+    fact gy.14 = 0
+    fact gw.14 = 0
+    fact gh.14 = 0
+    fact was.ph.14 = 0
+    prop pour.14 = 1 ~0ms
+    fact sc.last.15 = 0
+    fact gx.15 = 0
+    fact gy.15 = 0
+    fact gw.15 = 0
+    fact gh.15 = 0
+    fact was.ph.15 = 0
+    prop pour.15 = 1 ~0ms
     // The cards, and which one is in the middle.
     fact ph.cards = 0
     fact ph.at = 0
@@ -6675,6 +6789,29 @@ scene Session {
         }
         // The one in front closed: the cards, or the one beside it.
         on change win.$i.open while not win.$i.open and ph.front == i { ph.front = -1 }
+        // ── to the phone and back: on the desk it pours into the phone drawn
+        // on the curtain (`phone_curtain`), and comes back out of it ──
+        // Its monitor at the desk, and where it was on it, when it went (see `pour.`).
+        on change win.$i.screen while phone < 0 or win.$i.screen != phone { sc.last.$i = win.$i.screen }
+        // (On the phone's coming, not on the window's moving: which of the
+        // two the compositor says first is not known.)
+        on change phone while phone >= 0 and win.$i.open and not win.$i.dialog and was.ph.$i < 0.5 {
+            gx.$i = x.$i
+            gy.$i = y.$i
+            gw.$i = w.$i
+            gh.$i = h.$i
+            was.ph.$i = 1
+            pour.$i: 0 ~0ms
+            pour.$i: 1 ~spring(70, 13) after 120ms
+        }
+        // Back at the desk: out of the phone, where it was drawn, to its place.
+        on change phone while phone < 0 and was.ph.$i > 0.5 {
+            was.ph.$i = 0
+            x.$i: pick(sc.last.$i, screen.0.width, screen.1.width, screen.2.width, screen.3.width) / 2 - 28 ~0ms
+            y.$i: pick(sc.last.$i, screen.0.height, screen.1.height, screen.2.height, screen.3.height) / 2 - 92 ~0ms
+            w.$i: 56 ~0ms
+            h.$i: 104 ~0ms
+        }
 
         // Born from the water: its drawing (its shape is worked out above, with `nb.`).
         group {
@@ -8006,6 +8143,28 @@ scene Session {
         let cx = cw.w / 2
         let cy = cw.h / 2 - 40 + curtain.float
         box { from: 0, 0; size: cw.w, cw.h; color: #05090b; opacity: 94% * curtain.shown }
+        // The windows that were here pour into the phone (over the dark,
+        // not faded in with the rest).
+        repeat i in 0..16 {
+            let t = smooth(0, 1, pour.$i)
+            let pw = mix(gw.$i, 18, t)
+            let ph2 = mix(gh.$i, 30, t)
+            let px = mix(gx.$i + gw.$i / 2, cx, t)
+            let py = mix(gy.$i + gh.$i / 2, cy + 40 * t * (1 - t), t)
+            group {
+                show: pour.$i < 0.995 and sc.last.$i == screen.index and win.$i.open and not win.$i.dialog
+                opacity: 1 - smooth(0.65, 1, pour.$i)
+                body {
+                    color: #0c0e10
+                    shadow: 0, 18, 40, 50%
+                    box { at: px, py; size: pw, ph2; corner: 12 + 10 * t }
+                }
+                group {
+                    clip box { at: px, py; size: pw, ph2; corner: 12 + 10 * t }
+                    window win.$i { at: px - pw / 2, py - ph2 / 2; size: pw, ph2; ask: -1, -1 }
+                }
+            }
+        }
         group {
             opacity: curtain.shown
             group {
