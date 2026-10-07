@@ -53,7 +53,10 @@ mod fixture {
         };
         if !root.is_absolute() || !root.is_dir() {return Err("fixture output must be an existing absolute directory".into());}
         unsafe {SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)}?;
-        let mut find=Find {name,work:None,package:ci_package};
+        let ci_drag=std::env::var("GITHUB_ACTIONS").as_deref()==Ok("true")
+            && std::env::var("RUNNER_ENVIRONMENT").as_deref()==Ok("github-hosted")
+            && std::env::var("PLEAMAR_WM_CI_DOCK_DROP").as_deref()==Ok("1");
+        let mut find=Find {name,work:None,package:ci_package || ci_drag};
         if !unsafe {EnumDisplayMonitors(None,None,Some(monitor),LPARAM(&mut find as *mut _ as isize))}.as_bool() {return Err("monitor enumeration failed".into());}
         let area=find.work.ok_or("the explicit non-primary fixture monitor is unavailable")?;
         if area.right-area.left<400 || area.bottom-area.top<260 {return Err("secondary work area is too small".into());}

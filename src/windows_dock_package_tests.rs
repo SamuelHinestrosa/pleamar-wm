@@ -79,7 +79,8 @@ fn native_packaged_dock_activation() -> Result<()> {
         reloaded.open(&pin.key(),&[file.to_string_lossy().into_owned()],&mut launches)?;
         let third=arrival(&root,&mut seen,&mut owned)?;
         let args=third["args"].as_array().ok_or("package argument report missing")?;
-        assert!(args.iter().any(|arg|arg.as_str().is_some_and(|s|s==file.to_string_lossy())),"file activation did not preserve its path: {args:?}");
+        assert!(args.iter().any(|arg|arg.as_str().is_some_and(|s|std::fs::canonicalize(s).ok().as_ref()==Some(&file))),
+            "file activation did not identify the requested Unicode file: {args:?}");
         events.push(json!({"stage":"native-file-activation","window":third}));close(&third)?;
         Ok(())
     })();

@@ -1,8 +1,7 @@
 from pathlib import Path
 import ctypes as C
 from ctypes import wintypes as W
-import hashlib, json, os, subprocess, time
-from PIL import Image
+import hashlib, json, os, struct, subprocess, time, zlib
 
 import argparse
 
@@ -11,7 +10,11 @@ parser.add_argument('--binary', type=Path, required=True)
 parser.add_argument('--fixture', type=Path, required=True)
 parser.add_argument('--monitor', required=True)
 parser.add_argument('--output', type=Path, required=True)
+parser.add_argument('--ci-ole-source', type=Path, help='Owned engine test binary; requires the explicit disposable CI step')
 options = parser.parse_args()
+ci_drop=options.ci_ole_source is not None
+if ci_drop and (os.environ.get('GITHUB_ACTIONS')!='true' or os.environ.get('RUNNER_ENVIRONMENT')!='github-hosted' or os.environ.get('PLEAMAR_WM_CI_DOCK_DROP')!='1'):
+    raise RuntimeError('OS file dragging is restricted to the disposable GitHub-hosted test')
 repo = Path(__file__).resolve().parents[1]
 binary = options.binary.resolve(strict=True)
 fixture = options.fixture.resolve(strict=True)
@@ -20,7 +23,7 @@ assert not output.exists(), 'Use a fresh output directory; preserve previous evi
 assert binary.is_file() and fixture.is_file()
 flags = subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS
 screens = json.loads(subprocess.check_output([str(binary), 'monitors'], creationflags=flags, encoding='utf-8'))
-matching = [s for s in screens if s['name'] == options.monitor and not s['primary']]
+matching = [s for s in screens if s['name'] == options.monitor and (ci_drop or not s['primary'])]
 assert len(matching) == 1, 'The explicit non-primary monitor is unavailable'
 screen = matching[0]
 output.mkdir()
@@ -61,7 +64,7 @@ images=[]
 commands=[]
 scene=None
 initial=None
-report=dict(passed=False,monitor=screen,physical_input=False,installed_product_changed=False,stages=[],images=images,
+report=dict(passed=False,monitor=screen,physical_input=ci_drop,manual_input=False,installed_product_changed=False,stages=[],images=images,
             binaries={str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in [binary,fixture]})
 
 def windows(pid):
@@ -156,8 +159,13 @@ def capture(name):
         info=Info();info.header=Header(C.sizeof(Header),width,-height,1,32,0,width*height*4,0,0,0,0)
         data=C.create_string_buffer(width*height*4)
         assert gdi.GetDIBits(memory,bitmap,0,height,data,C.byref(info),0)==height
-        image=Image.frombytes('RGB',(width,height),data.raw,'raw','BGRX')
-        path=output/(name+'.png');image.save(path)
+        raw=data.raw;rgb=bytearray(width*height*3)
+        rgb[0::3]=raw[2::4];rgb[1::3]=raw[1::4];rgb[2::3]=raw[0::4]
+        def chunk(kind,payload):
+            return struct.pack('>I',len(payload))+kind+payload+struct.pack('>I',zlib.crc32(kind+payload)&0xffffffff)
+        rows=b''.join(b'\0'+rgb[y*width*3:(y+1)*width*3] for y in range(height))
+        png=b'\x89PNG\r\n\x1a\n'+chunk(b'IHDR',struct.pack('>IIBBBBB',width,height,8,2,0,0,0))+chunk(b'IDAT',zlib.compress(rows))+chunk(b'IEND',b'')
+        path=output/(name+'.png');path.write_bytes(png)
         images.append(dict(file=path.name,sha256=hashlib.sha256(path.read_bytes()).hexdigest(),width=width,height=height))
     finally:
         if previous:gdi.SelectObject(memory,previous)
@@ -181,9 +189,28 @@ try:
     second=wait(lambda:next((x for x in launches() if x['pid']!=initial.pid),None),'real relaunch')
     wait(lambda:ask('get win.dock.0.0.windows')=='1','relaunched native window');time.sleep(.4);capture('05-relaunched')
     assert second['args']==[];report['stages'].append('pin-restarts-actual-native-program')
+    active=second
+    if ci_drop:
+        close_fixture(second)
+        wait(lambda:ask('get win.dock.0.0.windows')=='0','closed app ready for file drop')
+        files=[output/"owned ñ 海 ' #1.txt",output/'$HOME; $(exit 9).txt']
+        for path in files:path.write_text('Owned OLE test file',encoding='utf-8')
+        box=W.RECT();assert user.GetWindowRect(canvases(scene.pid)[0],C.byref(box))
+        request=dict(pid=scene.pid,x=box.left+round(70*screen['scale']),y=box.top+round(135*screen['scale']),files=[str(p) for p in files])
+        drop_env=dict(env,PLEAMAR_DOCK_OLE_REQUEST=json.dumps(request))
+        helper=options.ci_ole_source.resolve(strict=True)
+        with (output/'ole-source.log').open('w',encoding='utf-8') as log:
+            result=subprocess.run([str(helper),'--ignored','--exact','platform::windows::drag::ole_tests::native_ole_file_source','--nocapture','--test-threads=1'],
+                                  env=drop_env,creationflags=flags,stdout=log,stderr=subprocess.STDOUT,timeout=20)
+        assert result.returncode==0,'The OS OLE source did not complete; see ole-source.log'
+        active=wait(lambda:next((x for x in launches() if x['pid'] not in [first['pid'],second['pid']]),None),'file-drop application launch')
+        assert active['args']==[str(p) for p in files],active
+        wait(lambda:ask('get win.dock.0.0.windows')=='1','file-drop native window')
+        capture('07-file-drop');report['stages'].append('actual-ole-drop-delivers-both-file-paths')
+        report['ole_source']=dict(binary=str(helper),sha256=hashlib.sha256(helper.read_bytes()).hexdigest(),request=request)
     press('unkeep.0');wait(lambda:json.loads(pins.read_text())['pins']==[],'persistent unpin');capture('06-unpinned')
-    close_fixture(second);report['stages'].append('unpin-updates-storage-and-ui');guard()
-    report.update(passed=True,foreground_owned_at_checks=False,commands=commands,launches=launches(),packaged_apps_tested=False,os_drag_drop_tested=False)
+    close_fixture(active);report['stages'].append('unpin-updates-storage-and-ui');guard()
+    report.update(passed=True,foreground_owned_at_checks=False,commands=commands,launches=launches(),packaged_apps_tested=False,os_drag_drop_tested=ci_drop)
 finally:
     stop_scene()
     if initial is not None and initial.poll() is None:initial.kill();initial.wait(timeout=5)

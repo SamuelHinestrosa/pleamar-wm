@@ -692,7 +692,7 @@ pin/restart/relaunch/unpin passed, no owned window took foreground at the checks
 and none remained. Six PNGs were recorded; the relaunch and unpin images were
 inspected. Store activation and OS file dragging remain unverified.
 
-The reusable regression requires Python with Pillow and a non-primary monitor:
+The reusable regression requires Python and a non-primary monitor:
 
 ```powershell
 cargo build --release --locked --bin pleamar-wm --example windows-dock-fixture
@@ -712,11 +712,26 @@ actual application identity, persisted pin, reactivation and file-activation
 path. Its test signer and package are removed afterward; machine deployment
 policy is not changed.
 The scripts refuse local execution; no Store account or download is involved.
-The first CI attempt failed during setup, before activation, because it tried
-to create a machine policy key. That unnecessary policy write has been removed;
-the activation workflow has not yet passed. It does not establish OS
-drag acceptance or support for every Store app. The ordinary secondary-monitor
-fixture still refuses a primary output when it has no CI package identity.
+The first CI attempt failed on an unnecessary machine-policy write, which has
+been removed. The next run successfully registered the package, resolved its
+real application identity, persisted its pin and reopened it. File activation
+then failed: `SHCreateItemFromParsingName` rejects the verbatim path prefix
+returned by Rust's canonicalization. The conversion now supplies an equivalent
+DOS/UNC path and refuses namespaces or suffixes that would change file identity.
+The release run passes 50 ordinary tests, including a real shell item for a
+canonical Unicode filename; 16 opt-in tests are excluded. The secondary-monitor
+dock regression also passed with no injected input, no owned foreground window
+at its checks and no remaining owned windows. Two captured images were inspected.
+The complete packaged file-activation rerun is still pending. This owned desktop
+MSIX fixture does not establish support for every Store/UWP app. The ordinary
+secondary-monitor fixture refuses a primary output without an explicit CI mode.
+
+The native workflow also has an OLE file-drop fixture. It uses an owned source,
+the real `DoDragDrop` loop and two actual files, then checks the reopened dock
+application's argument report. Only its explicit GitHub-hosted step may move the
+OS pointer; local runs refuse this mode before creating windows. This new
+end-to-end check has not yet passed. The existing in-memory OLE tests cover
+localhost file URIs, commented URI lists, UNC/extended paths and Unicode.
 
 Unavailable WM commands exit with an error. `capabilities` states their status
 explicitly; no rain, independent input seat or compositor session is simulated.

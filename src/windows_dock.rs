@@ -173,9 +173,11 @@ impl Dock {
                         // Activation is an OS-owned app lifetime, not a child of
                         // a PowerShell helper. Keep every file as a shell item.
                         for file in files {
-                            let path=wide(file);let item:IShellItem=SHCreateItemFromParsingName(PCWSTR(path.as_ptr()),None)?;
-                            let items:IShellItemArray=SHCreateShellItemArrayFromShellItem(&item)?;
-                            activation.ActivateForFile(PCWSTR(id.as_ptr()),&items,w!("open"))?;
+                            let item=file_item(file)?;
+                            let items:IShellItemArray=SHCreateShellItemArrayFromShellItem(&item)
+                                .map_err(|e|format!("Windows shell file array: {e}"))?;
+                            activation.ActivateForFile(PCWSTR(id.as_ptr()),&items,w!("open"))
+                                .map_err(|e|format!("Windows packaged file activation: {e}"))?;
                         }
                     }
                 }
@@ -183,6 +185,24 @@ impl Dock {
         }
         Ok(())
     }
+}
+
+fn shell_path(path:&str) -> Result<std::borrow::Cow<'_,str>> {
+    let Some(tail)=path.strip_prefix(r"\\?\") else {return Ok(path.into());};
+    // std::fs::canonicalize returns verbatim paths. Shell items reject that
+    // namespace even when normal Win32 file APIs accept the same existing file.
+    let normalized=if let Some(unc)=tail.strip_prefix(r"UNC\") {format!(r"\\{unc}")}
+        else if tail.as_bytes().first().is_some_and(u8::is_ascii_alphabetic) && tail.as_bytes().get(1..3)==Some(b":\\") {tail.to_owned()}
+        else {return Err("the Windows shell cannot represent this device namespace".into());};
+    if normalized.split('\\').any(|part|part.ends_with(['.',' '])) {
+        return Err("the Windows shell cannot preserve a verbatim path with dot or space suffixes".into());
+    }
+    Ok(normalized.into())
+}
+fn file_item(path:&str) -> Result<IShellItem> {
+    let path=wide(&shell_path(path)?);
+    unsafe {SHCreateItemFromParsingName(PCWSTR(path.as_ptr()),None)}
+        .map_err(|e|format!("Windows shell file item: {e}").into())
 }
 
 fn read(path:&Path) -> Result<Vec<Program>> {
@@ -223,6 +243,26 @@ mod package_tests;
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn canonical_file_paths_resolve_to_real_shell_items_without_aliasing() -> Result<()> {
+        assert_eq!(shell_path(r"\\?\C:\folder\a.txt")?,r"C:\folder\a.txt");
+        assert_eq!(shell_path(r"\\?\UNC\server\share\a.txt")?,r"\\server\share\a.txt");
+        for bad in [r"\\?\GLOBALROOT\Device\test",r"\\?\C:\folder.\a.txt",r"\\?\C:\folder\..\a.txt",r"\\?\C:\name "] {
+            assert!(shell_path(bad).is_err(),"{bad}");
+        }
+        let _apartment=Apartment::new()?;
+        let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_nanos();
+        let file=std::env::temp_dir().join(format!("pleamar shell ñ 海 ' {}-{nonce}.txt",std::process::id()));
+        std::fs::write(&file,"owned shell item test")?;
+        let canonical=std::fs::canonicalize(&file)?;
+        let result=file_item(&canonical.to_string_lossy()).and_then(|item|unsafe {
+            item.GetDisplayName(SIGDN_FILESYSPATH).and_then(take_string).map_err(Into::into)
+        });
+        std::fs::remove_file(&file)?;
+        let displayed=result?;
+        assert_eq!(displayed,file.to_string_lossy());
+        Ok(())
+    }
     unsafe extern "system" fn fixture(hwnd:HWND,message:u32,w:WPARAM,l:LPARAM) -> LRESULT {
         unsafe { DefWindowProcW(hwnd,message,w,l) }
     }

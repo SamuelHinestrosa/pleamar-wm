@@ -10,7 +10,7 @@ on:
         required: true
       pleamar_ref:
         description: Exact pleamar revision (Windows backend required)
-        default: 752fd7e0760d1bfd6196d59c7da5ddf49191ed38
+        default: 0d2022394da2803306b70cfdd3bcb2cf8f2286fb
         required: true
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.pleamar_repository || 'SamuelHinestrosa/pleamar' }}
-          ref: ${{ inputs.pleamar_ref || '752fd7e0760d1bfd6196d59c7da5ddf49191ed38' }}
+          ref: ${{ inputs.pleamar_ref || '0d2022394da2803306b70cfdd3bcb2cf8f2286fb' }}
           path: pleamar
       - name: Linux system libraries
         if: runner.os == 'Linux'
@@ -110,7 +110,7 @@ jobs:
       - name: Build the distribution binary for native scene acceptance
         if: runner.os == 'Windows'
         working-directory: pleamar-wm
-        run: cargo build --release --locked --bin pleamar-wm
+        run: cargo build --release --locked --bin pleamar-wm --example windows-dock-fixture
       - name: Verified shader compiler for the native scene fixture
         if: runner.os == 'Windows'
         working-directory: pleamar-wm
@@ -142,6 +142,27 @@ jobs:
           $tests = @($messages | Where-Object { $_.reason -eq 'compiler-artifact' -and $_.target.name -eq 'pleamar' -and $_.profile.test -and $_.executable })
           if ($tests.Count -ne 1) { throw 'Expected one engine test executable' }
           Add-Content -LiteralPath $env:GITHUB_ENV -Value "PLEAMAR_ENGINE_TEST_BINARY=$($tests[0].executable)"
+      - name: Native dock pinning and OS file drop on owned windows
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        timeout-minutes: 4
+        shell: pwsh
+        env:
+          PLEAMAR_WM_CI_DOCK_DROP: '1'
+        run: |
+          $screens = & target/release/pleamar-wm.exe monitors | ConvertFrom-Json
+          if ($LASTEXITCODE -ne 0) { throw 'Monitor discovery failed.' }
+          $screen = @($screens | Where-Object primary | Select-Object -First 1)
+          if ($screen.Count -ne 1) { throw 'The disposable CI desktop has no output.' }
+          python tests/windows-dock.py --binary target/release/pleamar-wm.exe --fixture target/release/examples/windows-dock-fixture.exe --monitor $screen[0].name --output (Join-Path $env:RUNNER_TEMP 'wm native dock') --ci-ole-source $env:PLEAMAR_ENGINE_TEST_BINARY
+          if ($LASTEXITCODE -ne 0) { throw 'Native dock and OLE acceptance failed.' }
+      - name: Keep native dock and file-drop evidence
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wm-native-dock
+          path: ${{ runner.temp }}/wm native dock
+          if-no-files-found: warn
       - name: Native minimize and restore shortcuts on owned windows
         if: runner.os == 'Windows'
         working-directory: pleamar-wm
