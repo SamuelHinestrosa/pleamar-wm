@@ -7546,11 +7546,19 @@ scene Session {
     }
     on phone_next while ph.home { ph.at = clamp(round(ph.at) + 1, 0, max(ph.n - 1, 0)) }
     on phone_prev while ph.home { ph.at = clamp(round(ph.at) - 1, 0, max(ph.n - 1, 0)) }
-    // The phone arrives: the app that had the keyboard in front, or the cards.
+    // The phone arrives: everything that was open comes in as a deck of
+    // cards, and a moment later the one that had the keyboard opens out of
+    // it to all of the screen.
+    fact ph.intro = 0
     on change phone while phone >= 0 {
         ph.front = if(win.focus >= 0, win.focus, -1)
-        ph.cards = 0
+        ph.cards = 1
+        ph.intro = 1
         ph.at = clamp(ph.kf, 0, max(ph.n - 1, 0))
+    }
+    on still phone for 1300ms while ph.intro > 0.5 and phone >= 0 {
+        ph.intro = 0
+        ph.cards = if(ph.front >= 0 and ph.n > 0, 0, 1)
     }
     on change phone while phone < 0 {
         ph.front = -1
@@ -7963,6 +7971,8 @@ scene Session {
         z: 200000
         box { from: 0, 0; size: W, ph.sb; color: #05090b; opacity: 80% * (1 - pc) }
         text now.time { at: 22, ph.sb / 2 + 1; anchor: left center; size: 13.5; weight: 700; color: ink }
+        // The app in front, in the middle.
+        text pick(max(ph.front, 0), win.0.title, win.1.title, win.2.title, win.3.title, win.4.title, win.5.title, win.6.title, win.7.title, win.8.title, win.9.title, win.10.title, win.11.title, win.12.title, win.13.title, win.14.title, win.15.title) { at: W / 2, ph.sb / 2 + 1; anchor: center; size: 12; weight: 600; width: W - 210; lines: 1; color: ink; opacity: 70% * (1 - pc); show: ph.front >= 0 }
         ellipse { at: W - 82, ph.sb / 2 + 1; radius: 3.5; color: mint }
         text "pleamar" { at: W - 74, ph.sb / 2 + 1; anchor: left center; size: 12.5; weight: 600; color: ink; opacity: 80% }
         box { from: 0, H - ph.hb; size: W, ph.hb; color: #05090b; opacity: 80% * (1 - pc) }

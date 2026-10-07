@@ -513,6 +513,47 @@ fn keep_phone(gate: Arc<Mutex<Gate>>) {
     }
 }
 
+/// Text as keys of the desk's own layout: each character, the key that
+/// writes it (with Shift if it is on the second level). For the lock screen,
+/// which is no window to type into otherwise.
+fn type_keys(h: &mut Hands, text: &str) {
+    static TABLE: std::sync::OnceLock<HashMap<char, (u16, bool)>> = std::sync::OnceLock::new();
+    let table = TABLE.get_or_init(|| {
+        let mut t = HashMap::new();
+        let Ok(km) = crate::session::keymap() else { return t };
+        use smithay::input::keyboard::xkb;
+        for level in [1u32, 0] {
+            for code in km.min_keycode().raw()..=km.max_keycode().raw() {
+                for sym in km.key_get_syms_by_level(code.into(), 0, level) {
+                    if let Some(c) = char::from_u32(xkb::keysym_to_utf32(*sym)).filter(|c| *c != '\0') {
+                        if code >= 8 {
+                            t.insert(c, ((code - 8) as u16, level == 1));
+                        }
+                    }
+                }
+            }
+        }
+        t
+    });
+    for c in text.chars() {
+        let (code, shift) = match c {
+            '\n' => (28, false),
+            _ => match table.get(&c) {
+                Some(k) => *k,
+                None => continue,
+            },
+        };
+        if shift {
+            h.key(42, true);
+        }
+        h.key(code, true);
+        h.key(code, false);
+        if shift {
+            h.key(42, false);
+        }
+    }
+}
+
 /// Whether the phone's monitor is up (the desk may have taken the session back).
 fn phone_index(monitors: &[(String, f64, f64, f64, f64)]) -> Option<usize> {
     monitors.iter().position(|m| m.0 == crate::layers::PHONE_NAME)
@@ -923,6 +964,10 @@ fn viewer(stream: TcpStream, token: String, from: String, gate: &Arc<Mutex<Gate>
     // A page on a phone, with the session on it (docs/phone.md).
     let mut on_phone = false;
     let mut parked = false;
+    // Asked for while the session is locked: the desk is shown to unlock it,
+    // and the phone is asked for again until it comes.
+    let mut unlocking: Option<String> = None;
+    let mut unlock_tried = Instant::now();
     let mut phone_checked = Instant::now();
     struct PhoneLeave<'a>(&'a Arc<Mutex<Gate>>, std::rc::Rc<std::cell::Cell<bool>>);
     impl Drop for PhoneLeave<'_> {
@@ -985,6 +1030,10 @@ fn viewer(stream: TcpStream, token: String, from: String, gate: &Arc<Mutex<Gate>
             Ok(_) => {}
             Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
             Err(_) => break,
+        }
+        if let Some(ask) = unlocking.as_ref().filter(|_| unlock_tried.elapsed() > Duration::from_millis(1500)) {
+            unlock_tried = Instant::now();
+            lines.push(ask.clone());
         }
         let mut gone = false;
         while let Some(event) = peer.as_ref().and_then(|p| p.events.try_recv().ok()) {
@@ -1076,7 +1125,24 @@ fn viewer(stream: TcpStream, token: String, from: String, gate: &Arc<Mutex<Gate>
                             std::thread::sleep(Duration::from_millis(100));
                         }
                         match (asked, k) {
+                            (Err(e), _) if e.contains("locked") => {
+                                // Shown the desk —its lock screen— to unlock it from here.
+                                if unlocking.is_none() {
+                                    println!("remote · the session is locked at the desk: unlocked from the phone first");
+                                    let _ = ws.send(Message::Text("phonelocked".into()));
+                                    monitor = 0;
+                                    parked = false;
+                                    if video_wanted {
+                                        restart = true;
+                                    } else {
+                                        pending = Some(true);
+                                        waiting = false;
+                                    }
+                                }
+                                unlocking = Some(t.clone());
+                            }
                             (Ok(_), Some(k)) => {
+                                unlocking = None;
                                 if !on_phone {
                                     on_phone = true;
                                     phone_flag.set(true);
@@ -1135,6 +1201,9 @@ fn viewer(stream: TcpStream, token: String, from: String, gate: &Arc<Mutex<Gate>
                         let _ = crate::agent_cli::tell(&format!("E phone_{}", rest.trim()));
                     }
                     // What the phone's keyboard writes.
+                    // Typing at the lock screen (no window to type into): its
+                    // keys, as the desk's own layout has them.
+                    ("type", _) if !on_phone && unlocking.is_some() && !rest.is_empty() => type_keys(h, rest),
                     ("type", _) if on_phone && !rest.is_empty() => {
                         if let Err(e) = crate::agent_cli::tell(&format!("U {}", hex(rest.as_bytes()))) {
                             println!("remote · the phone's text did not go: {e}");

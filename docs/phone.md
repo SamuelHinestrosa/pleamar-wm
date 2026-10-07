@@ -46,13 +46,47 @@ window manager and the shell are scenes.
 | --- | --- | --- |
 | A monitor with no screen, put up and taken down while running | `session.rs`, `headless.rs`, `phone.rs` | the same road as a monitor plugged in: the scene's copies are given again |
 | `P W H SCALE` · `P off` | `agent.rs` → `layers` → the session's loop | asked by the remote server |
-| `phone`, `phone.away` | facts of the scene | which monitor is the phone (-1: none), and whether the session is on it |
+| `phone` · `phone_cards`, `phone_next`, `phone_prev` | a fact and events of the scene | which monitor is the phone (-1: none); the gestures from its bottom edge (`E` on the agent socket) |
+| `U HEX` | `agent.rs` | the phone's keyboard: any text into the window with the keyboard, as the person's own typing |
 | Apps, cards, status line, gestures | `session.plm` | the phone's copy of the scene |
 | The curtain | `session.plm` | a surface over the real monitors, left out of captures |
 | Touch | `remote.html` | taps, holds, scrolls with momentum, swipes from the edges; the phone's keyboard types |
 
+## Locked at the desk
+
+The lock screen is only on the real monitors, so a locked session does not
+go to the phone: the phone shows the desk as it is —its lock screen— with a
+note on top, the phone's keyboard types the password there (each character
+as the key of the desk's own layout), and the session comes the moment it
+is unlocked.
+
+## Settings
+
+`session.conf`: `phone lock COMMAND` is what locks the session when it comes
+back to the desk (by default `marea lock`; `phone lock none`, nothing). The
+page tells it is on a phone by itself; `?phone=1` or `?phone=0` says so.
+
+## Trying it without a phone
+
+`PLEAMAR_HEADLESS_PHONE="1080x2400@2.5 3 20"` puts the phone's monitor up on
+a headless desktop by itself (3 s in, down at 20 s); `grim -o PHONE-1`
+takes its picture. With `PLEAMAR_HEADLESS_INPUT_FIFO=path` on the headless
+desktop and `PLEAMAR_REMOTE_HANDS_TO=path` on `pleamar-wm remote`, the
+page's taps go down that pipe instead of to real devices: an emulated phone
+(Chrome's device mode) can drive the whole thing without touching the real
+session's mouse.
+
 ## Measured
 
-- From a tap on the phone to the picture changing (the page stamps both).
-- Sharpness: the phone monitor is painted at the phone's own pixels.
-- Back at the desk: from the first key to every window in its place.
+Headless, four windows, three runs (2026-10-07):
+
+| | |
+| --- | --- |
+| Asked for → every window on the phone | 188–197 ms |
+| Given back → every window in its monitor and pool | 58–264 ms |
+| The arrival, as it is seen | the deck at once; the app in front opens out of it 1.3 s later |
+
+The phone's monitor is painted at the phone's own pixels (1080 × 2344 at
+scale 2.45 on a 393-point-wide phone: about 440 points across), so text is
+as sharp as the phone's own. Still to measure on a real phone: from a tap
+to the picture changing.

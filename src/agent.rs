@@ -362,6 +362,9 @@ impl State {
                 }
             }
             ["P", w, h, scale] => match (w.parse::<u32>(), h.parse::<u32>(), scale.parse::<f64>()) {
+                // Locked, it stays at the desk: the lock screen is only there,
+                // and it is unlocked there (from the phone too, typing).
+                _ if layers::locked() => Err("locked"),
                 (Ok(w), Ok(h), Ok(scale)) if (200..=4096).contains(&w) && (200..=4096).contains(&h) && (0.5..=4.0).contains(&scale) => {
                     if layers::request_phone(Some(layers::PhoneWish { size: (w, h), scale })) {
                         Ok("ok".to_owned())

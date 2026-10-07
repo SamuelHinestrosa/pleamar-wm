@@ -240,8 +240,9 @@ struct State {
     next_sheet: u32,
     quit: bool,
     /// The mouse of this desk moved while the session was on the phone: how
-    /// far, to tell a hand on it from a table being bumped.
+    /// far in one go, to tell a hand on it from a table being bumped.
     desk_moved: f64,
+    desk_moved_at: std::time::Instant,
 }
 
 fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String> {
@@ -354,7 +355,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     layers::set_card(drm.clone());
     layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz, scale: m.scale }, m.screen.clone())).collect());
     let mover = CursorMover::new(drm.clone());
-    let mut state = State { mover, session, drm, monitors, libinput, to_render: to_render.clone(), keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, route: Route::new(to_render), cursor_pictures: Vec::new(), handle: event_loop.handle(), gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false, desk_moved: 0.0 };
+    let mut state = State { mover, session, drm, monitors, libinput, to_render: to_render.clone(), keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, route: Route::new(to_render), cursor_pictures: Vec::new(), handle: event_loop.handle(), gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false, desk_moved: 0.0, desk_moved_at: std::time::Instant::now() };
     state.make_cursors(&gbm);
     // The cursor the scene and the programs ask for, whenever it changes.
     let (cursor_tx, cursor_rx) = smithay::reexports::calloop::channel::channel::<(bool, Cursor)>();
@@ -599,7 +600,7 @@ fn give_sheets(monitors: &[Monitor], surfaces: &[Surface], to_render: &Sender<To
 /// The keyboard layout: the configuration's (or Hyprland's), else
 /// `XKB_DEFAULT_LAYOUT`, else what `localectl` says the X11 layout is, else
 /// the default one.
-fn keymap() -> Result<xkb::Keymap, String> {
+pub(crate) fn keymap() -> Result<xkb::Keymap, String> {
     let from_env = |k: &str| std::env::var(k).ok().filter(|v| !v.is_empty());
     let k = &config::get().keyboard;
     let mut layout = k.layout.clone().or_else(|| from_env("XKB_DEFAULT_LAYOUT")).unwrap_or_default();
@@ -980,6 +981,11 @@ impl State {
                 InputEvent::Keyboard { event } => event.state() == KeyState::Pressed && here(event.device().name().to_owned()),
                 InputEvent::PointerButton { event } => event.state() == ButtonState::Pressed && here(event.device().name().to_owned()),
                 InputEvent::PointerMotion { event } if here(event.device().name().to_owned()) => {
+                    // (Still for a second, it starts counting again.)
+                    if self.desk_moved_at.elapsed() > Duration::from_secs(1) {
+                        self.desk_moved = 0.0;
+                    }
+                    self.desk_moved_at = std::time::Instant::now();
                     self.desk_moved += event.delta_x().abs() + event.delta_y().abs();
                     self.desk_moved > 60.0
                 }

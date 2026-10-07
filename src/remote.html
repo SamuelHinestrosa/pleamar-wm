@@ -78,6 +78,11 @@
   #ph-veil.on { opacity: 1; pointer-events: auto; }
   #ph-net { position: absolute; top: calc(8px + env(safe-area-inset-top)); left: 50%; transform: translate(-50%, -60px); padding: 6px 14px; border-radius: 16px; background: #0d1519ee; color: #e8c26a; font-size: 12.5px; transition: transform .3s; }
   #ph-net.on { transform: translate(-50%, 0); }
+  #ph-lock { position: absolute; left: 12px; right: 12px; top: calc(12px + env(safe-area-inset-top)); padding: 14px 16px; border-radius: 20px; background: #0d1519f0; border: 1px solid #e8c26a55; backdrop-filter: blur(14px); display: grid; gap: 10px; pointer-events: auto; transform: translateY(-160%); transition: transform .4s cubic-bezier(.2,.8,.2,1); }
+  #ph-lock.on { transform: translateY(0); }
+  #ph-lock b { color: #e8c26a; font-weight: 650; }
+  #ph-lock p { margin: 0; color: #9aa3a8; font-size: 13px; }
+  #ph-lock button { justify-self: start; border: 0; border-radius: 14px; padding: 10px 16px; font: inherit; font-weight: 650; color: #062421; background: #e8c26a; }
 </style>
 </head>
 <body>
@@ -121,6 +126,7 @@
       <p id="ph-back-why">Someone took the session back at the computer.</p>
       <button class="ph-go" id="ph-again">Bring it here again</button>
     </div>
+    <div id="ph-lock"><b>Locked at the desk</b><p>Unlock it from here: type your password, then Enter. The session comes as soon as it opens.</p><button id="ph-lock-kbd">Type password</button></div>
     <div id="ph-edge"></div>
     <div id="ph-net">reconnecting…</div>
     <button id="ph-kbd" aria-label="Keyboard">⌨</button>
@@ -296,7 +302,13 @@
         toast(arg);
       } else if (verb === 'phoneon') {
         phoneMon = current = Number(arg);
+        $('ph-lock').classList.remove('on');
         phoneArrived();
+      } else if (verb === 'phonelocked') {
+        // The desk, as it is (its lock screen), to unlock it from here.
+        current = 0;
+        startSheet.classList.add('gone'); startSheet.classList.remove('ph-arriving');
+        $('ph-lock').classList.add('on');
       } else if (verb === 'deskback') {
         phoneBack('Someone took the session back at the computer.');
       } else if (verb === 'nophone') {
@@ -555,6 +567,7 @@
     if (awake) { try { awake.release(); } catch (_) {} awake = null; }
   }
   $('ph-go').onclick = bringHere;
+  $('ph-lock-kbd').onclick = () => kbdOpen();
   $('ph-again').onclick = bringHere;
 
   // Fingers: a tap is a click; held, the right button; moved, the page under
