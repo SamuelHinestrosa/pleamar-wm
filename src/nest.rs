@@ -293,6 +293,16 @@ fn owner_hash(c: &ClientId) -> u64 {
     h.finish() | 1
 }
 
+/// Where a program's surface goes on its monitor, in units, by its anchors
+/// and margins.
+fn panel_place(c: &LayerSurfaceCachedState, (mw, mh): (i32, i32), (w, h): (i32, i32)) -> (i32, i32) {
+    let m = c.margin;
+    let (l, r, t, b) = (c.anchor.contains(Anchor::LEFT), c.anchor.contains(Anchor::RIGHT), c.anchor.contains(Anchor::TOP), c.anchor.contains(Anchor::BOTTOM));
+    let x = if l && !r { m.left } else if r && !l { mw - w - m.right } else if l && r { m.left + (mw - m.left - m.right - w) / 2 } else { (mw - w) / 2 };
+    let y = if t && !b { m.top } else if b && !t { mh - h - m.bottom } else if t && b { m.top + (mh - m.top - m.bottom - h) / 2 } else { (mh - h) / 2 };
+    (x, y)
+}
+
 fn owner_of(surface: &WlSurface) -> u64 {
     surface.client().map_or(0, |c| owner_hash(&c.id()))
 }
@@ -1032,7 +1042,16 @@ impl State {
                 let k = self.keyboard.clone();
                 k.set_focus(self, target, serial);
             }
-            ToNest::Focus(slot) => self.set_focus(Some(slot)),
+            // The scene gives the keyboard to the window the pointer is over. A
+            // window of the program the agent is working with this moment, while
+            // your keyboard is in another, does not take it that way: it opened
+            // under your pointer, or the agent's work moved it there; it was not
+            // gone to. A click of yours gives it (`Button`, above).
+            ToNest::Focus(slot) => {
+                if !self.agent_keeps_your_keyboard(self.pid_of(slot)) {
+                    self.set_focus(Some(slot));
+                }
+            }
             ToNest::Close(slot) => {
                 if let Some(Some(w)) = self.slots.get(slot) {
                     w.toplevel.send_close();
@@ -1920,6 +1939,23 @@ impl State {
         }
     }
 
+    /// A program's surface of that size (a program may have several: Marea's
+    /// card, and what catches a click outside it), and where it is: its
+    /// monitor and its corner there, in units. What an agent's hand reaches
+    /// when the program has no window.
+    pub(super) fn panel_of(&self, pid: u32, size: (i32, i32)) -> Option<(usize, WlSurface, usize, (i32, i32))> {
+        self.panels.iter().enumerate().find_map(|(k, p)| {
+            let root = p.shell.wl_surface().clone();
+            let own = root.client().and_then(|c| c.get_credentials(&self.dh).ok()).is_some_and(|c| c.pid as u32 == pid);
+            let s = content_of(&root, |c| c.size).unwrap_or((0, 0));
+            if !own || (s.0 as i32, s.1 as i32) != size || matches!(p.shell, Shell::Lock(_)) {
+                return None;
+            }
+            let c = with_states(&root, |s| *s.cached_state.get::<LayerSurfaceCachedState>().current());
+            Some((k, root, p.monitor, panel_place(&c, self.monitor_size(p.monitor), size)))
+        })
+    }
+
     /// What a program's surface shows, to its monitor: where, at what level,
     /// and its pieces (it, its subsurfaces and its menus).
     fn show_panel(&mut self, k: usize) {
@@ -1947,10 +1983,7 @@ impl State {
             layers::show(self.panels[k].monitor, ClientLayer { id, level: 4, rect: [0, 0, px(w), px(h)], pieces, region: None, keyboard: 1, blur: Vec::new(), owner: owner_of(&root) });
             return;
         }
-        let m = c.margin;
-        let (l, r, t, b) = (c.anchor.contains(Anchor::LEFT), c.anchor.contains(Anchor::RIGHT), c.anchor.contains(Anchor::TOP), c.anchor.contains(Anchor::BOTTOM));
-        let x = if l && !r { m.left } else if r && !l { mw - w - m.right } else if l && r { m.left + (mw - m.left - m.right - w) / 2 } else { (mw - w) / 2 };
-        let y = if t && !b { m.top } else if b && !t { mh - h - m.bottom } else if t && b { m.top + (mh - m.top - m.bottom - h) / 2 } else { (mh - h) / 2 };
+        let (x, y) = panel_place(&c, (mw, mh), (w, h));
         let region = with_states(&root, |s| {
             s.cached_state.get::<SurfaceAttributes>().current().input_region.as_ref().map(|r| {
                 r.rects.iter().map(|(kind, rect)| (matches!(kind, RectangleKind::Add), [px(rect.loc.x), px(rect.loc.y), px(rect.size.w), px(rect.size.h)])).collect()

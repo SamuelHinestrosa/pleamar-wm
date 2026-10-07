@@ -5,14 +5,15 @@ checkout starts the native desktop companion; it does **not** yet provide a
 complete Windows equivalent of the Linux compositor session. DWM continues to
 compose applications. No WSL, Wayland server or Unix shell is required.
 
-Upstream through `8959992` (0.2.26) is integrated, including its workspace-wave
+Upstream through `871808b` (0.2.28) is integrated, including its workspace-wave
 fix, independent Linux agent keyboard, Chromium emoji/clipboard handling and
 desktop cursor socket. The socket remains Linux-only; Windows reports global
 cursor positions through pleamar's native event loop and does not need it.
 Windows already emits UTF-16 keyboard input through the matching pleamar
 backend; it does not adopt the Linux Ctrl+Shift+U/clipboard workaround.
 Chromium/Discord typing acceptance is still pending. These merges do not
-provide Windows with an independent input seat. Native scene commands now
+provide Windows with an independent input seat. The 0.2.28 panel-cursor and
+opening-window keyboard fixes remain part of the Linux compositor. Native scene commands now
 expose the latest element labels, roles, values and states; their validation
 and the remaining capabilities are described below.
 
@@ -337,6 +338,18 @@ explicitly; no rain, independent input seat or compositor session is simulated.
 The existing Marea installation is not changed by building this checkout.
 
 ## Native acceptance (separate from CI)
+
+The current 0.2.28 Windows x64/MSVC build passes 20 CLI unit tests and builds
+both CLI and console-free host with default Luau, against pleamar 0.2.27.
+Nine desktop helpers remain opt-in. The CLI executable SHA-256 is
+`d6e046081738cb0080bc8e4760d2846ee3652d65c902a5fe39b16a9abb6c5cae`.
+Earlier native scene-command tests passed discovery, Unicode names, named
+actions, concurrent wait/watch, cancellation and reload. Two later regressions
+found stale input destinations when an overlay appeared; the engine correction
+passes unit tests, but its native rerun is pending. The latest attempt found
+only DISPLAY2 marked primary, and the non-primary-only harness refused to
+launch. Exact-head Windows/Linux CI is also pending. Older native records below
+do not establish acceptance of the current input guard or full desktop parity.
 
 The opt-in test creates three of its own ordinary native windows only on an
 explicitly named **non-primary** display. It tests all five arrangements,

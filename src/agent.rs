@@ -33,6 +33,8 @@
 //! | `k TARGET KEY` | a named key: enter, tab, escape, backspace, space, arrows, f1–f12 |
 //! | `h TARGET MODS KEY` | a chord: `ctrl,shift` and a key |
 //! | `d X Y COUNT BUTTON` | a click at a point of the desktop |
+//! | `M PID W H IDX X Y` | cursor IDX to X, Y of that process' surface of W × H that is no window (a panel: Marea, a bar) |
+//! | `B PID W H IDX BUTTON PRESSED` | a button there |
 //! | `R MONITOR HEX` · `R off` | `pleamar-wm remote`: someone uses this desktop from elsewhere, looking at that monitor, from that address (hex encoded) — said again every few seconds while it lasts, and forgotten 15 s after the last |
 //!
 //! A TARGET is `pid:N` (that process' only window), `root:N` (the only window
@@ -75,6 +77,9 @@ const CURSORS: usize = 2;
 /// The agent's seats and what each cursor last did.
 pub struct Agent {
     seats: Vec<(Seat<State>, PointerHandle<State>, KeyboardHandle<State>)>,
+    /// Per cursor, the monitor and the point (in its units) it was last drawn
+    /// at over a panel.
+    on_monitor: [Option<(usize, (f64, f64))>; CURSORS],
     /// Per cursor, on the usual seat (for the programs that only hear that
     /// one): the surface it entered, straight on its objects.
     raw_entered: [Option<WlSurface>; CURSORS],
@@ -200,7 +205,7 @@ pub fn start(state: &mut State) {
         return;
     }
     println!("agent · computer use: cua-inject v1 at {path}");
-    state.agent = Some(Agent { seats, raw_entered: [None, None], raw_real: [None, None], kb_entered: None, kb_slot: None, kb_real: None, opening: Vec::new(), seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None, remote: None, pasting: None });
+    state.agent = Some(Agent { seats, on_monitor: [None; CURSORS], raw_entered: [None, None], raw_real: [None, None], kb_entered: None, kb_slot: None, kb_real: None, opening: Vec::new(), seen: [0; CURSORS], busy: 0, at: [(0.0, 0.0).into(); CURSORS], path, peer: 0, last: None, active: false, stopped: None, global: [None; CURSORS], working: None, remote: None, pasting: None });
     // Whether it is at work, looked at every second: between one action and
     // the next an agent thinks, and that is still working.
     let timer = Timer::from_duration(Duration::from_secs(1));
@@ -338,7 +343,7 @@ impl State {
                 Ok("ok".to_owned())
             }
             // Looking stays possible; doing anything does not.
-            [verb, ..] if matches!(*verb, "f" | "m" | "b" | "a" | "t" | "k" | "h" | "d" | "v" | "L") && self.agent_stopped() => Err("stopped-by-user"),
+            [verb, ..] if matches!(*verb, "f" | "m" | "b" | "a" | "t" | "k" | "h" | "d" | "v" | "L" | "M" | "B") && self.agent_stopped() => Err("stopped-by-user"),
             // A program opened by the agent, on a monitor (-1: the one it
             // works on, or one you are not on): «opened PID MONITOR».
             ["L", monitor, command] => match monitor.parse::<i64>() {
@@ -368,6 +373,14 @@ impl State {
                 let code = named_key(key).or_else(|| (key.len() == 1).then(|| us_key(key.as_bytes()[0]).map(|(c, _)| c)).flatten()).ok_or("unknown-hotkey")?;
                 self.agent_keys(s, &held, code)
             }).map(|_| "ok".into()),
+            ["M", pid, w, h, idx, x, y] => match (pid.parse::<u32>(), w.parse::<i32>(), h.parse::<i32>()) {
+                (Ok(pid), Ok(w), Ok(h)) => num(x).and_then(|x| Ok((x, num(y)?))).and_then(|(x, y)| self.agent_panel_motion(pid, (w, h), idx.parse().unwrap_or(99), x, y)).map(|_| "ok".into()),
+                _ => Err("bad-args"),
+            },
+            ["B", pid, w, h, idx, button, pressed] => match (pid.parse::<u32>(), w.parse::<i32>(), h.parse::<i32>(), button.parse::<u32>()) {
+                (Ok(pid), Ok(w), Ok(h), Ok(button)) => self.agent_panel_button(pid, (w, h), idx.parse().unwrap_or(99), button, *pressed != "0").map(|_| "ok".into()),
+                _ => Err("bad-args"),
+            },
             ["d", x, y, count, button] => num(x).and_then(|x| Ok((x, num(y)?))).and_then(|(x, y)| self.agent_desktop_click(x, y, count.parse().unwrap_or(1), button.parse().unwrap_or(272))).map(|_| "ok".into()),
             [] => Err("empty"),
             _ => Err("unknown-command"),
@@ -1332,6 +1345,70 @@ impl State {
     }
 
     /// A click at a point of the desktop: on the window the scene shows there.
+    /// The agent's hand on a program's surface that is no window (a panel):
+    /// its own seat's pointer goes there, as on a window, and its cursor is
+    /// drawn where it is, with the monitor lit.
+    fn agent_panel_motion(&mut self, pid: u32, size: (i32, i32), idx: usize, x: f64, y: f64) -> Result<(), &'static str> {
+        if idx >= CURSORS {
+            return Err("bad-cursor");
+        }
+        let (_, root, monitor, (px, py)) = self.panel_of(pid, size).ok_or("no-surface")?;
+        let (_, pointer, _) = self.agent.as_ref().ok_or("off")?.seats.get(idx).cloned().ok_or("bad-cursor")?;
+        let (serial, time) = (SERIAL_COUNTER.next_serial(), self.time());
+        let at: Point<f64, Logical> = (x, y).into();
+        pointer.motion(self, Some((root, (0.0, 0.0).into())), &MotionEvent { location: at, serial, time });
+        pointer.frame(self);
+        self.agent_show_on(monitor, idx, (px as f64 + x, py as f64 + y), None);
+        Ok(())
+    }
+
+    fn agent_panel_button(&mut self, pid: u32, size: (i32, i32), idx: usize, button: u32, pressed: bool) -> Result<(), &'static str> {
+        if idx >= CURSORS || !(272..=279).contains(&button) {
+            return Err("bad-args");
+        }
+        let (_, root, monitor, _) = self.panel_of(pid, size).ok_or("no-surface")?;
+        let (_, pointer, _) = self.agent.as_ref().ok_or("off")?.seats.get(idx).cloned().ok_or("bad-cursor")?;
+        if pointer.current_focus().as_ref() != Some(&root) {
+            return Err("no-pointer-resource");
+        }
+        let (serial, time) = (SERIAL_COUNTER.next_serial(), self.time());
+        let state = if pressed { ButtonState::Pressed } else { ButtonState::Released };
+        pointer.button(self, &ButtonEvent { serial, time, button, state });
+        pointer.frame(self);
+        let at = self.agent.as_ref().and_then(|a| a.on_monitor[idx]).map_or((0.0, 0.0), |(_, p)| p);
+        self.agent_show_on(monitor, idx, at, Some(pressed));
+        Ok(())
+    }
+
+    /// The agent's cursor drawn at a point of a monitor, in its units, and the
+    /// monitor lit: what `agent_show` does for a window, for anything.
+    fn agent_show_on(&mut self, monitor: usize, idx: usize, at: (f64, f64), down: Option<bool>) {
+        let Some(agent) = self.agent.as_mut() else { return };
+        agent.last = Some(Instant::now());
+        agent.busy = agent.busy.wrapping_add(1);
+        agent.seen[idx] = agent.seen[idx].wrapping_add(1);
+        let (busy, seen) = (agent.busy, agent.seen[idx]);
+        agent.on_monitor[idx] = Some((monitor, at));
+        let m = layers::monitors().get(monitor).map(|m| (m.x as f64, m.y as f64)).unwrap_or_default();
+        agent.global[idx] = Some((m.0 + at.0, m.1 + at.1));
+        let facts = [
+            ("agent.win".to_owned(), -1.0),
+            ("agent.screen".to_owned(), monitor as f64),
+            ("agent.seen".to_owned(), busy as f64),
+            (format!("agent.{idx}.x"), at.0),
+            (format!("agent.{idx}.y"), at.1),
+            (format!("agent.{idx}.screen"), monitor as f64),
+            (format!("agent.{idx}.seen"), seen as f64),
+        ];
+        for (name, v) in facts {
+            let _ = self.to_render.send(ToRender::Fact(pleamar::scene::intern(&name), v as f32));
+        }
+        if let Some(down) = down {
+            let _ = self.to_render.send(ToRender::Fact(pleamar::scene::intern(&format!("agent.{idx}.down")), if down { 1.0 } else { 0.0 }));
+        }
+        self.agent_still_working();
+    }
+
     fn agent_desktop_click(&mut self, x: f64, y: f64, count: u32, button: u32) -> Result<(), &'static str> {
         let mut hit = None;
         for slot in self.slots_open().collect::<Vec<_>>() {
