@@ -44,6 +44,11 @@ stream encoder itself currently uses wlr-screencopy and Linux shared memory; it 
 not a Windows streaming backend. Building all workspace members on Windows is not
 supported yet. The upstream phone latency figures are not Windows measurements.
 
+The upstream remote fixes through `a4e4f20d` are also preserved: browser/decoder
+diagnostics, data-channel backlog pacing and Safari decoder reconfiguration when
+H.264 parameters change. These files still belong to the Linux remote backend;
+they do not enable the Windows remote command or virtual phone output.
+
 ## Build and run from PowerShell
 
 Install the stable Rust x64 MSVC toolchain and Visual Studio Build Tools with
