@@ -179,11 +179,17 @@ now tries the target's native GDI `PrintWindow` rendering in a disposable child.
 The earlier direct `WM_PRINT` message failed to draw into the other process's DC.
 This uses the exact HWND and its child controls, with no desktop rectangle,
 owner substitution or window-style mutation. The helper ends on cancellation
-or after three seconds; protected, incomplete and unavailable images remain
-errors and grant no input permit. The result's `capture_method` identifies WGC
-versus `window-print`; GPU-only applications need not implement GDI printing.
-The new native tests require real modal/tool button input and rejection of
-incomplete, hung and protected captures. Their acceptance remains pending.
+or after three seconds; protected, untouched and unavailable images remain
+errors and grant no input permit. PrintWindow can supply cached content and its
+success does not certify every application pixel was freshly painted. The
+result's `capture_method` identifies WGC versus `window-print`; GPU-only apps
+can return incomplete or blank GDI images.
+The modal capture and button click passed in
+[run 37638516551](https://github.com/SamuelHinestrosa/pleamar-wm/actions/runs/37638516551),
+including blue client/red patch pixel checks. Its next negative test incorrectly
+assumed that ignoring WM_PRINT prevented PrintWindow from obtaining an image.
+The revised fixture stalls the actual painting thread once. Hung/protected
+capture rejection and the remaining tool-window tests still need a passing run.
 
 ## Launching from a scene
 

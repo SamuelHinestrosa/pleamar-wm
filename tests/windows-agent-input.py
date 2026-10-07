@@ -327,8 +327,7 @@ def exercise(binary, tests, folder):
         picture('modal-result')
         assert report['images'][-1]['capture_method'] == 'window-print', 'modal case must exercise the fallback on this runner'
         report['modal'] = dict(pid=target.pid, owner=owner_id, dialog=identity, clicks=state()['clicks'], implicit_redirection=False)
-        for command, expected in [('print-refuse', 'did not paint the entire window'),
-                                  ('print-hang', 'window print capture timed out'),
+        for command, expected in [('print-hang', 'window print capture timed out'),
                                   ('protect-capture', 'the window excludes capture')]:
             control(target_folder, command)
             refused = folder / (command + '-must-not-exist.png')
@@ -340,6 +339,8 @@ def exercise(binary, tests, folder):
             report.setdefault('print_refusals', []).append(dict(case=command, seconds=elapsed, no_file=True, no_input_permit=True))
             control(target_folder, 'allow-capture' if command == 'protect-capture' else 'print-ok')
             assert target.poll() is None and state()['text'] == ''
+            if command == 'print-hang':
+                assert state()['paint_stalls'] == 1, 'the fixture must actually stall its painting thread'
         picture('modal-after-refusals')
         run('stop')
         assert modal_service.wait(timeout=5) == 0
