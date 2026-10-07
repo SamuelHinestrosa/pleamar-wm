@@ -187,7 +187,9 @@ def exercise(binary, tests, folder):
             assert png[:8] == b'\x89PNG\r\n\x1a\n'
             width, height = struct.unpack('>II', png[16:24])
             assert (width, height) == (data['width'], data['height']) and data['window'] == identity
-            report['images'].append(dict(file=path.name, width=width, height=height, sha256=hashlib.sha256(png).hexdigest()))
+            assert data['capture_method'] in ['windows-graphics-capture', 'window-print']
+            report['images'].append(dict(file=path.name, width=width, height=height,
+                                        capture_method=data['capture_method'], sha256=hashlib.sha256(png).hexdigest()))
             save()
             return path
 
@@ -312,7 +314,22 @@ def exercise(binary, tests, folder):
         act('modal-button', 'click', *point(390, 50))
         wait(lambda: state()['clicks'] == 1, 'explicit modal button click')
         picture('modal-result')
+        assert report['images'][-1]['capture_method'] == 'window-print', 'modal case must exercise the fallback on this runner'
         report['modal'] = dict(pid=target.pid, owner=owner_id, dialog=identity, clicks=state()['clicks'], implicit_redirection=False)
+        for command, expected in [('print-refuse', 'did not paint the entire window'),
+                                  ('print-hang', 'window print capture timed out'),
+                                  ('protect-capture', 'the window excludes capture')]:
+            control(target_folder, command)
+            refused = folder / (command + '-must-not-exist.png')
+            began = time.monotonic()
+            run('look', identity, str(refused), fail=expected)
+            elapsed = time.monotonic() - began
+            assert elapsed < 5 and not refused.exists(), (command, elapsed)
+            run('type', identity, 'no input from failed capture', fail='desktop.look must precede input')
+            report.setdefault('print_refusals', []).append(dict(case=command, seconds=elapsed, no_file=True, no_input_permit=True))
+            control(target_folder, 'allow-capture' if command == 'protect-capture' else 'print-ok')
+            assert target.poll() is None and state()['text'] == ''
+        picture('modal-after-refusals')
         run('stop')
         assert modal_service.wait(timeout=5) == 0
         control(target_folder, 'allow-parent')
@@ -333,20 +350,22 @@ def exercise(binary, tests, folder):
                                 creationflags=subprocess.CREATE_NO_WINDOW)
         report['commands'].append(dict(args=['look', identity, str(tool_path)], exit=result.returncode,
                                        stdout=result.stdout, stderr=result.stderr))
-        if result.returncode != 0:
-            assert 'CreateForWindow' in result.stderr and '0x80070057' in result.stderr, result.stderr
-            assert not tool_path.exists()
-            run('type', identity, 'no unseen tool-window input', fail='desktop.look must precede input')
-            assert state()['text'] == ''
-            report['tool_window'] = dict(capture=False, input=False, limitation=result.stderr.strip())
-        else:
-            data = json.loads(result.stdout)
-            png = tool_path.read_bytes()
-            assert data['window'] == identity and png[:8] == b'\x89PNG\r\n\x1a\n'
-            width, height = struct.unpack('>II', png[16:24])
-            assert (width, height) == (data['width'], data['height'])
-            report['images'].append(dict(file=tool_path.name, width=width, height=height, sha256=hashlib.sha256(png).hexdigest()))
-            report['tool_window'] = dict(capture=True, input_tested=False)
+        assert result.returncode == 0, result.stderr
+        data = json.loads(result.stdout)
+        png = tool_path.read_bytes()
+        assert data['window'] == identity and png[:8] == b'\x89PNG\r\n\x1a\n'
+        width, height = struct.unpack('>II', png[16:24])
+        assert (width, height) == (data['width'], data['height'])
+        assert data['capture_method'] == 'window-print', 'tool case must exercise the fallback on this runner'
+        report['images'].append(dict(file=tool_path.name, width=width, height=height,
+                                    capture_method=data['capture_method'], sha256=hashlib.sha256(png).hexdigest()))
+        assert desktop.user.SetForegroundWindow(hwnd), 'owned tool bootstrap focus'
+        wait(lambda: state().get('foreground'), 'owned tool foreground')
+        run('focus', identity)
+        act('tool-button', 'click', *point(390, 50))
+        wait(lambda: state()['clicks'] == 1, 'explicit tool button click')
+        picture('tool-result')
+        report['tool_window'] = dict(capture=True, clicks=state()['clicks'], implicit_redirection=False)
         run('stop')
         assert tool_service.wait(timeout=5) == 0
         control(target_folder, 'quit')
@@ -356,7 +375,8 @@ def exercise(binary, tests, folder):
                               'single-use and done revoke input permits', 'stale geometry refusal',
                               'new-file capture and process scope refusal', 'stop, expiry and process exit close broker',
                               'explicit modal identity, disabled owner refusal and actual dialog button',
-                              'tool-window capture reports actual support without owner fallback or unseen permits'],
+                              'tool-window capture and button input without owner substitution',
+                              'incomplete, timed-out and protected captures create no file or input permit'],
                       clean_exit=True)
     finally:
         for process, directory in fixtures:

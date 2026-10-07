@@ -132,9 +132,10 @@ fn picture(session: &mut Session, options: &Options, selector: &str, path: &str)
     let number = |key| fields.iter().find_map(|(name, v)| match v { DesktopValue::Num(n) if name == key => Some(*n as u32), _ => None });
     let size = (number("width").ok_or("missing capture width")?, number("height").ok_or("missing capture height")?);
     let data = fields.iter().find_map(|(name, v)| match v { DesktopValue::Text(s) if name == "data" => Some(s), _ => None }).ok_or("missing PNG")?;
+    let method = fields.iter().find_map(|(name, v)| match v { DesktopValue::Text(s) if name == "method" => Some(s.as_str()), _ => None }).unwrap_or("unknown");
     write_picture(Path::new(path), &STANDARD.decode(data)?)?;
     Ok(json!({"path":path,"width":size.0,"height":size.1,"window":before.id,"input":"foreground",
-        "coordinates":"picture physical pixels","permit":"one action within 30 seconds"}))
+        "capture_method":method,"coordinates":"picture physical pixels","permit":"one action within 30 seconds"}))
 }
 
 struct Pending { cancel: Cancellation, expired: Option<Arc<AtomicBool>> }

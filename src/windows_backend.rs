@@ -312,8 +312,14 @@ fn window_state(id: &str, minimize: bool, activate: bool) -> Result<Value> {
     let until = Instant::now() + Duration::from_secs(1);
     loop {
         pump();
-        let (_, current) = target(id)?;
-        if current.minimized == minimize { return Ok(json!({"id": id, "minimized": minimize})); }
+        // During asynchronous restore, Windows can briefly report geometry
+        // outside all monitors. Keep the exact identity while the catalog settles.
+        if Identity::read(hwnd).is_none_or(|current| current.token() != id) {
+            return Err("window identity changed during the state transition".into());
+        }
+        if let Some(current) = inspect(hwnd) {
+            if current.id == id && current.minimized == minimize { return Ok(json!({"id": id, "minimized": minimize})); }
+        }
         if Instant::now() >= until { return Err("window did not confirm the requested state".into()); }
         std::thread::sleep(Duration::from_millis(10));
     }
@@ -383,6 +389,7 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
 }
 
 pub fn run(args: Vec<String>) -> i32 {
+    if let Some(code) = pleamar::windows_desktop::capture_helper(&args) { return code; }
     if args.first().map(String::as_str) == Some("session") { return run_session(args[1..].to_vec()); }
     // No windows or threads have been created yet; coordinates remain physical
     // when displays have different scaling and origins.
