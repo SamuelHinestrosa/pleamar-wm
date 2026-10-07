@@ -10,7 +10,7 @@ on:
         required: true
       pleamar_ref:
         description: Exact pleamar revision (Windows backend required)
-        default: fc21d6a81f7b2063926d91cd37bf589846cce2b7
+        default: 8387d5441a778cba568b7267fab4792883399b3a
         required: true
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.pleamar_repository || 'SamuelHinestrosa/pleamar' }}
-          ref: ${{ inputs.pleamar_ref || 'fc21d6a81f7b2063926d91cd37bf589846cce2b7' }}
+          ref: ${{ inputs.pleamar_ref || '8387d5441a778cba568b7267fab4792883399b3a' }}
           path: pleamar
       - name: Linux system libraries
         if: runner.os == 'Linux'
@@ -105,6 +105,27 @@ jobs:
           foreach ($name in @('LICENCE-MIT.txt', 'LICENSE-LLVM.txt', 'LICENSE-MS.txt')) {
             Copy-Item -LiteralPath (Join-Path $unpacked $name) -Destination $licenses
           }
+      - name: Native agent CLI input on owned Win32 controls
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        timeout-minutes: 12
+        shell: pwsh
+        env:
+          PLEAMAR_WM_CI_AGENT_INPUT: '1'
+        run: |
+          $messages = cargo test --manifest-path ../pleamar/Cargo.toml --target-dir target --locked --lib --no-run --message-format=json | ForEach-Object { $_ | ConvertFrom-Json }
+          if ($LASTEXITCODE -ne 0) { throw 'Could not build the owned native input fixture' }
+          $tests = @($messages | Where-Object { $_.reason -eq 'compiler-artifact' -and $_.target.name -eq 'pleamar' -and $_.profile.test -and $_.executable })
+          if ($tests.Count -ne 1) { throw 'Expected one engine test executable' }
+          python tests/windows-agent-input.py --binary target/release/pleamar-wm.exe --tests $tests[0].executable --output "${{ runner.temp }}/wm agent input ñ"
+          if ($LASTEXITCODE -ne 0) { throw 'Native agent CLI input failed' }
+      - name: Keep native agent CLI evidence
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wm-native-agent-input
+          path: ${{ runner.temp }}/wm agent input ñ
+          if-no-files-found: warn
       - name: Rendered scene launch, Luau, reload and owned child cleanup
         if: runner.os == 'Windows'
         working-directory: pleamar-wm

@@ -79,7 +79,9 @@ Hidden, minimized, closed and capture-excluded windows are refused. Capture
 is bounded to six seconds, 8192 pixels per dimension and 16,777,216 pixels in
 total; the target identity is checked again before writing. This does not
 capture an entire desktop or panels excluded from the ordinary window catalog.
-`capabilities` reports `agent_window_capture: true` and `agent_native_input: false`.
+`capabilities` reports `agent_window_capture: true`, `agent_native_input: true`
+and `agent_input_mode: "opt-in-foreground"`. Application input requires the
+separate, explicitly enabled broker described below.
 
 `agent say` also supports named drag, wheel, hold and key commands. Commands
 use the scene's own input and Luau logic; they do not inject the OS mouse or
@@ -92,10 +94,70 @@ words does not change its identity. Multiple endpoints in the same process
 require `scene:ENDPOINT`; selecting only that PID fails as ambiguous. `PID.N`
 addresses the process's single scene, not a native child-window input seat.
 
-Arbitrary-application click/type, independent seats, cursor glide and background
-program launch remain unavailable here. They return errors. These limits do
-not prevent named actions on pleamar scenes. The matching engine documents
+Independent seats, cursor glide and background program launch remain unavailable
+here. They return errors. These limits do not prevent named actions on pleamar scenes. The matching engine documents
 the [protocol and interaction guards](https://github.com/SamuelHinestrosa/pleamar/blob/codex/windows-native-026/docs/windows-scene-commands.md).
+
+## Explicit foreground application input
+
+This is shared Windows input, not Linux's independent agent seat. Start the
+broker in another PowerShell terminal, naming a connected display exactly as
+shown by `agent monitors`. An optional process restricts its scope further:
+
+```powershell
+./target/release/pleamar-wm.exe agent serve --input foreground --monitor '\\.\DISPLAY2' --process 1234 --seconds 300
+```
+
+The broker is separate from the automatic layout session. It accepts same-user,
+same-logon named-pipe commands and exits after its lease (1–3600 seconds,
+default 300). A process scope holds its process object and creation identity;
+exiting ends the broker and PID reuse cannot substitute another application.
+It starts without creating a window, taking focus or injecting
+input. `PLEAMAR_WM_NAMESPACE` separates brokers as well as layout sessions.
+
+```powershell
+./target/release/pleamar-wm.exe agent input-status
+./target/release/pleamar-wm.exe agent focus 1234
+./target/release/pleamar-wm.exe agent look 1234 'C:\Pictures\Before ñ.png'
+./target/release/pleamar-wm.exe agent click 1234 120 90
+./target/release/pleamar-wm.exe agent look 1234 'C:\Pictures\After click ñ.png'
+./target/release/pleamar-wm.exe agent type 1234 'Café 海'
+./target/release/pleamar-wm.exe agent done
+./target/release/pleamar-wm.exe agent stop
+```
+
+Use your actual PID, capture coordinates and new file paths. While a broker
+runs, `look` returns JSON with the file, dimensions and selected identity.
+Its picture permits one action within 30 seconds. `move`, `click`, `drag` and `scroll`
+use physical pixels measured from the captured visible frame, including its
+title bar; these are not client-area or logical DPI coordinates. `type`, `key`
+and `hotkey` also require a fresh picture and the target in the foreground.
+`type PID -` reads up to 4000 Unicode characters from stdin. Hotkey modifiers
+are `ctrl`, `alt` and `shift`. `agent help` lists the complete command forms.
+
+The target must remain wholly inside the named monitor and optional process
+scope. `agent windows` includes owned dialogs, which automatic tiling still
+excludes. A parent and its dialog make a PID ambiguous: select the dialog's
+exact `window.id`. The broker never redirects an action from a disabled owner. The broker refuses minimized windows, implicit modal redirection, stale
+or reused identities, changed geometry, covered points, cursor confinement and
+user-held modifiers/buttons/Escape. Windows can refuse foreground activation or
+input into protected/elevated applications; an error does not trigger retries.
+An explicit `focus` command forwards the CLI caller's foreground eligibility
+only to its connected broker with `AllowSetForegroundWindow`. This remains
+subject to [Windows foreground rules](https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-allowsetforegroundwindow).
+An acknowledgement means Windows accepted the submitted events, not that an
+application completed the requested task. Observe it with another `look`.
+
+`done` discards all pictures. `stop` uses a separate pipe, so it can cancel a
+capture or pending input guard while the ordinary command pipe is occupied.
+Already delivered events cannot be undone; each remaining balanced gesture is
+inserted as one batch. The broker also cancels when its lease or request expires.
+If no broker exists, `look` retains its read-only behavior and grants no input
+permit. A running broker's refusal never falls back to a different capture path.
+
+Validation of this new CLI path is still in progress. Engine input acceptance
+does not by itself prove this broker/CLI integration; native end-to-end evidence
+must be recorded before treating it as verified.
 
 ## Launching from a scene
 
@@ -502,8 +564,8 @@ confirm placement and returns actual bounds/monitor JSON. It does not request
 foreground activation. A request for the current monitor preserves position
 and size. Disconnected destinations and ambiguous PIDs fail explicitly.
 `agent_window_send` advertises this command independently of native input or
-background launch, which remain unavailable through this CLI. Physical
-cross-monitor acceptance is still pending.
+background launch. Foreground input needs its own opt-in broker; background
+launch is unavailable. Physical cross-monitor acceptance is still pending.
 
 ## Status and remaining parity work
 

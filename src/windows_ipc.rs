@@ -49,6 +49,21 @@ impl Endpoint {
         Ok(Self { path: format!(r"\\.\pipe\pleamar-wm-{sid}-{session}-{namespace}"), sid })
     }
     pub fn current() -> Result<Self> { Self::new(&std::env::var("PLEAMAR_WM_NAMESPACE").unwrap_or_default()) }
+    pub fn service(mut self, name: &str) -> Result<Self> {
+        if !matches!(name, "agent" | "agent-control") { return Err("unknown WM service".into()); }
+        // A dot is forbidden in user namespaces, so these cannot alias a layout session.
+        self.path.push('.'); self.path.push_str(name); Ok(self)
+    }
+    pub fn exists(&self) -> Result<bool> {
+        let path: Vec<u16> = self.path.encode_utf16().chain([0]).collect();
+        if unsafe { WaitNamedPipeW(PCWSTR(path.as_ptr()), 1) }.as_bool() { return Ok(true); }
+        let error = std::io::Error::last_os_error();
+        match error.raw_os_error() {
+            Some(2) => Ok(false),
+            Some(121 | 231) => Ok(true), // Existing, busy pipe: never fall back to unguarded look.
+            _ => Err(error.into()),
+        }
+    }
     fn bind(&self) -> Result<File> {
         let descriptor: Vec<u16> = format!("D:P(A;;GA;;;SY)(A;;GA;;;{})", self.sid).encode_utf16().chain([0]).collect();
         let mut sd = PSECURITY_DESCRIPTOR::default();
@@ -65,7 +80,9 @@ impl Endpoint {
         if handle.is_invalid() { return Err(format!("WM session already running or pipe unavailable: {error}").into()); }
         Ok(unsafe { File::from_raw_handle(handle.0) })
     }
-    pub fn ask(&self, command: &str) -> Result<Value> {
+    pub fn ask(&self, command: &str) -> Result<Value> { self.ask_mode(command, false) }
+    pub fn ask_with_focus(&self, command: &str) -> Result<Value> { self.ask_mode(command, true) }
+    fn ask_mode(&self, command: &str, foreground: bool) -> Result<Value> {
         if command.len() > LIMIT - 128 { return Err("WM command exceeds the protocol limit".into()); }
         let until = Instant::now() + TIMEOUT;
         let file = loop {
@@ -76,6 +93,14 @@ impl Endpoint {
                 Err(e) => return Err(format!("WM session unavailable: {e}").into()),
             }
         };
+        if foreground {
+            // Only an explicit focus command forwards the caller's foreground
+            // eligibility, and only to the actual connected server, never ASFW_ANY.
+            let mut pid = 0;
+            unsafe { GetNamedPipeServerProcessId(HANDLE(file.as_raw_handle()), &mut pid) }?;
+            if pid == 0 { return Err("native focus server has no process identity".into()); }
+            let _ = unsafe { AllowSetForegroundWindow(pid) };
+        }
         let cancel = Event::new()?;
         send(&file, &cancel, &json!({"version":1,"command":command}), until)?;
         let answer = receive(&file, &cancel, until)?;
@@ -225,6 +250,18 @@ mod tests {
     fn endpoint() -> Endpoint {
         let nonce = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
         Endpoint::new(&format!("test-{}-{nonce}", std::process::id())).unwrap()
+    }
+    #[test]
+    fn agent_endpoints_do_not_alias_layout_namespaces() {
+        let layout=endpoint();
+        let input=layout.clone().service("agent").unwrap();
+        let control=layout.clone().service("agent-control").unwrap();
+        assert_ne!(input.path,control.path);assert_ne!(input.path,layout.path);
+        assert!(!input.exists().unwrap());
+        let server=Server::start(input.clone()).unwrap();
+        assert!(input.exists().unwrap());
+        drop(server);assert!(!input.exists().unwrap());
+        assert!(layout.service("arbitrary").is_err());
     }
     #[test]
     fn rejects_invalid_names_and_oversized_commands() {

@@ -1,5 +1,11 @@
-//! Named operations use the scene's own input path; no OS cursor or keyboard injection.
+//! Named scene operations and explicitly enabled foreground input.
 use super::*;
+#[path = "windows_agent_input.rs"]
+mod input;
+
+// Dialogs are addressable by an exact identity, but never enter tiling/recovery.
+fn windows() -> Result<Vec<Window>> { super::catalog(true) }
+fn target(id: &str) -> Result<(HWND, Window)> { super::target_kind(id, true) }
 
 const HELP: &str = "pleamar-wm agent — native Windows scene commands
 
@@ -24,7 +30,27 @@ Panels such as Marea may appear only in scenes, not the ordinary window catalog.
 This does not provide Linux's independent pointer, keyboard seat or cursor glide.
 Look uses native WGC without activating or restoring the window. Hidden/minimized
 windows and ambiguous PIDs are rejected. The output file must not exist.
-Arbitrary-application input, click/open and remote control remain unavailable.
+Native application input is opt-in, in a separate terminal:
+  serve --input foreground --monitor NAME [--process PID] [--seconds N]
+                                 enable shared foreground input for 300 seconds (maximum 3600)
+  input-status                   show the running broker's scope
+  focus PID|WINDOW_ID             request focus for a visible window within that scope
+  move PID X Y                   move the shared pointer within the last picture
+  click PID X Y [BUTTON] [COUNT]  click in the last picture's physical pixel coordinates
+  drag PID X1 Y1 X2 Y2            left-button drag in that picture
+  scroll PID X Y DIRECTION [N]    up/down/left/right wheel, 1..30 steps
+  type PID TEXT                  Unicode text; - reads stdin, maximum 4000 characters
+  key PID NAME                   enter/tab/escape/backspace/arrows and navigation keys
+  hotkey PID MODS+KEY             ctrl/alt/shift shortcuts, for example ctrl+a
+  done                           discard every picture and input permit
+  stop                           cancel the broker, including an in-flight capture/input
+
+While the broker runs, look returns JSON and grants one input action within 30s.
+Look again after every action. A moved, hidden, covered or unfocused target refuses
+input. Dialogs are listed but never selected implicitly; select their exact window.id.
+Use the exact display NAME, not all.
+This shares your real pointer/keyboard; it is not Linux's independent input seat.
+Open/background launch and remote control remain unavailable.
 All commands use the current logon's scene namespace.";
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -126,6 +152,7 @@ fn write_picture(path: &Path, encoded: &[u8]) -> Result<()> {
 }
 
 fn look(selector: &str, output: Option<&str>) -> Result<()> {
+    if input::look_if_running(selector, output)? { return Ok(()); }
     let catalog = windows()?;
     let window = select_window(&catalog,selector)?;
     if window.minimized { return Err("window is minimized; look does not restore or focus it".into()); }
@@ -170,6 +197,7 @@ fn look(selector: &str, output: Option<&str>) -> Result<()> {
 pub(super) fn execute(args: &[&str]) -> Result<Option<Value>> {
     match args {
         [] | ["help" | "--help" | "-h"] => { println!("{HELP}"); Ok(None) },
+        ["serve" | "stop" | "done" | "input-status" | "focus" | "move" | "click" | "drag" | "scroll" | "type" | "key" | "hotkey", ..] => input::execute(args).map(Some),
         ["scenes"] => Ok(Some(serde_json::to_value(scenes()?)?)),
         ["monitors"] => Ok(Some(serde_json::to_value(monitors()?)?)),
         ["look", selector] => { look(selector,None)?; Ok(None) },

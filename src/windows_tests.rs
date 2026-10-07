@@ -11,10 +11,22 @@ fn unsupported_capabilities_do_not_report_success() {
     assert_eq!(caps["agent_background_launch"],false);
     assert_eq!(caps["agent_window_capture"],true);
     assert_eq!(caps["agent_window_send"],true);
-    assert_eq!(caps["agent_native_input"],false);
+    assert_eq!(caps["agent_native_input"],true);
+    assert_eq!(caps["agent_input_mode"],"opt-in-foreground");
     for feature in ["window_scene_provider", "rain", "snow", "ride", "dock", "pools", "remote", "phone_monitor", "independent_agent_seat"] {
         assert_eq!(caps[feature], false);
     }
+}
+
+#[test]
+fn agent_catalog_includes_owned_dialogs_without_tiling_them() {
+    assert!(catalog_style(WS_EX_TOOLWINDOW,true,true));
+    assert!(!catalog_style(WS_EX_TOOLWINDOW,true,false));
+    assert!(!catalog_style(WS_EX_TOOLWINDOW,false,true));
+    assert!(catalog_style(WINDOW_EX_STYLE(0),true,true));
+    assert!(!catalog_style(WINDOW_EX_STYLE(0),true,false));
+    assert!(!catalog_style(WS_EX_NOACTIVATE,true,true));
+    assert!(catalog_style(WS_EX_APPWINDOW,true,false));
 }
 
 #[test]

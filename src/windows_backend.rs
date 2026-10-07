@@ -154,15 +154,20 @@ fn process_app(process: HANDLE) -> Option<String> {
 struct Window { id: String, title: String, app: String, class: String, process: u32, monitor: String,
     bounds: Bounds, minimized: bool, maximized: bool, resizable: bool }
 
-fn inspect(hwnd: HWND) -> Option<Window> {
+fn inspect(hwnd: HWND) -> Option<Window> { inspect_kind(hwnd, false) }
+fn catalog_style(ex: WINDOW_EX_STYLE, owned: bool, include_owned: bool) -> bool {
+    if ex.contains(WS_EX_NOACTIVATE) { return false; }
+    if ex.contains(WS_EX_APPWINDOW) { return true; }
+    if owned { include_owned } else { !ex.contains(WS_EX_TOOLWINDOW) }
+}
+fn inspect_kind(hwnd: HWND, include_owned: bool) -> Option<Window> {
     unsafe {
         if !IsWindowVisible(hwnd).as_bool() { return None; }
         let mut cloaked = 0u32;
         DwmGetWindowAttribute(hwnd, DWMWA_CLOAKED, &mut cloaked as *mut _ as _, size_of::<u32>() as u32).ok()?;
         if cloaked != 0 { return None; }
         let ex = WINDOW_EX_STYLE(GetWindowLongPtrW(hwnd, GWL_EXSTYLE) as u32);
-        if ex.contains(WS_EX_NOACTIVATE) || (!ex.contains(WS_EX_APPWINDOW)
-            && (ex.contains(WS_EX_TOOLWINDOW) || !GetWindow(hwnd, GW_OWNER).unwrap_or_default().is_invalid())) { return None; }
+        if !catalog_style(ex, !GetWindow(hwnd, GW_OWNER).unwrap_or_default().is_invalid(), include_owned) { return None; }
         let mut class = [0u16; 256];
         let n = GetClassNameW(hwnd, &mut class).max(0) as usize;
         let class = String::from_utf16_lossy(&class[..n]);
@@ -181,22 +186,24 @@ fn inspect(hwnd: HWND) -> Option<Window> {
     }
 }
 
-fn windows() -> Result<Vec<Window>> {
+fn windows() -> Result<Vec<Window>> { catalog(false) }
+fn catalog(include_owned: bool) -> Result<Vec<Window>> {
     unsafe extern "system" fn visit(hwnd: HWND, data: LPARAM) -> BOOL {
-        let found = unsafe { &mut *(data.0 as *mut Vec<Window>) };
-        if let Some(window) = inspect(hwnd) { found.push(window); }
+        let (found, include_owned) = unsafe { &mut *(data.0 as *mut (Vec<Window>, bool)) };
+        if let Some(window) = inspect_kind(hwnd, *include_owned) { found.push(window); }
         true.into()
     }
-    let mut found = Vec::<Window>::new();
+    let mut found = (Vec::<Window>::new(), include_owned);
     unsafe { EnumWindows(Some(visit), LPARAM(&mut found as *mut _ as isize)) }?;
-    Ok(found)
+    Ok(found.0)
 }
 
-fn target(id: &str) -> Result<(HWND, Window)> {
+fn target(id: &str) -> Result<(HWND, Window)> { target_kind(id, false) }
+fn target_kind(id: &str, include_owned: bool) -> Result<(HWND, Window)> {
     let parts: Vec<_> = id.split(':').collect();
     if parts.len() != 4 { return Err("use an ID from `pleamar-wm windows`".into()); }
     let hwnd = HWND(usize::from_str_radix(parts[2], 16)? as _);
-    let window = inspect(hwnd).ok_or("window closed, is hidden, or is not an ordinary application window")?;
+    let window = inspect_kind(hwnd, include_owned).ok_or("window closed, is hidden, or is outside this window catalog")?;
     if window.id != id { return Err("window identity changed; list windows again".into()); }
     Ok((hwnd, window))
 }
@@ -318,7 +325,7 @@ fn execute(args: &[String]) -> Result<Option<Value>> {
             "native_scenes_luau": true, "read_only_window_previews": true, "visible_window_capture": true,
             "preview_window_actions": ["focus", "close", "minimize", "restore", "configure", "send"], "preview_redirected_input": false,
             "scene_launch": true, "agent_background_launch": false,
-            "agent_window_capture": true, "agent_window_send": true, "agent_native_input": false,
+            "agent_window_capture": true, "agent_window_send": true, "agent_native_input": true, "agent_input_mode": "opt-in-foreground",
             "window_rules": ["app", "title", "float", "size", "monitor"], "private_window_rules": false, "workspace_window_rules": false,
             "window_scene_provider": false, "automatic_session": true, "rain": false, "snow": false,
             "ride": false, "dock": false, "pools": false, "remote": false, "phone_monitor": false, "independent_agent_seat": false,
