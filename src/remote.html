@@ -42,7 +42,7 @@
   #toast.show { opacity: 1; }
   /* ── on a phone (docs/phone.md): the session comes to it ── */
   body.phone #bar, body.phone #handle { display: none !important; }
-  body.phone #stage { touch-action: none; overflow: hidden; background: #071014; transition: transform .32s cubic-bezier(.2,.8,.2,1); transform-origin: 50% 0; }
+  body.phone #stage { touch-action: none; overflow: hidden; background: #071014; transition: transform .32s cubic-bezier(.2,.8,.2,1); transform-origin: 0 0; }
   body.phone video, body.phone canvas { width: 100%; height: 100%; max-width: none; max-height: none; object-fit: contain; }
   body.phone #toast { bottom: calc(40px + env(safe-area-inset-bottom)); }
   #ph { display: none; position: absolute; inset: 0; z-index: 5; pointer-events: none; }
@@ -624,13 +624,13 @@
     const f = at(e);
     one = { id: e.pointerId, x0: e.clientX, y0: e.clientY, x: e.clientX, y: e.clientY, t0: performance.now(), f, moved: false, edge: e.clientY > edgeZone(), track: [], timer: null, held: false };
     hand('m ' + f.join(' '));
-    // Held still: the right button (a menu), with a little buzz.
+    // Held still, a little buzz: let go there, the right button (a menu);
+    // moved from there, the left one held (to select, to drag).
     one.timer = setTimeout(() => {
       if (!one || one.moved || one.edge) return;
       one.held = true;
       ring(one.x, one.y, true);
       if (navigator.vibrate) navigator.vibrate(12);
-      hand('b 2 1'); hand('b 2 0');
     }, 480);
   });
   stage.addEventListener('pointermove', (e) => {
@@ -652,11 +652,22 @@
     if (!one.moved && Math.hypot(e.clientX - one.x0, e.clientY - one.y0) > 9) {
       one.moved = true;
       clearTimeout(one.timer);
+      // Held first: the left button goes down where it was held.
+      if (one.held) { one.dragging = true; hand('m ' + one.f.join(' ')); hand('b 0 1'); }
     }
-    if (one.moved) {
+    if (one.dragging) {
+      hand('m ' + at(e).join(' '));
+    } else if (one.moved) {
       if (one.edge) {
         edge.classList.add('on');
         edge.style.transform = 'translate(' + (e.clientX - one.x0) * 0.4 + 'px,' + Math.min(0, e.clientY - one.y0) * 0.35 + 'px)';
+      } else if (zoom.k > 1.01) {
+        // Zoomed in, one finger moves the picture, not what is in it.
+        zoom.x += dx; zoom.y += dy;
+        const r = stage.getBoundingClientRect();
+        zoom.x = Math.min(0, Math.max(innerWidth - r.width, zoom.x));
+        zoom.y = Math.min(0, Math.max(innerHeight - r.height, zoom.y));
+        applyZoom();
       } else {
         wheelBy(dx / zoom.k, dy / zoom.k);
       }
@@ -674,7 +685,8 @@
     const o = one; one = null;
     clearTimeout(o.timer);
     edge.classList.remove('on'); edge.style.transform = '';
-    if (o.held) return;
+    if (o.dragging) { hand('m ' + at(e).join(' ')); hand('b 0 0'); return; }
+    if (o.held) { hand('m ' + o.f.join(' ')); hand('b 2 1'); hand('b 2 0'); return; }
     if (o.edge && o.moved) {
       const dx = e.clientX - o.x0, dy = e.clientY - o.y0;
       if (dy < -50 && Math.abs(dy) > Math.abs(dx)) send('g cards');
@@ -691,9 +703,9 @@
       lastTapY = o.y0;
       return;
     }
-    // Let go moving: it goes on by itself, slowing down.
+    // Let go moving: it goes on by itself, slowing down (not the zoomed picture).
     const tr = o.track;
-    if (tr.length > 1) {
+    if (tr.length > 1 && zoom.k <= 1.01) {
       const a = tr[0], b = tr[tr.length - 1], dt = Math.max(b.t - a.t, 1);
       let vx = (b.x - a.x) / dt, vy = (b.y - a.y) / dt;
       if (Math.hypot(vx, vy) > 0.25) {
