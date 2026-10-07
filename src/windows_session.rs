@@ -451,6 +451,10 @@ pub(super) fn run(args:&[String]) -> Result<Value> {
 }
 
 #[cfg(test)]
+#[path = "windows_recovery_tests.rs"]
+mod recovery_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

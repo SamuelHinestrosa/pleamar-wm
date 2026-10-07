@@ -150,6 +150,15 @@ the journal before accepting commands. Unavailable/hidden windows and changed
 display geometry can leave pending recovery entries, which `status` reports;
 real hotplug and maximized-window acceptance are still pending.
 
+The Windows CI workflow also runs an opt-in native recovery regression on its
+disposable runner: maximized, minimized and minimized-from-maximized windows,
+return to free layout and recovery from the saved journal. It checks the free
+rectangle, restored show state and focus separately. Its report is the
+`wm-recovery-acceptance` artifact; compiling the helper or leaving it ignored
+does not count as a pass. It changes focus between its own fixture windows and
+refuses to run outside the explicit GitHub-hosted CI step. This API regression
+does not replace a mixed-DPI, multi-monitor or physical desktop walkthrough.
+
 Commands use a local named pipe restricted to the current Windows user and
 session; remote pipe clients are rejected. Frames, waits and cancellation are
 bounded. One request runs on the desktop thread at a time. Idle connections

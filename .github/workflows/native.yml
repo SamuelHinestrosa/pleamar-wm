@@ -49,6 +49,24 @@ jobs:
       - name: Check the preview scene
         working-directory: pleamar-wm
         run: cargo run --locked -- --check examples/windows-preview.plm
+      - name: Recover normal positions without changing show state or focus
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        shell: pwsh
+        env:
+          PLEAMAR_WM_CI_RECOVERY: '1'
+          PLEAMAR_WM_CI_OUTPUT: ${{ runner.temp }}/wm-recovery-acceptance
+        run: >-
+          cargo test --locked --bin pleamar-wm
+          windows_backend::session::recovery_tests::native_recovery_preserves_show_states
+          -- --ignored --exact --nocapture --test-threads=1
+      - name: Keep native recovery evidence
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wm-recovery-acceptance
+          path: ${{ runner.temp }}/wm-recovery-acceptance
+          if-no-files-found: warn
       - name: Check the overview scene
         working-directory: pleamar-wm
         run: cargo run --locked -- --check examples/windows-overview.plm
