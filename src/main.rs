@@ -19,6 +19,8 @@ mod desktop;
 #[cfg(target_os = "linux")]
 mod nest;
 #[cfg(target_os = "linux")]
+mod phone;
+#[cfg(target_os = "linux")]
 mod portal;
 #[cfg(target_os = "linux")]
 mod headless;

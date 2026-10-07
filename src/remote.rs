@@ -36,6 +36,10 @@ const LIFE: Duration = Duration::from_secs(24 * 3600);
 /// out: a laptop closed with the page open (its browser kept it connected,
 /// and kept the picture coming) is not someone using this desktop.
 const UNUSED: Duration = Duration::from_secs(30 * 60);
+/// How long the session waits on the phone with no page of the phone
+/// connected (switched to another app, the network gone a moment) before it
+/// goes back to the desk.
+const PHONE_GRACE: Duration = Duration::from_secs(3 * 60);
 
 const HELP: &str = "pleamar-wm remote — this desktop from a browser elsewhere
 
@@ -158,6 +162,11 @@ struct Gate {
     next_page: u64,
     /// Raised by `pleamar-wm remote stop`: every page connected goes.
     kicked: u64,
+    /// The session is on the phone (docs/phone.md): how many of the phone's
+    /// pages are connected, and since when none is.
+    phone_on: bool,
+    phone_pages: u32,
+    phone_left: Option<Instant>,
 }
 
 impl Gate {
@@ -267,7 +276,7 @@ fn serve(view_only: bool) -> Result<(), String> {
     // One left from before (a session that ended, one started by hand) goes:
     // this is the one the session started now.
     take_over(port);
-    let mut gate = Gate { config, sessions: HashMap::new(), saved: 0, failures: HashMap::new(), all_failures: Vec::new(), last_step: 0, present: HashMap::new(), next_page: 0, kicked: 0 };
+    let mut gate = Gate { config, sessions: HashMap::new(), saved: 0, failures: HashMap::new(), all_failures: Vec::new(), last_step: 0, present: HashMap::new(), next_page: 0, kicked: 0, phone_on: false, phone_pages: 0, phone_left: None };
     gate.restore();
     let gate = Arc::new(Mutex::new(gate));
     // The session is told who is in (it marks it on the monitors), and this
@@ -276,6 +285,8 @@ fn serve(view_only: bool) -> Result<(), String> {
     std::thread::spawn(move || tell_the_session(told));
     let door = gate.clone();
     std::thread::spawn(move || control(door));
+    let keeper = gate.clone();
+    std::thread::spawn(move || keep_phone(keeper));
     let hands = Arc::new(Mutex::new(None::<Hands>));
     let mut tries = 0;
     let listener = loop {
@@ -482,6 +493,70 @@ fn tell_the_session(gate: Arc<Mutex<Gate>>) {
         }
         std::thread::sleep(Duration::from_millis(700));
     }
+}
+
+/// The session back at the desk once no page of the phone has been there
+/// for a while; and told the phone is gone if the desk took it back.
+fn keep_phone(gate: Arc<Mutex<Gate>>) {
+    loop {
+        std::thread::sleep(Duration::from_secs(2));
+        let mut g = gate.lock().unwrap();
+        if !g.phone_on {
+            continue;
+        }
+        if g.phone_pages == 0 && g.phone_left.is_some_and(|t| t.elapsed() > PHONE_GRACE) {
+            g.phone_on = false;
+            drop(g);
+            println!("remote · no phone for a while: the session goes back to the desk");
+            let _ = crate::agent_cli::tell("P off");
+        }
+    }
+}
+
+/// Text as keys of the desk's own layout: each character, the key that
+/// writes it (with Shift if it is on the second level). For the lock screen,
+/// which is no window to type into otherwise.
+fn type_keys(h: &mut Hands, text: &str) {
+    static TABLE: std::sync::OnceLock<HashMap<char, (u16, bool)>> = std::sync::OnceLock::new();
+    let table = TABLE.get_or_init(|| {
+        let mut t = HashMap::new();
+        let Ok(km) = crate::session::keymap() else { return t };
+        use smithay::input::keyboard::xkb;
+        for level in [1u32, 0] {
+            for code in km.min_keycode().raw()..=km.max_keycode().raw() {
+                for sym in km.key_get_syms_by_level(code.into(), 0, level) {
+                    if let Some(c) = char::from_u32(xkb::keysym_to_utf32(*sym)).filter(|c| *c != '\0') {
+                        if code >= 8 {
+                            t.insert(c, ((code - 8) as u16, level == 1));
+                        }
+                    }
+                }
+            }
+        }
+        t
+    });
+    for c in text.chars() {
+        let (code, shift) = match c {
+            '\n' => (28, false),
+            _ => match table.get(&c) {
+                Some(k) => *k,
+                None => continue,
+            },
+        };
+        if shift {
+            h.key(42, true);
+        }
+        h.key(code, true);
+        h.key(code, false);
+        if shift {
+            h.key(42, false);
+        }
+    }
+}
+
+/// Whether the phone's monitor is up (the desk may have taken the session back).
+fn phone_index(monitors: &[(String, f64, f64, f64, f64)]) -> Option<usize> {
+    monitors.iter().position(|m| m.0 == crate::layers::PHONE_NAME)
 }
 
 /// Where `stop` finds the server: one per port, so two never meet.
@@ -872,17 +947,40 @@ fn viewer(stream: TcpStream, token: String, from: String, gate: &Arc<Mutex<Gate>
             *h = Some(Hands::new()?);
         }
     }
-    let monitors = crate::agent_cli::monitors()?;
-    let mut list = String::from("mons");
-    for (name, x, y, w, h) in &monitors {
-        list.push_str(&format!(" {name},{x},{y},{w},{h}"));
-    }
-    ws.send(Message::Text(list.into())).map_err(|e| e.to_string())?;
+    let mut monitors = crate::agent_cli::monitors()?;
+    let mons = |monitors: &[(String, f64, f64, f64, f64)]| {
+        let mut list = String::from("mons");
+        for (name, x, y, w, h) in monitors {
+            list.push_str(&format!(" {name},{x},{y},{w},{h}"));
+        }
+        list
+    };
+    ws.send(Message::Text(mons(&monitors).into())).map_err(|e| e.to_string())?;
 
-    let (want_tx, want_rx) = mpsc::channel::<Want>();
-    let (frame_tx, frame_rx) = mpsc::channel::<Result<(usize, u32, u32, Vec<Vec<u8>>), String>>();
+    let (mut want_tx, want_rx) = mpsc::channel::<Want>();
+    let (frame_tx, mut frame_rx) = mpsc::channel::<Result<(usize, u32, u32, Vec<Vec<u8>>), String>>();
     let names: Vec<String> = monitors.iter().map(|m| m.0.clone()).collect();
     std::thread::spawn(move || pictures(names, want_rx, frame_tx));
+    // A page on a phone, with the session on it (docs/phone.md).
+    let mut on_phone = false;
+    let mut parked = false;
+    // Asked for while the session is locked: the desk is shown to unlock it,
+    // and the phone is asked for again until it comes.
+    let mut unlocking: Option<String> = None;
+    let mut unlock_tried = Instant::now();
+    let mut phone_checked = Instant::now();
+    struct PhoneLeave<'a>(&'a Arc<Mutex<Gate>>, std::rc::Rc<std::cell::Cell<bool>>);
+    impl Drop for PhoneLeave<'_> {
+        fn drop(&mut self) {
+            if self.1.get() {
+                let mut g = self.0.lock().unwrap();
+                g.phone_pages = g.phone_pages.saturating_sub(1);
+                g.phone_left = Some(Instant::now());
+            }
+        }
+    }
+    let phone_flag = std::rc::Rc::new(std::cell::Cell::new(false));
+    let _phone_leave = PhoneLeave(gate, phone_flag.clone());
 
     let mut monitor = 0usize;
     let mut flow = Flow::new();
@@ -932,6 +1030,10 @@ fn viewer(stream: TcpStream, token: String, from: String, gate: &Arc<Mutex<Gate>
             Ok(_) => {}
             Err(tungstenite::Error::Io(e)) if matches!(e.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut) => {}
             Err(_) => break,
+        }
+        if let Some(ask) = unlocking.as_ref().filter(|_| unlock_tried.elapsed() > Duration::from_millis(1500)) {
+            unlock_tried = Instant::now();
+            lines.push(ask.clone());
         }
         let mut gone = false;
         while let Some(event) = peer.as_ref().and_then(|p| p.events.try_recv().ok()) {
@@ -1003,10 +1105,110 @@ fn viewer(stream: TcpStream, token: String, from: String, gate: &Arc<Mutex<Gate>
                     Some(h) if !view_only => h,
                     _ => idle.insert(Hands::none()),
                 };
-                if matches!(verb, "m" | "b" | "w" | "k" | "paste" | "copy" | "mon") {
+                if matches!(verb, "m" | "b" | "w" | "k" | "paste" | "copy" | "mon" | "phone" | "unphone" | "g" | "type") {
                     used = Instant::now();
                 }
                 match (verb, &n[..]) {
+                    // A phone: the session comes to a monitor of its size.
+                    ("phone", [w, hh, scale]) if !view_only => {
+                        let asked = crate::agent_cli::tell(&format!("P {} {} {:.3}", *w as u32, *hh as u32, scale));
+                        // Up within a moment (the scene's copies are given again).
+                        let mut k = None;
+                        for _ in 0..30 {
+                            if let Ok(m) = crate::agent_cli::monitors() {
+                                if let Some(i) = phone_index(&m) {
+                                    k = Some(i);
+                                    monitors = m;
+                                    break;
+                                }
+                            }
+                            std::thread::sleep(Duration::from_millis(100));
+                        }
+                        match (asked, k) {
+                            (Err(e), _) if e.contains("locked") => {
+                                // Shown the desk —its lock screen— to unlock it from here.
+                                if unlocking.is_none() {
+                                    println!("remote · the session is locked at the desk: unlocked from the phone first");
+                                    let _ = ws.send(Message::Text("phonelocked".into()));
+                                    monitor = 0;
+                                    parked = false;
+                                    if video_wanted {
+                                        restart = true;
+                                    } else {
+                                        pending = Some(true);
+                                        waiting = false;
+                                    }
+                                }
+                                unlocking = Some(t.clone());
+                            }
+                            (Ok(_), Some(k)) => {
+                                unlocking = None;
+                                if !on_phone {
+                                    on_phone = true;
+                                    phone_flag.set(true);
+                                    let mut g = gate.lock().unwrap();
+                                    g.phone_on = true;
+                                    g.phone_pages += 1;
+                                    g.phone_left = None;
+                                }
+                                println!("remote · the session goes to the phone ({}×{} at {:.2})", *w as u32, *hh as u32, scale);
+                                let _ = ws.send(Message::Text(mons(&monitors).into()));
+                                let _ = ws.send(Message::Text(format!("phoneon {k}").into()));
+                                // The pictures, of the new row of monitors.
+                                let (wt, wr) = mpsc::channel::<Want>();
+                                let (ft, fr) = mpsc::channel();
+                                let names: Vec<String> = monitors.iter().map(|m| m.0.clone()).collect();
+                                std::thread::spawn(move || pictures(names, wr, ft));
+                                want_tx = wt;
+                                frame_rx = fr;
+                                monitor = k;
+                                if let Some(p) = gate.lock().unwrap().present.get_mut(&page) {
+                                    p.0 = monitor;
+                                }
+                                phone_checked = Instant::now();
+                                parked = false;
+                                if video_wanted {
+                                    restart = true;
+                                } else {
+                                    pending = Some(true);
+                                    waiting = false;
+                                }
+                            }
+                            (Err(e), _) => {
+                                let _ = ws.send(Message::Text(format!("nophone {e}").into()));
+                            }
+                            (_, None) => {
+                                let _ = ws.send(Message::Text("nophone the session did not put up the phone's monitor".into()));
+                            }
+                        }
+                    }
+                    // Given back from the phone: the session goes to the desk now.
+                    ("unphone", _) if on_phone => {
+                        on_phone = false;
+                        phone_flag.set(false);
+                        parked = true;
+                        video = None;
+                        {
+                            let mut g = gate.lock().unwrap();
+                            g.phone_pages = g.phone_pages.saturating_sub(1);
+                            g.phone_on = g.phone_pages > 0;
+                        }
+                        println!("remote · the phone gives the session back to the desk");
+                        let _ = crate::agent_cli::tell("P off");
+                    }
+                    // A gesture from the phone's bottom edge.
+                    ("g", _) if on_phone && matches!(rest.trim(), "cards" | "next" | "prev") => {
+                        let _ = crate::agent_cli::tell(&format!("E phone_{}", rest.trim()));
+                    }
+                    // What the phone's keyboard writes.
+                    // Typing at the lock screen (no window to type into): its
+                    // keys, as the desk's own layout has them.
+                    ("type", _) if !on_phone && unlocking.is_some() && !rest.is_empty() => type_keys(h, rest),
+                    ("type", _) if on_phone && !rest.is_empty() => {
+                        if let Err(e) = crate::agent_cli::tell(&format!("U {}", hex(rest.as_bytes()))) {
+                            println!("remote · the phone's text did not go: {e}");
+                        }
+                    }
                     ("hello", _) => {
                         video_wanted = rest.trim() == "video";
                         if video_wanted {
@@ -1084,6 +1286,32 @@ fn viewer(stream: TcpStream, token: String, from: String, gate: &Arc<Mutex<Gate>
             }
         }
 
+        // The desk took the session back: the phone is told, and nothing more is sent.
+        if on_phone && phone_checked.elapsed() > Duration::from_secs(1) {
+            phone_checked = Instant::now();
+            if let Ok(m) = crate::agent_cli::monitors() {
+                if phone_index(&m).is_none() {
+                    on_phone = false;
+                    phone_flag.set(false);
+                    {
+                        let mut g = gate.lock().unwrap();
+                        g.phone_pages = g.phone_pages.saturating_sub(1);
+                        g.phone_on = g.phone_pages > 0;
+                    }
+                    println!("remote · the session went back to the desk");
+                    video = None;
+                    parked = true;
+                    monitors = m;
+                    monitor = 0;
+                    let _ = ws.send(Message::Text(mons(&monitors).into()));
+                    let _ = ws.send(Message::Text("deskback".into()));
+                }
+            }
+        }
+        // Parked (the desk has the session): nothing to send until the phone asks again.
+        if parked {
+            continue;
+        }
         // As video: frames as they come; fallen behind, from a whole one again.
         if video_wanted {
             if video.as_ref().is_some_and(|v| v.behind.load(std::sync::atomic::Ordering::Relaxed)) {
@@ -1417,10 +1645,19 @@ struct Hands {
     held_keys: HashSet<u16>,
     held_buttons: HashSet<u16>,
     wheel: (f64, f64),
+    /// Instead of devices, steps down a pipe to a headless desktop
+    /// (`PLEAMAR_REMOTE_HANDS_TO`, its `PLEAMAR_HEADLESS_INPUT_FIFO`): to try
+    /// the page without touching the real session's input.
+    to: Option<std::fs::File>,
 }
 
 impl Hands {
     fn new() -> Result<Hands, String> {
+        if let Ok(path) = std::env::var("PLEAMAR_REMOTE_HANDS_TO") {
+            let to = std::fs::OpenOptions::new().write(true).open(&path).map_err(|e| format!("{path}: {e}"))?;
+            println!("remote · the hands go down {path}, not to devices");
+            return Ok(Hands { to: Some(to), ..Hands::none() });
+        }
         // A pointer that says where it is (as a tablet, or a virtual
         // machine's mouse): over all of the desktop, 0…65535.
         let pointer = Device::new("pleamar remote pointer", 0x0701, |fd| unsafe {
@@ -1449,12 +1686,23 @@ impl Hands {
         })?;
         // The session finds them a moment later.
         std::thread::sleep(Duration::from_millis(300));
-        Ok(Hands { pointer: Some(pointer), keyboard: Some(keyboard), held_keys: HashSet::new(), held_buttons: HashSet::new(), wheel: (0.0, 0.0) })
+        Ok(Hands { pointer: Some(pointer), keyboard: Some(keyboard), held_keys: HashSet::new(), held_buttons: HashSet::new(), wheel: (0.0, 0.0), to: None })
     }
 
     /// Hands that do nothing: only watching.
     fn none() -> Hands {
-        Hands { pointer: None, keyboard: None, held_keys: HashSet::new(), held_buttons: HashSet::new(), wheel: (0.0, 0.0) }
+        Hands { pointer: None, keyboard: None, held_keys: HashSet::new(), held_buttons: HashSet::new(), wheel: (0.0, 0.0), to: None }
+    }
+
+    /// A step down the pipe, when there is one instead of devices.
+    fn piped(&mut self, step: &str) -> bool {
+        match self.to.as_mut() {
+            Some(f) => {
+                let _ = writeln!(f, "{step}");
+                true
+            }
+            None => false,
+        }
     }
 
     fn press(&self, pointer: bool, events: &[(u16, u16, i32)]) {
@@ -1465,6 +1713,9 @@ impl Hands {
 
     /// The pointer to a point of the desktop, in units.
     fn point(&mut self, monitors: &[(String, f64, f64, f64, f64)], x: f64, y: f64) {
+        if self.piped(&format!("{x:.1},{y:.1}")) {
+            return;
+        }
         let x0 = monitors.iter().map(|m| m.1).fold(f64::MAX, f64::min);
         let y0 = monitors.iter().map(|m| m.2).fold(f64::MAX, f64::min);
         let x1 = monitors.iter().map(|m| m.1 + m.3).fold(f64::MIN, f64::max);
@@ -1486,11 +1737,26 @@ impl Hands {
         } else {
             self.held_buttons.remove(&code);
         }
+        let step = match (which, down) {
+            (2, true) => "rdown",
+            (2, false) => "rup",
+            (_, true) => "down",
+            (_, false) => "up",
+        };
+        if self.piped(step) {
+            return;
+        }
         self.press(true, &[(EV_KEY, code, down as i32)]);
     }
 
     /// The wheel, in notches (a fraction of one too: a touchpad).
     fn wheel(&mut self, dx: f64, dy: f64) {
+        if self.to.is_some() {
+            if dy != 0.0 {
+                self.piped(&format!("wheel:{:.3}", -dy));
+            }
+            return;
+        }
         let mut events = Vec::new();
         let (hx, hy) = ((dx * 120.0).round() as i32, (-dy * 120.0).round() as i32);
         if hy != 0 {
@@ -1521,6 +1787,19 @@ impl Hands {
         if down {
             self.held_keys.insert(code);
         } else if !self.held_keys.remove(&code) {
+            return;
+        }
+        if self.to.is_some() {
+            let name = match code {
+                14 => "BackSpace",
+                28 => "Return",
+                57 => "space",
+                1 => "Escape",
+                _ => "",
+            };
+            if !name.is_empty() {
+                self.piped(&format!("{}:{name}:{code}", if down { "keydown" } else { "keyup" }));
+            }
             return;
         }
         self.press(false, &[(EV_KEY, code, down as i32)]);

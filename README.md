@@ -489,8 +489,19 @@ Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
   someone there— and takes it up again when it is seen; one with no mouse
   or key from it for half an hour is signed out.
 
-Not yet: touch screens and tablets, dragging out of the window manager's
-own scene (its `carries:` zones).
+- **Your session, in your pocket**: the same page on a phone does not
+  squeeze a monitor into it. It asks for a monitor of the phone's own size
+  and scale, and every window goes there, remembering where it was: on the
+  phone each one is an app under a status line, with a deck of cards to go
+  between them (a swipe up from the bottom) and the dock's programs to open
+  more. Taps, holds (the right button), scrolling that glides on, pinch to
+  zoom, the phone's keyboard. Meanwhile the real monitors are covered; a
+  key or the mouse at the desk brings the session back, locked; given back
+  from the phone (or the phone gone for three minutes), every window
+  returns to its monitor and pool. [docs/phone.md](docs/phone.md)
+
+Not yet: touch screens and tablets on the desk itself, dragging out of the
+window manager's own scene (its `carries:` zones).
 
 # Special Thanks
 

@@ -17,6 +17,15 @@ opening-window keyboard fixes remain part of the Linux compositor. Native scene 
 expose the latest element labels, roles, values and states; their validation
 and the remaining capabilities are described below.
 
+The subsequent upstream changes through `74413be` are also integrated, paired
+with pleamar's `4d35565` pool-return correction. The new phone session includes
+its virtual output, gestures, return curtain and Linux session-lock behavior.
+Those implementations use the Linux compositor and remain Linux-only here;
+`phone_monitor: false` makes this explicit in the native capabilities. Windows
+still needs a remote transport, native application input and virtual-output
+integration before it can offer the same phone session. Merging the sources
+and checking the session scene does not establish that feature on Windows.
+
 ## Build and run from PowerShell
 
 Install the stable Rust x64 MSVC toolchain and Visual Studio Build Tools with
@@ -111,6 +120,14 @@ exit. It keeps PNGs, command logs and a case report as the
 it is not an installer or a test to run on somebody's active desktop. A pending
 or failed workflow is not evidence that these cases pass. Even a pass does not
 cover physical input, mixed-DPI monitors or the full Marea walkthrough.
+
+All three cases passed in [the initial CI run](https://github.com/SamuelHinestrosa/pleamar-wm/actions/runs/37582929156)
+on Windows Server 2022 using D3D12's Microsoft Basic Render Driver. The scene
+PNGs were inspected: its control and Luau count remain visible after reload.
+That run used the debug binary, including its diagnostic overlay and deliberate
+logic delay; it is functional evidence, not a release-performance measurement.
+The workflow now repeats this fixture with the release binary. Its result must
+be checked separately after the current source merge.
 
 ## Explicit window layouts
 

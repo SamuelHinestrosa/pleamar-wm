@@ -9,7 +9,7 @@ fn unsupported_capabilities_do_not_report_success() {
     let caps = execute(&["capabilities".into()]).unwrap().unwrap();
     assert_eq!(caps["scene_launch"],true);
     assert_eq!(caps["agent_background_launch"],false);
-    for feature in ["window_scene_provider", "rain", "snow", "ride", "dock", "pools", "remote", "independent_agent_seat"] {
+    for feature in ["window_scene_provider", "rain", "snow", "ride", "dock", "pools", "remote", "phone_monitor", "independent_agent_seat"] {
         assert_eq!(caps[feature], false);
     }
 }

@@ -10,7 +10,7 @@ on:
         required: true
       pleamar_ref:
         description: Exact pleamar revision (Windows backend required)
-        default: 1a9fbaac6366ec92ef12a2547e8e10fcc5103104
+        default: 71358a0e0cd1a23a33c3705f4e369ce2d78557c1
         required: true
 permissions:
   contents: read
@@ -30,7 +30,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           repository: ${{ inputs.pleamar_repository || 'SamuelHinestrosa/pleamar' }}
-          ref: ${{ inputs.pleamar_ref || '1a9fbaac6366ec92ef12a2547e8e10fcc5103104' }}
+          ref: ${{ inputs.pleamar_ref || '71358a0e0cd1a23a33c3705f4e369ce2d78557c1' }}
           path: pleamar
       - name: Linux system libraries
         if: runner.os == 'Linux'
@@ -71,6 +71,10 @@ jobs:
         if: runner.os == 'Windows'
         with:
           python-version: '3.13'
+      - name: Build the distribution binary for native scene acceptance
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        run: cargo build --release --locked --bin pleamar-wm
       - name: Verified shader compiler for the native scene fixture
         if: runner.os == 'Windows'
         working-directory: pleamar-wm
@@ -84,9 +88,9 @@ jobs:
           $unpacked = Join-Path $stage 'unpacked'
           Expand-Archive -LiteralPath $archive -DestinationPath $unpacked
           foreach ($name in @('dxcompiler.dll', 'dxil.dll')) {
-            Copy-Item -LiteralPath (Join-Path $unpacked "bin/x64/$name") -Destination (Join-Path 'target/debug' $name)
+            Copy-Item -LiteralPath (Join-Path $unpacked "bin/x64/$name") -Destination (Join-Path 'target/release' $name)
           }
-          $licenses = Join-Path 'target/debug' 'licenses/dxc'
+          $licenses = Join-Path 'target/release' 'licenses/dxc'
           New-Item -ItemType Directory -Path $licenses | Out-Null
           foreach ($name in @('LICENCE-MIT.txt', 'LICENSE-LLVM.txt', 'LICENSE-MS.txt')) {
             Copy-Item -LiteralPath (Join-Path $unpacked $name) -Destination $licenses
@@ -97,7 +101,7 @@ jobs:
         timeout-minutes: 6
         env:
           PLEAMAR_WM_CI_SCENE_LAUNCH: '1'
-        run: python tests/windows-scene-launch.py --binary target/debug/pleamar-wm.exe --output "${{ runner.temp }}/wm native scene ñ"
+        run: python tests/windows-scene-launch.py --binary target/release/pleamar-wm.exe --output "${{ runner.temp }}/wm native scene ñ"
       - name: Keep native scene launch evidence
         if: always() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4

@@ -1622,11 +1622,26 @@ impl State {
         // The windows, by the name of their monitor; the ones on one that left,
         // to the first, remembering it; the ones whose monitor came back, to it.
         // Each with its workspace, whole (`Moved`), not mixed into the one shown.
+        // The phone's monitor put up (docs/phone.md): every window goes to it,
+        // remembering where it was, as one whose monitor was unplugged does;
+        // while it is up they stay there; taken down, they go back.
+        let phone = monitors.iter().position(|m| m.name == layers::PHONE_NAME);
+        let phone_came = phone.is_some() && !old_names.iter().any(|n| n == layers::PHONE_NAME);
         let mut moved = Vec::new();
         for (slot, w) in self.slots.iter_mut().enumerate() {
             let Some(w) = w else { continue };
             let back = w.home.as_ref().and_then(|h| monitors.iter().position(|m| &m.name == h));
+            // One that comes from the phone with no place of its own joins
+            // the pool shown where it lands; the rest keep theirs.
+            let join = w.home.is_none() && new_index(w.screen).is_none() && old_names.get(w.screen).is_some_and(|n| n == layers::PHONE_NAME);
             let to = match (back, new_index(w.screen)) {
+                _ if phone_came => {
+                    if w.home.is_none() {
+                        w.home = old_names.get(w.screen).cloned();
+                    }
+                    phone.unwrap_or(0)
+                }
+                (_, Some(i)) if Some(i) == phone => i,
                 (Some(b), _) => {
                     println!("windows · {} back to {}", w.app, monitors[b].name);
                     w.home = None;
@@ -1634,7 +1649,9 @@ impl State {
                 }
                 (None, Some(i)) => i,
                 (None, None) => {
-                    if w.home.is_none() {
+                    // Opened on the phone, it has no other place: it stays here.
+                    let from_phone = old_names.get(w.screen).is_some_and(|n| n == layers::PHONE_NAME);
+                    if w.home.is_none() && !from_phone {
                         w.home = old_names.get(w.screen).cloned();
                     }
                     0
@@ -1642,14 +1659,14 @@ impl State {
             };
             if to != w.screen || new_index(w.screen).is_none() {
                 w.screen = to;
-                moved.push((slot, to, w.surface.clone()));
+                moved.push((slot, to, w.surface.clone(), join));
             }
         }
-        for (slot, to, surface) in moved {
+        for (slot, to, surface, join) in moved {
             if let Some(o) = outputs.get(to) {
                 o.enter(&surface);
             }
-            self.tell(NestEvent::Moved(slot, to));
+            self.tell(if join { NestEvent::Screen(slot, to) } else { NestEvent::Moved(slot, to) });
         }
         // The programs' surfaces: on their monitor by its name; the ones on one that left, closed.
         let mut closed = Vec::new();
@@ -1671,6 +1688,10 @@ impl State {
         self.outputs = outputs;
         self.output_globals = globals;
         self.on_screen = self.on_screen.min(self.outputs.len() - 1);
+        // What opens now opens on the phone, where whoever uses it is.
+        if let (true, Some(p)) = (phone_came, phone) {
+            self.on_screen = p;
+        }
         // Everything shown again where it now is.
         for k in 0..self.panels.len() {
             self.panels[k].configured = None;
@@ -3385,6 +3406,11 @@ impl SessionLockHandler for State {
     fn lock(&mut self, confirmation: SessionLocker) {
         println!("windows · the session is locked");
         layers::set_locked(true);
+        // On the phone, it comes back to the desk, where its lock screen is:
+        // the phone unlocks it from there (docs/phone.md).
+        if layers::monitors().iter().any(|m| m.name == layers::PHONE_NAME) {
+            layers::request_phone(None);
+        }
         confirmation.lock();
     }
 

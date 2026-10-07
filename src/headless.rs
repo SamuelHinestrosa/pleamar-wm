@@ -179,6 +179,96 @@ impl pleamar::Platform for Headless {
                 })));
             }
         }
+        // The phone's monitor, put up and taken down as `pleamar-wm remote`
+        // asks (`P W H SCALE` on the agent socket), as in a session; or by
+        // itself: `PLEAMAR_HEADLESS_PHONE="1080x2400@2.5 3 20"`, that size and
+        // scale 3 s in, and down again 20 s in. Its picture is taken as any
+        // monitor's (`grim -o PHONE-1`).
+        let phone: Arc<Mutex<Option<(Screen, Vec<u32>, i32, f64)>>> = Arc::new(Mutex::new(None));
+        {
+            let (ptx, prx) = std::sync::mpsc::channel::<Option<crate::layers::PhoneWish>>();
+            let auto = ptx.clone();
+            crate::layers::set_phone_sink(Box::new(move |w| ptx.send(w).is_ok()));
+            if let Ok(spec) = std::env::var("PLEAMAR_HEADLESS_PHONE") {
+                let mut words = spec.split_whitespace();
+                let wish = words.next().and_then(|w| {
+                    let (size, scale) = w.split_once('@').unwrap_or((w, "2"));
+                    let (pw, ph) = size.split_once('x')?;
+                    Some(crate::layers::PhoneWish { size: (pw.parse().ok()?, ph.parse().ok()?), scale: scale.parse().ok()? })
+                });
+                let on = words.next().and_then(|v| v.parse::<f32>().ok()).unwrap_or(3.0);
+                let off = words.next().and_then(|v| v.parse::<f32>().ok());
+                if let Some(wish) = wish {
+                    std::thread::spawn(move || {
+                        std::thread::sleep(Duration::from_secs_f32(on));
+                        let _ = auto.send(Some(wish));
+                        if let Some(off) = off {
+                            std::thread::sleep(Duration::from_secs_f32((off - on).max(0.0)));
+                            let _ = auto.send(None);
+                        }
+                    });
+                }
+            }
+            let (tx, screens, phone, surfaces) = (to_render.clone(), screens.clone(), phone.clone(), surfaces.clone());
+            let (cursor, mhz_of) = (cursor.clone(), mhz_of.clone());
+            std::thread::spawn(move || {
+                let mut id = 9000;
+                let real = |screens: &[Screen]| screens.iter().enumerate().map(|(m, sc)| (crate::layers::MonitorInfo { name: format!("HEADLESS-{}", m + 1), size, x: m as i32 * unit_w, y: 0, mhz: mhz_of(m), scale }, sc.clone())).collect::<Vec<_>>();
+                for wish in prx {
+                    if let Some((sc, sheets, ..)) = phone.lock().unwrap().take() {
+                        println!("headless · the phone's monitor goes");
+                        for id in sheets {
+                            let _ = tx.send(ToRender::SheetGone(id));
+                        }
+                        sc.0.lock().unwrap().quit = true;
+                        sc.1.notify_all();
+                    }
+                    let mut all = real(&screens);
+                    if let Some(w) = wish {
+                        let sc = crate::phone::make(w.size, &tx);
+                        let k = screens.len();
+                        println!("headless · a monitor for the phone: {}×{} at scale {}", w.size.0, w.size.1, w.scale);
+                        let mut given = Vec::new();
+                        for (n, s) in surfaces.iter().enumerate() {
+                            let mine = match &s.screens {
+                                Screens::All => !s.name.is_empty(),
+                                // `screens: each`: its copy for this monitor.
+                                Screens::Number(m) => *m == k,
+                                _ => false,
+                            };
+                            if !mine {
+                                continue;
+                            }
+                            id += 1;
+                            let layer = screen::layer(id, n, s, w.size, w.scale as f32);
+                            let lsize = (layer.rect[2] as u32, layer.rect[3] as u32);
+                            let units = layer.units;
+                            sc.0.lock().unwrap().layers.push(layer);
+                            given.push(id);
+                            let _ = tx.send(ToRender::Sheet(Box::new(NewSheet {
+                                id,
+                                target: Target::Frames(Box::new(LayerFrames::new(sc.clone(), id, lsize, tx.clone()))),
+                                window: Box::new(LayerWindow { screen: sc.clone(), sheet: id, cursor: cursor.clone() }),
+                                scale: w.scale as f32,
+                                size: units,
+                                mhz: crate::phone::PHONE_MHZ,
+                                name: crate::layers::PHONE_NAME.to_owned(),
+                                view: View { surface: n, popup: None, origin: s.origin, size: (units.0 as f32, units.1 as f32) },
+                            })));
+                        }
+                        let right = screens.len() as i32 * unit_w;
+                        let (px, py) = crate::phone::place(right);
+                        all.push((crate::layers::MonitorInfo { name: crate::layers::PHONE_NAME.to_owned(), size: w.size, x: px, y: py, mhz: crate::phone::PHONE_MHZ, scale: w.scale }, sc.clone()));
+                        *phone.lock().unwrap() = Some((sc, given, px, w.scale));
+                    }
+                    let k = if wish.is_some() { screens.len() as f32 } else { -1.0 };
+                    crate::layers::register(all);
+                    crate::layers::tell(crate::layers::ToLayers::Monitors);
+                    let _ = tx.send(ToRender::Fact(pleamar::scene::intern("phone"), k));
+                    let _ = tx.send(ToRender::Repaint);
+                }
+            });
+        }
         // `PLEAMAR_HEADLESS_UNPLUG=s`: the last monitor goes away after that
         // long, as a session sees one unplugged: its surfaces are taken from the
         // render, and the compositor inside is told.
@@ -215,7 +305,18 @@ impl pleamar::Platform for Headless {
         // as the real ones would go. Points in units of the whole desktop; a
         // key by its keysym's name and evdev code (it types itself if the name
         // is one character).
-        if let Ok(script) = std::env::var("PLEAMAR_HEADLESS_INPUT") {
+        // `PLEAMAR_HEADLESS_INPUT="900,40@3000 down@3500 up@3600 key:Escape:1@4000"`:
+        // a mouse and a keyboard, through the same road as the session's
+        // (`route.rs`): to the scene or to a program's surface —a bar, Marea—
+        // as the real ones would go. Points in units of the whole desktop; a
+        // key by its keysym's name and evdev code (it types itself if the name
+        // is one character). `PLEAMAR_HEADLESS_INPUT_FIFO=path`: the same
+        // steps, without the `@`, one a line, as they come down that pipe
+        // (what `pleamar-wm remote` sends with `PLEAMAR_REMOTE_HANDS_TO`, to
+        // try it without real devices).
+        let script = std::env::var("PLEAMAR_HEADLESS_INPUT").ok();
+        let fifo = std::env::var("PLEAMAR_HEADLESS_INPUT_FIFO").ok();
+        if script.is_some() || fifo.is_some() {
             // A pointer to be seen where one is drawn into a picture (sharing
             // the screen): an arrow, white with a dark edge, its tip at 0, 0.
             let mut arrow = vec![0u8; 64 * 64 * 4];
@@ -227,82 +328,37 @@ impl pleamar::Platform for Headless {
                 }
             }
             crate::layers::set_pointer_picture(Some(std::sync::Arc::new((arrow, (0, 0)))));
-            let (tx, screens) = (to_render.clone(), screens.clone());
-            std::thread::spawn(move || {
-                let start = Instant::now();
-                let mut route = crate::route::Route::new(tx);
-                for step in script.split_whitespace() {
-                    let Some((what, ms)) = step.rsplit_once('@') else { continue };
-                    let Ok(ms) = ms.parse::<u64>() else { continue };
-                    if let Some(wait) = Duration::from_millis(ms).checked_sub(start.elapsed()) {
-                        std::thread::sleep(wait);
+            let route = Arc::new(Mutex::new(crate::route::Route::new(to_render.clone())));
+            let hand = Hand { route, screens: screens.clone(), phone: phone.clone(), unit_w, scale };
+            if let Some(script) = script {
+                let hand = hand.clone();
+                std::thread::spawn(move || {
+                    let start = Instant::now();
+                    for step in script.split_whitespace() {
+                        let Some((what, ms)) = step.rsplit_once('@') else { continue };
+                        let Ok(ms) = ms.parse::<u64>() else { continue };
+                        if let Some(wait) = Duration::from_millis(ms).checked_sub(start.elapsed()) {
+                            std::thread::sleep(wait);
+                        }
+                        hand.step(what);
                     }
-                    match what {
-                        "down" | "up" => {
-                            route.button(&screens, 0x110, what == "down");
-                        }
-                        // The right button.
-                        "rdown" | "rup" => {
-                            route.button(&screens, 0x111, what == "rdown");
-                        }
-                        // The mouse's side buttons: back and forward.
-                        "back" | "forward" => {
-                            let code = if what == "back" { 0x113 } else { 0x114 };
-                            route.button(&screens, code, true);
-                            route.button(&screens, code, false);
-                        }
-                        // `wheel:-1` a notch down (as the session tells it: up is positive).
-                        _ if what.starts_with("wheel:") => {
-                            if let Ok(n) = what[6..].parse::<f32>() {
-                                route.wheel(n);
-                            }
-                        }
-                        // `keydown:` and `keyup:` apart: a key let go after
-                        // whoever took it has gone (Marea's search closing on Escape).
-                        _ if what.starts_with("key:") || what.starts_with("keydown:") || what.starts_with("keyup:") => {
-                            let (step, rest) = what.split_once(':').unwrap_or(("key", ""));
-                            let mut parts = rest.splitn(2, ':');
-                            let name = parts.next().unwrap_or("");
-                            let Some(code) = parts.next().and_then(|c| c.parse::<u32>().ok()) else { continue };
-                            // `key:Super+Shift+q:16`: modifiers before the name.
-                            let (mods_part, name) = name.rsplit_once('+').unwrap_or(("", name));
-                            let mut mods = pleamar::scene::Mods::default();
-                            for m in mods_part.split('+') {
-                                match m.to_lowercase().as_str() {
-                                    "super" => mods.logo = true,
-                                    "ctrl" => mods.ctrl = true,
-                                    "alt" => mods.alt = true,
-                                    "shift" => mods.shift = true,
-                                    _ => {}
-                                }
-                            }
-                            let typed = Some(name.to_owned()).filter(|n| n.chars().count() == 1 && !mods.logo && !mods.ctrl && !mods.alt);
-                            println!("headless · key {name} → {:?}", route.key_owner(&screens));
-                            if std::env::var_os("PLEAMAR_DEBUG_WINDOWS").is_some() {
-                                for (m, s) in screens.iter().enumerate() {
-                                    for c in &s.0.lock().unwrap().clients {
-                                        println!("headless ·   monitor {m}: surface {} level {} keyboard {} pieces {}", c.id, c.level, c.keyboard, c.pieces.len());
-                                    }
-                                }
-                            }
-                            if step != "keyup" {
-                                route.key(&screens, name, None, typed, mods, code, true);
-                            }
-                            if step != "keydown" {
-                                route.key(&screens, name, None, None, mods, code, false);
-                            }
-                        }
-                        _ => {
-                            let Some((x, y)) = what.split_once(',').and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?))) else { continue };
-                            let m = ((x / unit_w as f64).floor().max(0.0) as usize).min(screens.len() - 1);
-                            let (mx, my) = ((x - (m as i32 * unit_w) as f64) * scale, y * scale);
-                            route.pointer(&screens[m], (mx, my));
-                            crate::layers::set_pointer_at((x, y));
-                            println!("headless · pointer {x},{y} → {:?}", route.hit);
-                        }
-                    }
+                });
+            }
+            if let Some(path) = fifo {
+                let _ = std::fs::remove_file(&path);
+                let made = std::ffi::CString::new(path.clone()).map(|c| unsafe { libc::mkfifo(c.as_ptr(), 0o600) } == 0).unwrap_or(false);
+                if !made {
+                    eprintln!("headless · no pipe at {path}");
                 }
-            });
+                std::thread::spawn(move || loop {
+                    let Ok(f) = std::fs::File::open(&path) else { return };
+                    for line in std::io::BufRead::lines(std::io::BufReader::new(f)).map_while(Result::ok) {
+                        for what in line.split_whitespace() {
+                            hand.step(what);
+                        }
+                    }
+                });
+            }
         }
         // At the hour of the picture everything is painted, so that a monitor
         // where nothing moves shows its frame all the same.
@@ -314,6 +370,98 @@ impl pleamar::Platform for Headless {
         let _ = to_render.send(ToRender::KeyboardFocus(true));
         loop {
             std::thread::sleep(Duration::from_secs(3600));
+        }
+    }
+}
+
+
+/// A headless mouse and keyboard (`PLEAMAR_HEADLESS_INPUT`, `_FIFO`): each
+/// step goes where the session's real ones would, the phone's monitor too.
+#[derive(Clone)]
+struct Hand {
+    route: Arc<Mutex<crate::route::Route>>,
+    screens: Vec<Screen>,
+    phone: Arc<Mutex<Option<(Screen, Vec<u32>, i32, f64)>>>,
+    unit_w: i32,
+    scale: f64,
+}
+
+impl Hand {
+    fn step(&self, what: &str) {
+        let phone = self.phone.lock().unwrap().clone();
+        let mut screens = self.screens.clone();
+        if let Some((sc, ..)) = &phone {
+            screens.push(sc.clone());
+        }
+        let mut route = self.route.lock().unwrap();
+        match what {
+            "down" | "up" => {
+                route.button(&screens, 0x110, what == "down");
+            }
+            // The right button.
+            "rdown" | "rup" => {
+                route.button(&screens, 0x111, what == "rdown");
+            }
+            // The mouse's side buttons: back and forward.
+            "back" | "forward" => {
+                let code = if what == "back" { 0x113 } else { 0x114 };
+                route.button(&screens, code, true);
+                route.button(&screens, code, false);
+            }
+            // `wheel:-1` a notch down (as the session tells it: up is positive).
+            _ if what.starts_with("wheel:") => {
+                if let Ok(n) = what[6..].parse::<f32>() {
+                    route.wheel(n);
+                }
+            }
+            // `keydown:` and `keyup:` apart: a key let go after
+            // whoever took it has gone (Marea's search closing on Escape).
+            _ if what.starts_with("key:") || what.starts_with("keydown:") || what.starts_with("keyup:") => {
+                let (step, rest) = what.split_once(':').unwrap_or(("key", ""));
+                let mut parts = rest.splitn(2, ':');
+                let name = parts.next().unwrap_or("");
+                let Some(code) = parts.next().and_then(|c| c.parse::<u32>().ok()) else { return };
+                // `key:Super+Shift+q:16`: modifiers before the name.
+                let (mods_part, name) = name.rsplit_once('+').unwrap_or(("", name));
+                let mut mods = pleamar::scene::Mods::default();
+                for m in mods_part.split('+') {
+                    match m.to_lowercase().as_str() {
+                        "super" => mods.logo = true,
+                        "ctrl" => mods.ctrl = true,
+                        "alt" => mods.alt = true,
+                        "shift" => mods.shift = true,
+                        _ => {}
+                    }
+                }
+                let typed = Some(name.to_owned()).filter(|n| n.chars().count() == 1 && !mods.logo && !mods.ctrl && !mods.alt);
+                println!("headless · key {name} → {:?}", route.key_owner(&screens));
+                if std::env::var_os("PLEAMAR_DEBUG_WINDOWS").is_some() {
+                    for (m, s) in screens.iter().enumerate() {
+                        for c in &s.0.lock().unwrap().clients {
+                            println!("headless ·   monitor {m}: surface {} level {} keyboard {} pieces {}", c.id, c.level, c.keyboard, c.pieces.len());
+                        }
+                    }
+                }
+                if step != "keyup" {
+                    route.key(&screens, name, None, typed, mods, code, true);
+                }
+                if step != "keydown" {
+                    route.key(&screens, name, None, None, mods, code, false);
+                }
+            }
+            _ => {
+                let Some((x, y)) = what.split_once(',').and_then(|(x, y)| Some((x.parse::<f64>().ok()?, y.parse::<f64>().ok()?))) else { return };
+                // On the phone's monitor, far to the right of the others.
+                if let Some((sc, _, px, pscale)) = phone.as_ref().filter(|p| x >= p.2 as f64) {
+                    route.pointer(sc, ((x - *px as f64) * pscale, y * pscale));
+                } else {
+                    let m = ((x / self.unit_w as f64).floor().max(0.0) as usize).min(self.screens.len() - 1);
+                    let (mx, my) = ((x - (m as i32 * self.unit_w) as f64) * self.scale, y * self.scale);
+                    route.pointer(&self.screens[m], (mx, my));
+                }
+                crate::layers::set_pointer_at((x, y));
+                println!("headless · pointer {x},{y} → {:?}", route.hit);
+            }
         }
     }
 }
