@@ -88,7 +88,7 @@ fn select<'a>(scenes: &'a [Scene], selector: &str) -> Result<&'a Scene> {
         if index.parse::<u32>().is_err() || parts.next().is_some() { return Err("use PID or PID.N from agent windows".into()); }
     }
     let mut matches = scenes.iter().filter(|s| s.pid == pid);
-    let first = matches.next().ok_or("this process has no responding pleamar scene; arbitrary application input is not implemented on Windows")?;
+    let first = matches.next().ok_or("this process has no responding pleamar scene; native application input requires the foreground broker described by agent help")?;
     if matches.next().is_some() { return Err("this process has several scenes; use scene:ENDPOINT from agent scenes".into()); }
     Ok(first)
 }

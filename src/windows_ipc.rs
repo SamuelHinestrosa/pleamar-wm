@@ -187,6 +187,8 @@ pub(super) struct Server {
     stop: Arc<Event>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
+struct ListenerExit(Arc<Event>);
+impl Drop for ListenerExit { fn drop(&mut self) { self.0.signal(); } }
 impl Server {
     pub fn start(endpoint: Endpoint) -> Result<Self> {
         let file = endpoint.bind()?;
@@ -195,6 +197,7 @@ impl Server {
         let (tx, requests) = mpsc::sync_channel(1);
         let (notify, cancel) = (wake.clone(), stop.clone());
         let thread = std::thread::spawn(move || {
+            let _finished = ListenerExit(cancel.clone());
             while !cancel.signaled() {
                 if let Err(error) = operation(&file, &cancel, None, |overlap| unsafe { ConnectNamedPipe(HANDLE(file.as_raw_handle()), Some(overlap)) }) {
                     if cancel.signaled() { break; }
@@ -236,6 +239,7 @@ impl Server {
         Ok(Self { wake, requests, stop, thread:Some(thread) })
     }
     pub fn running(&self) -> bool { self.thread.as_ref().is_some_and(|t| !t.is_finished()) }
+    pub fn stopped(&self) -> HANDLE { self.stop.handle() }
 }
 impl Drop for Server {
     fn drop(&mut self) {

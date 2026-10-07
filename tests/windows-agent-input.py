@@ -275,6 +275,11 @@ def exercise(binary, tests, folder):
         expiring = broker(monitor, target.pid, 'lease', seconds=1)
         assert expiring.wait(timeout=5) == 0
         bound = broker(monitor, target.pid, 'process-lifetime')
+        # Preserve the test parent's eligibility for the next owned fixture.
+        # Once this foreground window exits, the controller cannot simply
+        # assume Windows will let it activate another application's dialog.
+        assert desktop.user.GetForegroundWindow() == hwnd
+        control(target_folder, 'allow-parent')
         control(target_folder, 'quit')
         assert target.wait(timeout=5) == 0
         assert bound.wait(timeout=5) == 0
@@ -294,9 +299,12 @@ def exercise(binary, tests, folder):
         ambiguous = folder / 'ambiguous-must-not-exist.png'
         run('look', str(target.pid), str(ambiguous), fail='process has several windows')
         assert not ambiguous.exists()
-        run('focus', owner_id, fail='blocked by a dialog')
         assert desktop.user.SetForegroundWindow(hwnd), 'owned modal bootstrap focus'
         wait(lambda: state().get('foreground'), 'owned modal foreground')
+        # A focus CLI command can forward eligibility to its broker. Bootstrap
+        # the owned target before that transfer, then prove the owner is refused.
+        run('focus', owner_id, fail='blocked by a dialog')
+        assert desktop.user.GetForegroundWindow() == hwnd
         run('focus', identity)
         act('modal-button', 'click', *point(390, 50))
         wait(lambda: state()['clicks'] == 1, 'explicit modal button click')

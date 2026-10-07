@@ -138,44 +138,75 @@ fn picture(session: &mut Session, options: &Options, selector: &str, path: &str)
 }
 
 struct Pending { cancel: Cancellation, expired: Option<Arc<AtomicBool>> }
-struct Controller { stop: Arc<AtomicBool>, pending: Arc<Mutex<Pending>>, worker: Option<thread::JoinHandle<()>> }
+struct Controller {
+    stop: Arc<AtomicBool>, pending: Arc<Mutex<Pending>>, worker: Option<thread::JoinHandle<()>>,
+    changed: Arc<ipc::Event>, stopped: Arc<ipc::Event>,
+}
+struct ControlExit { stop: Arc<AtomicBool>, pending: Arc<Mutex<Pending>>, event: Arc<ipc::Event> }
+impl Drop for ControlExit {
+    fn drop(&mut self) {
+        self.stop.store(true, Ordering::Release);
+        self.pending.lock().unwrap_or_else(|e| e.into_inner()).cancel.cancel();
+        self.event.signal();
+    }
+}
+fn control_wait(remaining: Duration, pending: bool) -> u32 {
+    // Only a live request needs to observe IPC's atomic expiration flag.
+    let wait = if pending { remaining.min(Duration::from_millis(25)) } else { remaining };
+    wait.as_millis().clamp(1, u32::MAX as u128 - 1) as u32
+}
 impl Controller {
-    fn new(server: ipc::Server, cancel: Cancellation, seconds: u64, process: Option<Process>) -> Self {
+    fn new(server: ipc::Server, cancel: Cancellation, seconds: u64, process: Option<Process>) -> Result<Self> {
         let stop = Arc::new(AtomicBool::new(false));
         let pending = Arc::new(Mutex::new(Pending { cancel, expired: None }));
+        let changed = Arc::new(ipc::Event::new()?);
+        let stopped = Arc::new(ipc::Event::new()?);
         let (halt, active) = (stop.clone(), pending.clone());
+        let (update, finished) = (changed.clone(), stopped.clone());
         let worker = thread::spawn(move || {
-            let start = Instant::now();
+            let _exit = ControlExit { stop:halt.clone(), pending:active.clone(), event:finished.clone() };
+            let deadline = Instant::now() + Duration::from_secs(seconds);
+            let mut handles = vec![update.handle(), server.wake.handle(), server.stopped()];
+            if let Some(process) = &process { handles.push(HANDLE(process.handle.as_raw_handle())); }
             loop {
-                let expired = active.lock().unwrap().expired.as_ref().is_some_and(|v| v.load(Ordering::Acquire));
+                // Reset before checking the associated state/queue so a concurrent
+                // publication is either observed below or leaves the event signalled.
+                update.reset();
+                server.wake.reset();
+                let (expired, busy) = {
+                    let pending = active.lock().unwrap();
+                    (pending.expired.as_ref().is_some_and(|v| v.load(Ordering::Acquire)), pending.expired.is_some())
+                };
                 if halt.load(Ordering::Acquire) || expired || process.as_ref().is_some_and(|p|!p.alive())
-                    || start.elapsed() >= Duration::from_secs(seconds) || !server.running() {
-                    halt.store(true, Ordering::Release);
-                    active.lock().unwrap().cancel.cancel();
-                    break;
-                }
-                match server.requests.recv_timeout(Duration::from_millis(25)) {
+                    || Instant::now() >= deadline || !server.running() { break; }
+                match server.requests.try_recv() {
                     Ok(request) if !request.expired.load(Ordering::Acquire) => {
                         if request.command == "stop" {
                             halt.store(true, Ordering::Release);
                             active.lock().unwrap().cancel.cancel();
+                            finished.signal();
                             request.finish(Ok(json!({"cancelled":true})));
                             break;
                         }
                         request.finish(Err("only stop is accepted on the cancellation endpoint".into()));
+                        continue;
                     },
-                    Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {},
-                    Err(_) => { halt.store(true, Ordering::Release); active.lock().unwrap().cancel.cancel(); break; },
+                    Ok(_) => continue,
+                    Err(std::sync::mpsc::TryRecvError::Empty) => {},
+                    Err(_) => break,
                 }
+                let wait = control_wait(deadline.saturating_duration_since(Instant::now()), busy);
+                if unsafe { WaitForMultipleObjects(&handles, false, wait) } == WAIT_FAILED { break; }
             }
         });
-        Self { stop, pending, worker: Some(worker) }
+        Ok(Self { stop, pending, worker: Some(worker), changed, stopped })
     }
 }
 impl Drop for Controller {
     fn drop(&mut self) {
         self.stop.store(true, Ordering::Release);
         self.pending.lock().unwrap().cancel.cancel();
+        self.changed.signal();
         if let Some(worker) = self.worker.take() { let _ = worker.join(); }
     }
 }
@@ -188,16 +219,25 @@ fn serve(args: &[&str]) -> Result<Value> {
     let server = ipc::Server::start(endpoint(false)?)?;
     let control = ipc::Server::start(endpoint(true)?)?;
     let mut session = Some(Session::new()?);
-    let controller = Controller::new(control, session.as_ref().unwrap().cancellation(), options.seconds, process);
+    let controller = Controller::new(control, session.as_ref().unwrap().cancellation(), options.seconds, process)?;
     while !controller.stop.load(Ordering::Acquire) {
+        server.wake.reset();
         pump();
         if !server.running() { return Err("native input listener stopped".into()); }
-        let request = match server.requests.recv_timeout(Duration::from_millis(25)) {
+        let request = match server.requests.try_recv() {
             Ok(request) if !request.expired.load(Ordering::Acquire) => request,
-            Ok(_) | Err(std::sync::mpsc::RecvTimeoutError::Timeout) => continue,
+            Ok(_) => continue,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                let handles = [server.wake.handle(), controller.stopped.handle(), server.stopped()];
+                if unsafe { MsgWaitForMultipleObjectsEx(Some(&handles), INFINITE, QS_ALLINPUT, MWMO_INPUTAVAILABLE) } == WAIT_FAILED {
+                    return Err(windows::core::Error::from_thread().into());
+                }
+                continue;
+            },
             Err(e) => return Err(e.into()),
         };
         controller.pending.lock().unwrap().expired = Some(request.expired.clone());
+        controller.changed.signal();
         let response = (|| -> Result<Value> {
             if controller.stop.load(Ordering::Acquire) { return Err("native input stopped".into()); }
             let words: Vec<String> = serde_json::from_str(&request.command)?;
@@ -230,6 +270,7 @@ fn serve(args: &[&str]) -> Result<Value> {
         if response.is_err() { if let Some(session) = &mut session { session.forget(); } }
         request.finish(response);
         controller.pending.lock().unwrap().expired = None;
+        controller.changed.signal();
     }
     drop(controller);
     drop(session);
@@ -285,7 +326,7 @@ mod tests {
             let endpoint=ipc::Endpoint::new(&format!("cancel-{}-{nonce}",std::process::id())).unwrap().service("agent-control").unwrap();
             let server=ipc::Server::start(endpoint.clone()).unwrap();
             let mut session=Session::new().unwrap();
-            let controller=Controller::new(server,session.cancellation(),10,None);
+            let controller=Controller::new(server,session.cancellation(),10,None).unwrap();
             assert_eq!(endpoint.ask("stop").unwrap()["cancelled"],true);
             assert!(controller.stop.load(Ordering::Acquire));
             assert!(session.look("1").unwrap_err().contains("cancelled"));
@@ -307,13 +348,20 @@ mod tests {
             let nonce=std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
             let endpoint=ipc::Endpoint::new(&format!("process-{}-{nonce}",std::process::id())).unwrap().service("agent-control").unwrap();
             let mut session=Session::new().unwrap();
-            let controller=Controller::new(ipc::Server::start(endpoint).unwrap(),session.cancellation(),10,Some(process));
+            let controller=Controller::new(ipc::Server::start(endpoint).unwrap(),session.cancellation(),10,Some(process)).unwrap();
             drop(child.0.stdin.take());assert!(child.0.wait().unwrap().success());
             let began=Instant::now();
             while !controller.stop.load(Ordering::Acquire) { assert!(began.elapsed()<Duration::from_secs(3));thread::sleep(Duration::from_millis(10)); }
             assert!(session.look("1").unwrap_err().contains("cancelled"));
             drop(controller);
         }).join().unwrap();
+    }
+    #[test]
+    fn idle_controller_waits_for_events_but_live_requests_keep_their_cancellation_bound() {
+        assert_eq!(control_wait(Duration::from_secs(300), false), 300_000);
+        assert_eq!(control_wait(Duration::from_secs(300), true), 25);
+        assert_eq!(control_wait(Duration::from_millis(8), true), 8);
+        assert_eq!(control_wait(Duration::from_nanos(1), false), 1);
     }
     #[test]
     fn foreground_scope_and_lease_are_explicit() {

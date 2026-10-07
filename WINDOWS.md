@@ -114,6 +114,9 @@ default 300). A process scope holds its process object and creation identity;
 exiting ends the broker and PID reuse cannot substitute another application.
 It starts without creating a window, taking focus or injecting
 input. `PLEAMAR_WM_NAMESPACE` separates brokers as well as layout sessions.
+An idle broker waits on native request, process-exit and cancellation events;
+it does not poll the desktop. Only an active request checks its expiration flag
+at a bounded interval. Its lease remains a deadline while it sleeps.
 
 ```powershell
 ./target/release/pleamar-wm.exe agent input-status
