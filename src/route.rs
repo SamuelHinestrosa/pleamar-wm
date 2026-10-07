@@ -157,6 +157,15 @@ impl Route {
         false
     }
 
+    /// Sideways, in notches (to the right, negative, as down is): only the
+    /// scene's (a deck of cards, the line between two apps on a tablet); the
+    /// programs are given the wheel up and down only.
+    pub fn wheel_sideways(&self, notches: f32) {
+        if !matches!(self.hit, Hit::Client(..)) {
+            let _ = self.to_render.send(ToRender::Wheel(notches));
+        }
+    }
+
     /// The wheel, in notches: to whoever has the pointer.
     pub fn wheel(&self, notches: f32) {
         if matches!(self.hit, Hit::Client(..)) {

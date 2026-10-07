@@ -408,6 +408,12 @@ impl Hand {
                 route.button(&screens, code, true);
                 route.button(&screens, code, false);
             }
+            // `wheelx:-1` a notch to the right (the scene's only, as at the session).
+            _ if what.starts_with("wheelx:") => {
+                if let Ok(n) = what[7..].parse::<f32>() {
+                    route.wheel_sideways(n);
+                }
+            }
             // `wheel:-1` a notch down (as the session tells it: up is positive).
             _ if what.starts_with("wheel:") => {
                 if let Ok(n) = what[6..].parse::<f32>() {

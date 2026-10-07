@@ -494,7 +494,10 @@ Qt (Dolphin), Firefox, Vulkan, OpenGL and GTK on X11 all do.
   zoom, the phone's keyboard. Meanwhile the real monitors are covered; a
   key or the mouse at the desk brings the session back, locked; given back
   from the phone (or the phone gone for three minutes), every window
-  returns to its monitor and pool. [docs/phone.md](docs/phone.md)
+  returns to its monitor and pool. On a tablet the apps get the room they
+  have at the desk, and lying down two go side by side, with a line between
+  them that a finger moves; phones and tablets turn freely, the windows
+  staying where they are. [docs/phone.md](docs/phone.md)
 
 Not yet: touch screens and tablets on the desk itself, dragging out of the
 window manager's own scene (its `carries:` zones).

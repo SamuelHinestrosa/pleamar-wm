@@ -1111,12 +1111,15 @@ fn viewer(stream: TcpStream, token: String, from: String, gate: &Arc<Mutex<Gate>
                 match (verb, &n[..]) {
                     // A phone: the session comes to a monitor of its size.
                     ("phone", [w, hh, scale]) if !view_only => {
+                        // Already there and turned on its side: it takes the new
+                        // shape in its place (its size, until then, the old one).
+                        let before = phone_index(&monitors).filter(|_| on_phone).map(|i| (monitors[i].3, monitors[i].4));
                         let asked = crate::agent_cli::tell(&format!("P {} {} {:.3}", *w as u32, *hh as u32, scale));
                         // Up within a moment (the scene's copies are given again).
                         let mut k = None;
-                        for _ in 0..30 {
+                        for tries in 0..30 {
                             if let Ok(m) = crate::agent_cli::monitors() {
-                                if let Some(i) = phone_index(&m) {
+                                if let Some(i) = phone_index(&m).filter(|&i| before.is_none_or(|b| b != (m[i].3, m[i].4)) || tries >= 15) {
                                     k = Some(i);
                                     monitors = m;
                                     break;
@@ -1755,6 +1758,9 @@ impl Hands {
             if dy != 0.0 {
                 self.piped(&format!("wheel:{:.3}", -dy));
             }
+            if dx != 0.0 {
+                self.piped(&format!("wheelx:{:.3}", -dx));
+            }
             return;
         }
         let mut events = Vec::new();
@@ -1795,6 +1801,15 @@ impl Hands {
                 28 => "Return",
                 57 => "space",
                 1 => "Escape",
+                // (Letters too: a keyboard of its own on a tablet.)
+                16..=25 | 30..=38 | 44..=50 => {
+                    let row = match code {
+                        16..=25 => &"qwertyuiop"[(code - 16) as usize..],
+                        30..=38 => &"asdfghjkl"[(code - 30) as usize..],
+                        _ => &"zxcvbnm"[(code - 44) as usize..],
+                    };
+                    &row[..1]
+                }
                 _ => "",
             };
             if !name.is_empty() {

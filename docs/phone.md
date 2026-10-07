@@ -52,6 +52,38 @@ window manager and the shell are scenes.
 | The curtain | `session.plm` | a surface over the real monitors, left out of captures |
 | Touch | `remote.html` | taps, holds, scrolls with momentum, swipes from the edges; the phone's keyboard types |
 
+## A tablet
+
+A tablet (its short side 600 CSS pixels or more: every iPad, Android
+tablets) gets the same session with more room. Its points are a little
+larger than its own (the scale is its pixel ratio × 1.1: an iPad Air is
+about 745 × 1070 points), so the apps have the room they have at the desk.
+
+- **Turned on its side** —a tablet or a phone—, the page asks for the new
+  size and the phone's monitor takes it where it is: the windows stay on it
+  and move to their new places. Meanwhile the old picture blurs under a
+  small turning mark. Nothing is locked to standing up any more.
+- **Lying down** (at least 900 × 560 points), **two apps side by side**: the
+  one in front and the one before it in the deck, or the one asked for.
+  Touching the other one puts it in front (each stays on its side). The line
+  between them moves with a finger sideways (the wheel sideways, which the
+  scene now hears), with a finger held a moment and moved, or with a
+  pointer; let go, it settles at a third, the middle or two thirds, and both
+  wait under a veil with their names while it moves. Taken to an edge, the
+  app on that side goes and the other has all of the screen.
+- **The cards**, lying down, go along in a row; each card but the one in
+  front has a button to put it **beside** the one in front.
+- **A keyboard of its own** (a Magic Keyboard, a Bluetooth one): its keys go
+  home as keys from the first one, without opening the one on the screen;
+  on an iPad ⌘ is Ctrl at home (⌘C, ⌘V, ⌘T). A trackpad or a mouse is a
+  pointer, its clicks and its wheel, as on the desk.
+
+| | |
+| --- | --- |
+| `ph.wide`, `ph.row` | lying down with room for two; lying down at all (the cards in a row) |
+| `ph.side`, `ph.fl`, `ph.ratio`, `ph.solo` | the one beside (-1: the one before in the deck), which side the one in front is on, where the line is, asked to be alone |
+| `ph_div` | the line: pressed and moved, or the wheel over it |
+
 ## Marea, and other panels
 
 Marea follows you onto the phone (`screens: each max 3`): she lives at the
@@ -75,7 +107,8 @@ is unlocked.
 
 `session.conf`: `phone lock COMMAND` is what locks the session when it comes
 back to the desk (by default `marea lock`; `phone lock none`, nothing). The
-page tells it is on a phone by itself; `?phone=1` or `?phone=0` says so.
+page tells it is on a phone or a tablet by itself (an iPad's Safari, which
+says it is a Mac, by its fingers); `?phone=1` or `?phone=0` says so.
 
 ## Trying it without a phone
 

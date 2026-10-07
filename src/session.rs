@@ -216,6 +216,7 @@ struct State {
     scene_cursor: Cursor,
     program_cursor: Cursor,
     scroll: f64,
+    scroll_sideways: f64,
     /// A swipe on the touchpad under way: how many fingers, and how far they went;
     /// a pinch: how many, and how much bigger or smaller.
     swipe: Option<(u32, f64, f64)>,
@@ -355,7 +356,7 @@ fn run(surfaces: Vec<Surface>, to_render: Sender<ToRender>) -> Result<(), String
     layers::set_card(drm.clone());
     layers::register(monitors.iter().map(|m| (MonitorInfo { name: m.name.clone(), size: m.size, x: m.x, y: m.y, mhz: m.mhz, scale: m.scale }, m.screen.clone())).collect());
     let mover = CursorMover::new(drm.clone());
-    let mut state = State { mover, session, drm, monitors, libinput, to_render: to_render.clone(), keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, route: Route::new(to_render), cursor_pictures: Vec::new(), handle: event_loop.handle(), gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false, desk_moved: 0.0, desk_moved_at: std::time::Instant::now() };
+    let mut state = State { mover, session, drm, monitors, libinput, to_render: to_render.clone(), keymap, pointer: first, cursors: Vec::new(), shown: None, scene_cursor: Cursor::Normal, program_cursor: Cursor::Normal, scroll: 0.0, scroll_sideways: 0.0, swipe: None, pinch: None, last_touch: std::time::Instant::now(), last_input: std::time::Instant::now(), dark_for_idle: false, route: Route::new(to_render), cursor_pictures: Vec::new(), handle: event_loop.handle(), gbm: gbm.clone(), surfaces, cursor_kind, sheets, next_sheet, quit: false, desk_moved: 0.0, desk_moved_at: std::time::Instant::now() };
     state.make_cursors(&gbm);
     // The cursor the scene and the programs ask for, whenever it changes.
     let (cursor_tx, cursor_rx) = smithay::reexports::calloop::channel::channel::<(bool, Cursor)>();
@@ -1038,6 +1039,19 @@ impl State {
                 };
                 if notches != 0.0 {
                     self.route.wheel(notches as f32);
+                }
+                let sideways = match (event.source(), event.amount_v120(Axis::Horizontal), event.amount(Axis::Horizontal)) {
+                    (AxisSource::Wheel, Some(v), _) => -v / 120.0,
+                    (_, _, Some(a)) => {
+                        self.scroll_sideways += a;
+                        let n = (self.scroll_sideways / 15.0).trunc();
+                        self.scroll_sideways -= n * 15.0;
+                        -n
+                    }
+                    _ => 0.0,
+                };
+                if sideways != 0.0 {
+                    self.route.wheel_sideways(sideways as f32);
                 }
             }
             InputEvent::Keyboard { event } => self.key(event.key_code(), event.state() == KeyState::Pressed),
