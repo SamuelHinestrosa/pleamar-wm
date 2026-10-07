@@ -344,6 +344,22 @@ page is visible and the source is not minimized. Only receiving pixels resets
 that backoff; a driver that starts but produces no frame cannot spin. Reopening
 the page or restoring the source requests an immediate attempt.
 
+The capture device is now created when the first visible, non-minimized picture
+is requested. Catalog discovery and scene launch do not require WGC device
+initialization. After capture demand ends and the renderer acknowledges pending
+frames, the cached D3D11 device retires following a two-second grace period.
+Reopening within that interval reuses it; later requests recreate it with the
+current renderer adapter. Shared transport failures retain the existing device
+or fall back to CPU capture on a fresh allocation, with a diagnostic.
+
+The no-window native device regression exercised eight allocation/retirement
+cycles and independently held references. In that short local fixture,
+retirement released about 33 MiB of private process commit per cycle. Windows
+and driver allocations remained above the initial baseline. This is not a
+whole-product RAM/VRAM benchmark or a test of captured-image reopening; native
+overview pixels and sustained performance still require acceptance after this
+change. CI runs the device regression separately from ordinary unit tests.
+
 Window events, including native cloaking/uncloaking, refresh the catalog. The
 two-second timer checks display topology, DPI and work areas, but no longer
 enumerates all applications when those values are unchanged. Unit tests cover
@@ -355,7 +371,8 @@ these changes.
 respects Windows' foreground restrictions and reports a rejected activation to
 stderr; no injected key or input-queue attachment bypasses them. The scene's
 focus facts follow observed native focus. Pointer/keyboard forwarding through
-the picture, launch and other scene actions remain unavailable.
+the picture remains unavailable. Scene launch is available with the explicit
+`--window-actions` opt-in described above.
 Restore alone does not request keyboard focus. This does not replace the native
 layout session or enable Marea's pending effects.
 Capture can be denied by an application or unavailable on a Windows installation;

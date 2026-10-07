@@ -124,7 +124,15 @@ def leaf(output):
     window = tk.Tk()
     window.title('Owned launch child ñ 海')
     window.geometry('180x100+700+450')
-    tk.Label(window, text='Native child\nEspaña ñ 海').pack(padx=12, pady=20)
+    window.configure(background='#20c060')
+    label = tk.Label(window, text='Native child\nEspaña ñ 海', background='#20c060')
+    label.pack(padx=12, pady=20)
+    def repaint():
+        color = '#d03080' if (output / 'repaint').exists() else '#20c060'
+        window.configure(background=color)
+        label.configure(background=color)
+        window.after(150, repaint)
+    window.after(150, repaint)
     window.update()
     hwnd = C.WinDLL('user32').GetAncestor
     hwnd.argtypes, hwnd.restype = [W.HWND, W.UINT], W.HWND
@@ -137,17 +145,27 @@ def leaf(output):
 
 def scene_source(command, generation='A'):
     return '''scene NativeLaunchCI {
-    surface { size: 520, 240; kind: window; title: "Native launch CI"; keyboard: none; rate: 30 }
-    windows win max 4
+    surface { size: 640, 360; kind: window; title: "Native launch CI"; keyboard: none; rate: 30 }
+    windows win max 16
     fact ready = false
     fact count = 0
+    fact previews = false
+    fact preview_slot = -1
     event invoked ->
+    event toggle_preview ->
     box { from: 0, 0; size: screen.width, screen.height; color: __BACKGROUND__ }
     text "Native launch · Generation __GENERATION__" { at: 24, 24; size: 22; color: #eeeeee }
     box open_program { from: 24, 90; size: 260, 60; color: #36514b; label: "Open owned program __GENERATION__" }
     text "Open owned program" { at: 40, 112; size: 16; color: #ffffff }
     on press open_program { emit invoked; launch __COMMAND__ }
     text "Luau actions: {count}" { at: 24, 180; size: 16; color: #ffffff }
+    box preview_toggle { from: 24, 230; size: 260, 44; color: #36514b; label: "Toggle owned preview" }
+    text "Toggle owned preview" { at: 40, 244; size: 16; color: #ffffff }
+    on press preview_toggle { emit toggle_preview }
+    repeat i in 0..16 {
+        window win.$i { at: 310, 80; size: 300, 220; ask: -1, -1;
+            show: previews and win.$i.open and i == preview_slot }
+    }
 }
 '''.replace('__COMMAND__', json.dumps(command, ensure_ascii=False)).replace('__GENERATION__', generation).replace(
         '__BACKGROUND__', '#12171b' if generation == 'A' else '#1b2840')
@@ -165,7 +183,7 @@ def exercise(binary, output):
             quoted = lambda value: "'" + str(value).replace("'", "''") + "'"
             command = '& ' + ' '.join(map(quoted, (sys.executable, Path(__file__).resolve(), '--leaf', '--output', folder)))
             scene.write_text(scene_source(command), encoding='utf-8')
-            scene.with_suffix('.luau').write_text('fact.ready = true\non("invoked", function() fact.count += 1 end)\n', encoding='utf-8')
+            scene.with_suffix('.luau').write_text('fact.ready = true\non("invoked", function() fact.count += 1 end)\non("toggle_preview", function() fact.previews = not fact.previews end)\n', encoding='utf-8')
             env = dict(os.environ, PLEAMAR_CONFIG=str(folder / 'config'), APPDATA=str(folder / 'state'),
                        PLEAMAR_SOCKET_DIR=f'native-launch-ci-{os.getpid()}-{mode}')
             flags = subprocess.CREATE_NO_WINDOW | subprocess.BELOW_NORMAL_PRIORITY_CLASS
@@ -196,7 +214,7 @@ def exercise(binary, output):
 
                 try:
                     run(['--check', str(scene)])
-                    args = [str(binary), '--scene', str(scene), '--preview-monitor', 'all']
+                    args = [str(binary), '--scene', str(scene), '--preview-monitor', 'all', '--no-hud']
                     if mode != 'view-only':
                         args.append('--window-actions')
                     process = subprocess.Popen(args, env=env, stdout=log, stderr=log, creationflags=flags)
@@ -227,6 +245,40 @@ def exercise(binary, output):
                         assert desktop.pid(child['hwnd']) == child['pid'] and desktop.user.IsWindowVisible(child['hwnd'])
                         child_handle = desktop.kernel.OpenProcess(0x00100000, False, child['pid'])
                         assert child_handle and desktop.kernel.WaitForSingleObject(child_handle, 0) == 258
+                        # Resolve the owned child's title before enabling one
+                        # slot. The child stays alive throughout capture checks.
+                        def owned_slot():
+                            for slot in range(16):
+                                if ask(f'get win.{slot}.title') == 'Owned launch child ñ 海':
+                                    return str(slot)
+                            return None
+                        slot = until(owned_slot, 'owned child in the native catalog')
+                        ask(f'set preview_slot {slot}')
+                        trace = lambda: (folder / 'scene.log').read_text(encoding='utf-8')
+                        assert 'capture transport =' not in trace(), 'hidden previews allocated a capture device'
+                        def preview_pixels(color, name, visible=True):
+                            picture = desktop.pixels(hwnd)
+                            width, _, bgra = picture
+                            matches = 0
+                            for y in range(80, 300):
+                                for x in range(310, 610):
+                                    i = (y * width + x) * 4
+                                    if all(abs(a-b) <= 5 for a,b in zip((bgra[i+2],bgra[i+1],bgra[i]),color)):
+                                        matches += 1
+                            if (matches > 1000) != visible:
+                                return False
+                            png(folder / name, picture)
+                            return True
+                        run(['agent', 'press', str(process.pid), 'preview_toggle'])
+                        until(lambda: preview_pixels((0x20,0xc0,0x60), 'preview-initial.png'), 'real WGC picture in scene')
+                        allocations = trace().count('capture transport =')
+                        run(['agent', 'press', str(process.pid), 'preview_toggle'])
+                        until(lambda: preview_pixels((0x20,0xc0,0x60), 'preview-hidden.png', False), 'hidden preview removed')
+                        until(lambda: 'idle capture device retired' in trace(), 'idle capture device retirement')
+                        (folder / 'repaint').write_text('owned source only', encoding='utf-8')
+                        run(['agent', 'press', str(process.pid), 'preview_toggle'])
+                        until(lambda: preview_pixels((0xd0,0x30,0x80), 'preview-reopened.png'), 'fresh source pixels after device recreation')
+                        assert trace().count('capture transport =') > allocations, 'preview did not recreate its device'
                         scene.write_text(scene_source(command, 'B'), encoding='utf-8')
                         until(lambda: 'Open owned program B' in run(['agent', 'tree', str(process.pid), 'json']), 'scene hot reload')
                         until(lambda: rendered('B'), 'reloaded GPU scene pixels')
@@ -242,7 +294,9 @@ def exercise(binary, output):
                     if child_handle:
                         assert desktop.kernel.WaitForSingleObject(child_handle, 5000) == 0, 'scene left an owned child running'
                     report['cases'].append(dict(mode=mode, rendered=True, luau=True,
-                                              native_child=mode != 'view-only', hot_reload=mode != 'view-only', cleanup=True))
+                                              native_child=mode != 'view-only', hot_reload=mode != 'view-only', cleanup=True,
+                                              lazy_capture=mode != 'view-only', idle_capture_retirement=mode != 'view-only',
+                                              fresh_capture_after_reopen=mode != 'view-only'))
                 finally:
                     if process and process.poll() is None:
                         process.kill()

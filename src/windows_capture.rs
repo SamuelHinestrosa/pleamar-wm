@@ -27,6 +27,57 @@ fn keep_capture_code(factory: &IGraphicsCaptureSessionStatics) -> Result<()> {
 const MAX_PIXELS: u64 = 16_777_216;
 const FRAME_BUFFERS: i32 = 1;
 
+// Keep the renderer descriptor, but allocate capture resources only on demand.
+// A short grace period avoids recreating D3D11 during overview page transitions.
+pub(super) struct DeviceCache {
+    active: Option<Rc<Device>>,
+    wake: Option<Arc<super::wait::Wake>>,
+    renderer: Option<SharedDevice>,
+    retire_at: Option<Instant>,
+}
+impl DeviceCache {
+    pub fn new(wake:Option<Arc<super::wait::Wake>>) -> Self {
+        Self {active:None,wake,renderer:None,retire_at:None}
+    }
+    pub fn get(&mut self) -> Result<Rc<Device>> {
+        self.retire_at=None;
+        if let Some(device)=&self.active { return Ok(device.clone()); }
+        let device=match Device::create(self.wake.clone(),self.renderer.clone()) {
+            Ok(device) => device,
+            Err(error) if self.renderer.is_some() => {
+                eprintln!("windows preview: shared capture unavailable; trying CPU readback: {error}");
+                Device::new(self.wake.clone())?
+            },
+            Err(error) => return Err(error),
+        };
+        eprintln!("windows preview: capture transport = {}",if device.shared() {"shared GPU textures"} else {"CPU readback"});
+        self.active=Some(device.clone());
+        Ok(device)
+    }
+    // Return whether existing captures must be replaced. On an allocation
+    // failure the live device and its matching renderer remain unchanged.
+    pub fn renderer(&mut self, shared:Option<SharedDevice>) -> Result<bool> {
+        let replace=match &self.active {
+            Some(device) => shared.is_some() || device.shared(),
+            None => false,
+        };
+        if replace { self.active=Some(Device::create(self.wake.clone(),shared.clone())?); }
+        self.renderer=shared;
+        Ok(replace)
+    }
+    pub fn idle(&mut self, idle:bool, now:Instant) {
+        if !idle || self.active.is_none() { self.retire_at=None;return; }
+        let deadline=*self.retire_at.get_or_insert(now+Duration::from_secs(2));
+        if now>=deadline {
+            self.active=None;self.retire_at=None;
+            eprintln!("windows preview: idle capture device retired");
+        }
+    }
+    pub fn wait(&self, now:Instant) -> Option<Duration> {
+        self.retire_at.map(|at|at.saturating_duration_since(now))
+    }
+}
+
 struct Apartment(PhantomData<Rc<()>>);
 impl Drop for Apartment { fn drop(&mut self) { unsafe { RoUninitialize() }; } }
 
@@ -43,7 +94,6 @@ pub(super) struct Device {
 }
 impl Device {
     pub fn new(wake:Option<Arc<super::wait::Wake>>) -> Result<Rc<Self>> { Self::create(wake,None) }
-    pub fn with_renderer(&self, shared:Option<SharedDevice>) -> Result<Rc<Self>> { Self::create(self.wake.clone(),shared) }
     pub fn shared(&self) -> bool { self.shared.is_some() }
     fn create(wake:Option<Arc<super::wait::Wake>>, shared:Option<SharedDevice>) -> Result<Rc<Self>> { unsafe {
         RoInitialize(RO_INIT_MULTITHREADED)?;
@@ -285,5 +335,60 @@ impl Drop for Capture {
         if self.frame_token != 0 { let _ = self.pool.RemoveFrameArrived(self.frame_token); }
         if self.closed_token != 0 { let _ = self.item.RemoveClosed(self.closed_token); }
         let _ = self.pool.Close();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "creates and retires native D3D11 capture devices; no windows, pixels or input"]
+    fn native_capture_device_idle_retirement() -> Result<()> {
+        use windows::Win32::System::{ProcessStatus::*, Threading::GetCurrentProcess};
+        fn memory() -> Result<usize> {
+            let mut counters=PROCESS_MEMORY_COUNTERS_EX::default();
+            unsafe { GetProcessMemoryInfo(GetCurrentProcess(),(&mut counters as *mut PROCESS_MEMORY_COUNTERS_EX).cast(),
+                std::mem::size_of_val(&counters) as u32)?; }
+            Ok(counters.PrivateUsage)
+        }
+        let baseline=memory()?;
+        let mut cache=DeviceCache::new(None);
+        assert!(!cache.renderer(None)?);
+        assert!(cache.active.is_none());
+        assert!(cache.wait(Instant::now()).is_none());
+        let lazy=memory()?;
+        let mut samples=Vec::new();
+        for _ in 0..8 {
+            let device=cache.get()?;
+            let weak=Rc::downgrade(&device);
+            assert!(Rc::ptr_eq(&device,&cache.get()?));
+            let allocated=memory()?;
+            drop(device);
+            let now=Instant::now();
+            cache.idle(true,now);
+            cache.idle(true,now+Duration::from_secs(1));
+            assert!(weak.upgrade().is_some());
+            cache.idle(false,now+Duration::from_secs(1));
+            assert!(cache.wait(now).is_none());
+            cache.idle(true,now+Duration::from_secs(2));
+            cache.idle(true,now+Duration::from_secs(4));
+            assert!(weak.upgrade().is_none(),"idle cache retained its D3D11 device");
+            assert!(cache.wait(now).is_none());
+            std::thread::sleep(Duration::from_millis(200));
+            samples.push(serde_json::json!({"allocated_private_bytes":allocated,"retired_private_bytes":memory()?}));
+        }
+        // Capture/render owners may still hold their own references. Retiring
+        // the cache must not invalidate them while another page reopens.
+        let old=cache.get()?;
+        let now=Instant::now();cache.idle(true,now);cache.idle(true,now+Duration::from_secs(2));
+        assert!(cache.active.is_none());
+        let fresh=cache.get()?;
+        assert!(!Rc::ptr_eq(&old,&fresh));
+        assert!(old.runtime.cast::<IDirect3DDevice>().is_ok());
+        drop(old);drop(fresh);drop(cache);
+        println!("{}",serde_json::json!({"native_device_cycles":8,"windows_created":0,"physical_input":false,
+            "baseline_private_bytes":baseline,"lazy_private_bytes":lazy,"samples":samples}));
+        Ok(())
     }
 }

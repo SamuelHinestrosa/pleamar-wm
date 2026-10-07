@@ -127,7 +127,7 @@ impl Slot {
     }
 }
 struct Preview {
-    scope:Scope, created:Option<u64>, device:std::rc::Rc<capture::Device>,
+    scope:Scope, created:Option<u64>, device:capture::DeviceCache,
     slots:Vec<Option<Slot>>, send:Sender<ToRender>, _hooks:Hooks,
     consumed:Option<mpsc::Receiver<String>>, waiter:wait::Waiter, warned:HashSet<&'static str>,
     focused:Option<usize>,
@@ -151,7 +151,7 @@ impl Preview {
         // A different process taking focus clears this scene's focused slot.
         hooks.add(EVENT_SYSTEM_FOREGROUND,EVENT_SYSTEM_FOREGROUND,0)?;
         let waiter=wait::Waiter::new(wake.clone())?;
-        Ok(Self { scope,created,device:capture::Device::new(Some(wake))?,slots:(0..max).map(|_|None).collect(),
+        Ok(Self { scope,created,device:capture::DeviceCache::new(Some(wake)),slots:(0..max).map(|_|None).collect(),
             send,_hooks:hooks,consumed:None,waiter,warned:HashSet::new(),focused:None,visible:HashSet::new(),screens:Vec::new(),outputs:Outputs::default(),launches:launch::Launches::default() })
     }
     fn tell(&self,event:NestEvent) -> Result<()> { self.send.send(ToRender::Nest(event))?; Ok(()) }
@@ -173,7 +173,7 @@ impl Preview {
         let Some(slot)=self.slots[i].as_mut() else { return; };
         if slot.window.minimized || !slot.visible { return; }
         let result=(|| -> Result<_> { let (hwnd,_)=target(&slot.window.id)?;
-            Ok(capture::Capture::new(self.device.clone(),hwnd,16_777_216u64.saturating_sub(existing))?) })();
+            Ok(capture::Capture::new(self.device.get()?,hwnd,16_777_216u64.saturating_sub(existing))?) })();
         match result {
             Ok(capture) => { slot.capture=Some(capture);slot.received=false;slot.born=Instant::now();slot.next_frame=Instant::now(); },
             Err(error) => {
@@ -297,14 +297,12 @@ impl Preview {
             eprintln!("windows preview: capture transport = CPU readback (requested)");
             return;
         }
-        if shared.is_none() && !self.device.shared() { return; }
-        match self.device.with_renderer(shared) {
-            Ok(device) => {
-                self.device=device;
-                eprintln!("windows preview: capture transport = {}",if self.device.shared() {"shared GPU textures"} else {"CPU readback"});
+        match self.device.renderer(shared) {
+            Ok(true) => {
                 for slot in self.slots.iter_mut().flatten() { slot.capture=None;slot.retry.reset(); }
                 for i in 0..self.slots.len() { self.capture(i); }
             },
+            Ok(false) => {},
             Err(error) => eprintln!("windows preview: retaining current capture transport: {error}"),
         }
     }
@@ -376,8 +374,11 @@ impl Preview {
             }
             if self.consumed.is_none() { self.frames()?; }
             let now=Instant::now();
+            self.device.idle(self.consumed.is_none() && self.slots.iter().flatten()
+                .all(|slot|slot.capture.is_none() && (!slot.visible || slot.window.minimized)),now);
             if let Err(error)=self.launches.poll(now) { eprintln!("windows launch: {error}"); }
             let mut wait=(topology+Duration::from_secs(2)).saturating_duration_since(now);
+            if let Some(retire)=self.device.wait(now) { wait=wait.min(retire); }
             if let Some(launch)=self.launches.wait(now) { wait=wait.min(launch); }
             for slot in self.slots.iter().flatten() {
                 if let Some(resize)=slot.configure.wait(now) { wait=wait.min(resize); }
