@@ -64,7 +64,17 @@ def main():
         if owned.read(path / 'state.json').get('command') == command:
             control(path, 'checkpoint')
         (path / 'control.pending').write_text(command, encoding='utf-8')
-        (path / 'control.pending').replace(path / 'control')
+        # The fixture polls this file. Windows can briefly refuse replacement
+        # while its reader is open; retry only that sharing/access race.
+        deadline = time.monotonic() + 2
+        while True:
+            try:
+                (path / 'control.pending').replace(path / 'control')
+                break
+            except PermissionError as error:
+                if error.winerror not in (5, 32, 33) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(.01)
         owned.wait(lambda: owned.read(path / 'state.json').get('command') == command, command)
     def run(*arguments, fail=None):
         result = subprocess.run([str(binary), *map(str, arguments)], env=env, capture_output=True,
