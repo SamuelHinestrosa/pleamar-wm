@@ -8,11 +8,30 @@ use windows::Win32::{Storage::FileSystem::*, UI::Accessibility::*};
 thread_local! {
     static DIRTY: Cell<bool> = const { Cell::new(false) };
     static DRAGGING: Cell<bool> = const { Cell::new(false) };
+    static DRAG_START: RefCell<Option<(String, Bounds)>> = const { RefCell::new(None) };
+    static DROP: RefCell<Option<(String, POINT)>> = const { RefCell::new(None) };
     static MINIMIZE_EVENTS: RefCell<Vec<(isize, bool)>> = const { RefCell::new(Vec::new()) };
 }
 unsafe extern "system" fn changed(_: HWINEVENTHOOK, event: u32, hwnd: HWND, object: i32, child: i32, _: u32, _: u32) {
-    if event == EVENT_SYSTEM_MOVESIZESTART { DRAGGING.set(true); }
-    if event == EVENT_SYSTEM_MOVESIZEEND { DRAGGING.set(false); }
+    if event == EVENT_SYSTEM_MOVESIZESTART {
+        DRAGGING.set(true);
+        DRAG_START.with(|start| *start.borrow_mut() = inspect(hwnd).map(|w|(w.id,w.bounds)));
+    }
+    if event == EVENT_SYSTEM_MOVESIZEEND {
+        DRAGGING.set(false);
+        if let Some((id, before)) = DRAG_START.with(|start| start.borrow_mut().take()) {
+            if let Some(now) = inspect(hwnd).filter(|w|w.id==id) {
+                // Resizing a border is not a request to exchange two tiles.
+                if now.bounds.width==before.width && now.bounds.height==before.height
+                    && (now.bounds.x!=before.x || now.bounds.y!=before.y) {
+                    let mut point=POINT::default();
+                    if unsafe { GetCursorPos(&mut point) }.is_ok() {
+                        DROP.with(|drop| *drop.borrow_mut()=Some((id,point)));
+                    }
+                }
+            }
+        }
+    }
     if event < EVENT_OBJECT_CREATE || (object == 0 && child == 0) { DIRTY.set(true); }
     if matches!(event, EVENT_SYSTEM_MINIMIZESTART | EVENT_SYSTEM_MINIMIZEEND) || (event == EVENT_OBJECT_DESTROY && object == 0 && child == 0) {
         MINIMIZE_EVENTS.with(|pending| {
@@ -164,6 +183,7 @@ fn restore(old: &Original, screens: &[Monitor]) -> Result<bool> {
 struct Manager {
     modes: BTreeMap<String, Mode>, originals:BTreeMap<String, Original>, journal:Journal,
     process:Option<u32>, owner:Option<u32>, creation:Option<u64>, all:bool, scans:u64, changes:u64,
+    layout_micros:u64,
     rules:rules::Rules,
     minimized:Minimized,
     fullscreen:BTreeSet<String>,
@@ -180,7 +200,7 @@ impl Manager {
         if !options.all && modes.len() != options.monitors.len() { return Err("a requested monitor is not connected".into()); }
         let rules = rules::Rules::read(options.rules.clone(),options.explicit_rules)?;
         let (journal, originals) = Journal::open(options.state.clone())?;
-        let mut manager = Self { modes, originals, journal, process:options.process, owner:options.owner, creation:None, all:options.all, scans:0, changes:0, rules, minimized:Minimized::default(), fullscreen:BTreeSet::new() };
+        let mut manager = Self { modes, originals, journal, process:options.process, owner:options.owner, creation:None, all:options.all, scans:0, changes:0, layout_micros:0, rules, minimized:Minimized::default(), fullscreen:BTreeSet::new() };
         if let Some(pid) = options.process {
             // Store a creation stamp as well: a recycled PID must not widen a fixture's scope.
             manager.creation = windows()?.iter().find(|w| w.process == pid)
@@ -216,6 +236,7 @@ impl Manager {
             "pools":false,"process":self.process,"owner":self.owner,"saved_windows":self.originals.len(),
             "pending_recovery":self.originals.values().filter(|w|!self.fullscreen.contains(&w.id) && self.modes.get(&w.monitor).is_none_or(|m|!m.tiled)).count(),
             "catalog_scans":self.scans,"geometry_changes":self.changes,
+            "last_layout_micros":self.layout_micros,"layout_choices":["left","right","columns","rows","grid"],
             "minimize_shortcuts":true,"last_minimized":self.minimized.0.last(),
             "navigation_shortcuts":true,"close_shortcut":true,"fullscreen_shortcut":true,"fullscreen_windows":self.fullscreen,
             "rules_file":self.rules.path,"window_rules":self.rules.entries.len(),
@@ -284,10 +305,11 @@ impl Manager {
                     }
                 }
                 if saved { self.journal.save(&self.originals)?; }
-                for (id, rect) in order.iter().zip(boxes) {
-                    let bounds:Bounds = rect.into();
-                    if target(id)?.1.bounds != bounds { place(id, &bounds)?; self.changes += 1; }
-                }
+                let moves:Vec<_> = order.iter().cloned().zip(boxes.into_iter().map(Bounds::from)).collect();
+                let started = Instant::now();
+                let result = place_many(&moves);
+                self.layout_micros = started.elapsed().as_micros().min(u64::MAX as u128) as u64;
+                self.changes += result? as u64;
                 Ok(())
             })();
             if let Err(error) = changed {
@@ -414,6 +436,20 @@ impl Manager {
         }
         DIRTY.set(true);
         Ok(self.status())
+    }
+    fn dropped(&mut self, id:&str, point:POINT) -> Result<()> {
+        let (_, window)=target(id)?;
+        if !self.owns(&window) || self.fullscreen.contains(id) { return Ok(()); }
+        let Some(mode)=self.modes.get_mut(&window.monitor).filter(|mode|mode.tiled) else { return Ok(()); };
+        let Some(from)=mode.order.iter().position(|other|other==id) else { return Ok(()); };
+        let Some(screen)=monitors()?.into_iter().find(|m|m.name==window.monitor) else { return Ok(()); };
+        let boxes=layout::arrange((&screen.work).into(),mode.order.len(),mode.layout,(8.0*screen.scale).round() as i32)?;
+        if let Some(to)=boxes.iter().position(|r| point.x>=r.x && point.y>=r.y
+            && i64::from(point.x)<i64::from(r.x)+i64::from(r.width)
+            && i64::from(point.y)<i64::from(r.y)+i64::from(r.height)) {
+            mode.order.swap(from,to);
+        }
+        Ok(())
     }
     fn active(&self, include_owned:bool) -> Result<(HWND,Window)> {
         let hwnd = unsafe { GetForegroundWindow() };
@@ -599,6 +635,11 @@ pub(super) fn run(args:&[String]) -> Result<Value> {
         loop {
             pump();
             manager.minimized_events();
+            if let Some((id,point))=DROP.with(|drop|drop.borrow_mut().take()) {
+                // A window may disappear after the end-of-drag notification.
+                if let Err(error)=manager.dropped(&id,point) { eprintln!("window drop · {error}"); }
+                dirty_since=Some(Instant::now()-Duration::from_millis(60));
+            }
             if owner.as_ref().map(Owner::exited).transpose()?.unwrap_or(false) { break; }
             if !server.running() { return Err("WM command listener stopped unexpectedly".into()); }
             server.wake.reset();
@@ -644,6 +685,10 @@ mod fullscreen_tests;
 #[cfg(test)]
 #[path = "windows_navigation_tests.rs"]
 mod navigation_tests;
+
+#[cfg(test)]
+#[path = "windows_layout_tests.rs"]
+mod layout_tests;
 
 #[cfg(test)]
 mod tests {

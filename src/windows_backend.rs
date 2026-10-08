@@ -234,18 +234,50 @@ fn pump() {
 }
 
 fn place(id: &str, bounds: &Bounds) -> Result<()> {
-    let (hwnd, current) = target(id)?;
-    normal(&current)?;
-    unsafe { SetWindowPos(hwnd, None, bounds.x, bounds.y, bounds.width, bounds.height,
-        SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS) }?;
-    let until = Instant::now() + Duration::from_secs(1);
-    loop {
-        pump();
-        let (_, current) = target(id)?;
-        if current.bounds == *bounds { return Ok(()); }
-        if Instant::now() >= until { return Err(format!("{id} did not accept the requested geometry").into()); }
-        std::thread::sleep(Duration::from_millis(10));
+    place_many(&[(id.to_string(), bounds.clone())]).map(|_| ())
+}
+
+// Dispatch every move before waiting for acknowledgement. A slow application
+// must not hold back the other applications in a layout. Keep one deadline for
+// the entire group, and never treat an accepted request as confirmed geometry.
+fn place_many(windows: &[(String, Bounds)]) -> Result<usize> {
+    if windows.len() > 64 { return Err("a layout supports at most 64 windows".into()); }
+    let mut identities = HashSet::new();
+    let mut pending = Vec::new();
+    for (id, bounds) in windows {
+        if !identities.insert(id) { return Err("duplicate layout window".into()); }
+        if bounds.width <= 0 || bounds.height <= 0 || bounds.x.checked_add(bounds.width).is_none()
+            || bounds.y.checked_add(bounds.height).is_none() { return Err("invalid layout bounds".into()); }
+        let (hwnd, current) = target(id)?;
+        normal(&current)?;
+        if current.bounds != *bounds { pending.push((hwnd, id, bounds)); }
     }
+    let changed = pending.len();
+    for (hwnd, id, bounds) in &pending {
+        if !Identity::read(*hwnd).is_some_and(|identity| identity.token() == **id) {
+            return Err("layout window identity changed".into());
+        }
+        unsafe { SetWindowPos(*hwnd, None, bounds.x, bounds.y, bounds.width, bounds.height,
+            SWP_NOACTIVATE | SWP_NOZORDER | SWP_NOOWNERZORDER | SWP_ASYNCWINDOWPOS) }?;
+    }
+    let until = Instant::now() + Duration::from_secs(1);
+    while !pending.is_empty() {
+        pump();
+        let mut waiting = Vec::new();
+        for entry @ (_, id, bounds) in pending {
+            if target(id)?.1.bounds != *bounds { waiting.push(entry); }
+        }
+        pending = waiting;
+        if pending.is_empty() { break; }
+        if Instant::now() >= until {
+            return Err(format!("{} did not accept the requested geometry", pending[0].1).into());
+        }
+        // Messages can confirm same-thread moves; cross-process acknowledgement
+        // is polled without spinning or imposing a 10 ms delay per window.
+        let result = unsafe { MsgWaitForMultipleObjectsEx(None, 4, QS_ALLINPUT, MWMO_INPUTAVAILABLE) };
+        if result == WAIT_FAILED { return Err(std::io::Error::last_os_error().into()); }
+    }
+    Ok(changed)
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]

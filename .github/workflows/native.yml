@@ -117,6 +117,23 @@ jobs:
           cargo test --locked --bin pleamar-wm
           windows_backend::session::navigation_tests::native_navigation_and_close
           -- --ignored --exact --nocapture --test-threads=1
+      - name: Native layout latency, placement and tile exchange
+        if: runner.os == 'Windows'
+        working-directory: pleamar-wm
+        env:
+          PLEAMAR_WM_CI_LAYOUT: '1'
+          PLEAMAR_WM_CI_OUTPUT: ${{ runner.temp }}/wm-layout-acceptance
+        run: >-
+          cargo test --locked --bin pleamar-wm
+          windows_backend::session::layout_tests::native_layout_batch_and_drag
+          -- --ignored --exact --nocapture --test-threads=1
+      - name: Keep native layout measurements
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@v4
+        with:
+          name: wm-layout-acceptance
+          path: ${{ runner.temp }}/wm-layout-acceptance
+          if-no-files-found: warn
       - name: Keep native navigation evidence
         if: always() && runner.os == 'Windows'
         uses: actions/upload-artifact@v4

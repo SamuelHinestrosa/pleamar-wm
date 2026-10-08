@@ -903,3 +903,30 @@ Windows taskbar work-area inset is handled by Marea's dock logic. Local primary
 monitor acceptance is refused; only the explicit GitHub-hosted fixture may use
 `--ci-owned-desktop`. These named scene actions do not inject OS input or prove
 physical keyboard/mouse dispatch.
+
+
+## Layout responsiveness and selection
+
+Automatic tiling dispatches all changed window positions before waiting for
+readback, with one shared one-second deadline. Unchanged rectangles generate no
+resize request. Recovery is still flushed before any placement and a refused
+layout restores the saved free positions. `status.last_layout_micros` measures
+the last native placement/acknowledgement phase, not compositor frame pacing.
+
+Dragging a tiled window's title bar onto another tile exchanges their order on
+that monitor; a border resize does not exchange tiles. Dropping in a gap keeps
+the existing order. Cross-monitor movement follows the existing monitor rules.
+Free mode and shutdown restore the original positions. Marea's Windows settings
+now expose free, main-left, main-right, columns, rows and grid arrangements.
+
+`native_layout_batch_and_drag` runs on a disposable Windows CI desktop. It checks
+all five layouts, exchanges two tiles, verifies free-position recovery and focus,
+and compares sequential against grouped acknowledgements for four independent
+UI threads with 40 ms simulated application work. These timings are a controlled
+latency regression check, not a claim about real-application FPS. CI also retains
+the native Marea page and its translated, named controls. Local unit tests pass;
+native results for this change must be read from the exact commit's CI run.
+
+This does not implement workspaces/pools, animated DWM transitions, in-preview
+input, or an independent agent seat. The intermittent WGC preview issue remains
+under investigation; a passing rerun is not a root-cause fix.
