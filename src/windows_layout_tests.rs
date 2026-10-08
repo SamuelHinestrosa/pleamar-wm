@@ -2,6 +2,10 @@
 use super::*;
 
 unsafe extern "system" fn procedure(hwnd:HWND,message:u32,w:WPARAM,l:LPARAM) -> LRESULT {
+    if message==WM_WINDOWPOSCHANGING && unsafe { GetWindowLongPtrW(hwnd,GWLP_USERDATA) }==2 {
+        let position=unsafe { &mut *(l.0 as *mut WINDOWPOS) };
+        position.flags |= SWP_NOMOVE | SWP_NOSIZE;
+    }
     if message==WM_WINDOWPOSCHANGING && unsafe { GetWindowLongPtrW(hwnd,GWLP_USERDATA) }==1 {
         std::thread::sleep(Duration::from_millis(40));
     }
@@ -93,13 +97,21 @@ fn native_layout_batch_and_drag() -> Result<()> {
     assert_eq!(manager.modes[&screen.name].order[2],order[0]);
     assert_eq!(manager.modes[&screen.name].order[0],order[2]);
     assert_eq!(target(&order[0])?.1.bounds,destination);
+    let started=Instant::now();
     manager.set_mode(&screen.name,false,None)?;
+    let free_micros=started.elapsed().as_micros() as u64;
     for (id,bounds) in &free { assert_eq!(target(id)?.1.bounds,*bounds); }
     assert_eq!(unsafe { GetForegroundWindow() },foreground,"layouts took focus");
+    unsafe { SetWindowLongPtrW(HWND(apps.0[0].0 as _),GWLP_USERDATA,2); }
+    assert!(manager.set_mode(&screen.name,true,Some(Layout::Grid)).unwrap_err().to_string().contains("did not accept"));
+    assert!(!manager.modes[&screen.name].tiled);
+    assert!(manager.originals.is_empty(),"failed layout lost a recovery entry");
+    for (id,bounds) in &free { assert_eq!(target(id)?.1.bounds,*bounds,"failed layout did not restore free geometry"); }
+    unsafe { SetWindowLongPtrW(HWND(apps.0[0].0 as _),GWLP_USERDATA,1); }
     let serial_total:u64=serial.iter().sum();let batch_total:u64=batched.iter().sum();
     let report=json!({"serial_micros":serial,"batch_micros":batched,"ratio":batch_total as f64/serial_total as f64,
-        "window_count":4,"fixture_delay_ms":40,"only_owned_windows":true,"physical_input":false,
-        "checks":["five layouts read back","drop exchanges tiles","free positions restored","no focus change","unchanged geometry skipped"],
+        "window_count":4,"fixture_delay_ms":40,"free_mode_micros":free_micros,"only_owned_windows":true,"physical_input":false,
+        "checks":["five layouts read back","drop exchanges tiles","free positions restored","no focus change","unchanged geometry skipped","refused layout restores the whole group"],
         "scope":"native placement acknowledgements; not compositor frame pacing or whole-product acceptance"});
     std::fs::write(out.join("report.json"),serde_json::to_vec_pretty(&report)?)?;
     assert!(batch_total*10<serial_total*8,"batched acknowledgement did not improve latency: {report}");

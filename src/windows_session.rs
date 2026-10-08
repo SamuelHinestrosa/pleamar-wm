@@ -214,6 +214,7 @@ impl Manager {
         let screens = monitors()?;
         let before = self.originals.len();
         let mut errors = Vec::new();
+        let mut normal_moves = Vec::new();
         let ids: Vec<_> = self.originals.values().filter(|w| screen.is_none_or(|s| w.monitor == s)).map(|w| w.id.clone()).collect();
         for id in ids {
             if self.fullscreen.contains(&id) { continue; }
@@ -221,11 +222,26 @@ impl Manager {
             if !self.modes.contains_key(&old.monitor) { continue; }
             if old.pending_monitor.as_ref().is_some_and(|m|!self.modes.contains_key(m)) { continue; }
             if let Ok((_, w)) = target(&id) { if !self.owns(&w) { continue; } }
+            if old.fullscreen.is_none() && screens.iter().any(|m|m.name==old.monitor && m.bounds.contains(&old.bounds)) {
+                if let Ok((_,current))=target(&id) {
+                    if !current.minimized && !current.maximized
+                        && (current.monitor==old.monitor || old.pending_monitor.as_deref()==Some(&current.monitor)) {
+                        normal_moves.push((id,old.bounds.clone()));
+                        continue;
+                    }
+                }
+            }
             match restore(old, &screens) {
                 Ok(true) => { self.originals.remove(&id); }
                 Ok(false) => {}
                 Err(e) => errors.push(e.to_string()),
             }
+        }
+        if let Err(error)=place_many(&normal_moves) { errors.push(error.to_string()); }
+        // Keep unconfirmed entries durable, even if another application in the
+        // group already accepted its free position.
+        for (id,bounds) in normal_moves {
+            if target(&id).is_ok_and(|(_,current)|current.bounds==bounds) { self.originals.remove(&id); }
         }
         if before != self.originals.len() || !self.journal.path.exists() { self.journal.save(&self.originals)?; }
         if !errors.is_empty() { return Err(errors.join("; ").into()); }
