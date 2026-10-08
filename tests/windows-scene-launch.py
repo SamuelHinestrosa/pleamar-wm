@@ -330,6 +330,12 @@ def exercise(binary, output):
                                     if all(abs(a-b) <= 5 for a,b in zip((bgra[i+2],bgra[i+1],bgra[i]),color)):
                                         matches += 1
                             if (matches > 1000) != visible:
+                                # Keep the last actual frame when WGC acceptance
+                                # fails, not only successful screenshots.
+                                png(folder / 'preview-last-mismatch.png', picture)
+                                (folder / 'preview-last-mismatch.json').write_text(json.dumps(dict(
+                                    expected=color, visible=visible, matching_pixels=matches,
+                                    source_id=native_id, preview_slot=slot)), encoding='utf-8')
                                 return False
                             png(folder / name, picture)
                             return True
