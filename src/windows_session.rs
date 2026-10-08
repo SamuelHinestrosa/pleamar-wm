@@ -465,10 +465,12 @@ impl Manager {
     }
     fn minimize_focused(&mut self) -> Result<Value> {
         let (_,window)=self.active(false)?;
-        if self.modes[&window.monitor].tiled { return Err("switch this monitor to free windows before minimizing".into()); }
         window_state(&window.id, true, true)?;
         self.minimized.remember(window.id);
         self.minimized_events();
+        // Minimized windows leave the layout but retain their recovery entry.
+        // Reflow before returning so the command's status matches the desktop.
+        self.reconcile()?;
         Ok(self.status())
     }
     fn restore_last(&mut self) -> Result<Value> {
@@ -480,6 +482,7 @@ impl Manager {
             // Keep a failed restoration retryable; remove it only after native readback.
             window_state(&id, false, true)?;
             self.minimized.0.pop();
+            self.reconcile()?;
             return Ok(self.status());
         }
         Err("no recently minimized window remains in this WM session".into())

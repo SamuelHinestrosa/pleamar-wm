@@ -138,10 +138,20 @@ def main():
         owned.wait(lambda: not desktop.user.IsZoomed(hwnd), 'normal geometry')
         control(target_path, 'allow-parent')
         assert desktop.user.SetForegroundWindow(hwnd)
+        free_bounds = next(w['bounds'] for w in run('windows') if w['id'] == identity)
         wm('layout ' + monitor + ' grid')
-        wm('emit minimize', fail='free windows before minimizing')
-        assert not desktop.user.IsIconic(hwnd)
+        status = wm('emit minimize')
+        assert desktop.user.IsIconic(hwnd) and status['last_minimized'] == identity
+        assert status['saved_windows'] == 1, 'minimizing lost the free-position journal'
+        assert status['monitors'][0]['tiled'] and status['monitors'][0]['windows'] == 0
+        status = wm('emit restore_last')
+        assert not desktop.user.IsIconic(hwnd) and not desktop.user.IsZoomed(hwnd)
+        assert status['last_minimized'] is None and status['monitors'][0]['windows'] == 1
+        assert status['monitors'][0]['tiled'] and status['saved_windows'] == 1
+        capture(identity, '04-restored-into-layout')
         wm('free ' + monitor)
+        assert next(w['bounds'] for w in run('windows') if w['id'] == identity) == free_bounds
+        assert wm('status')['saved_windows'] == 0
         desktop.user.ShowWindow(other_hwnd, 6)
         time.sleep(.15)
         assert wm('status')['last_minimized'] is None, 'out-of-scope minimize entered history'
@@ -155,7 +165,7 @@ def main():
         wm('quit')
         assert service.wait(timeout=5) == 0
         report.update(passed=True, checks=['scoped foreground minimize', 'normal and maximized restoration',
-                      'actual minimize/destroy events', 'tiled-mode refusal', 'out-of-scope refusal',
+                      'actual minimize/destroy events', 'tiled minimize/rejoin and free-position recovery', 'out-of-scope refusal',
                       'no unrelated restore after target exit'], physical_key_dispatch=False)
     finally:
         for child, path in fixtures:

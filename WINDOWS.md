@@ -102,7 +102,9 @@ cargo test --release --locked --bin pleamar-wm windows_backend::session::fullscr
 The automatic session accepts `--say wm 'emit minimize'` and
 `--say wm 'emit restore_last'`, matching Marea's optional Win+M / Win+Shift+M
 bindings. Minimize targets the actual foreground application and requires its
-monitor to be managed in free-window mode. Restore uses actual minimize events
+monitor to be managed. In tiled mode it leaves the layout while retaining its
+original free position; restore rejoins the layout and reflows the remaining
+windows. Restore uses actual minimize events
 from that session, including application title-bar buttons; its history keeps
 at most 64 identities and retires them on restore/destruction. A session restart
 starts a new history. Disconnected displays and a different process scope are
