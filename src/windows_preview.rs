@@ -560,7 +560,14 @@ fn act(scope:&Scope,created:Option<u64>,id:&str,action:Action) -> Result<()> {
             let (hwnd,window)=target(id)?;
             if !scope.allows(&window,created) { return Err("window left the selected scope while restoring".into()); }
             if !unsafe { SetForegroundWindow(hwnd) }.as_bool() {
-                return Err("Windows denied foreground activation; select the scene and try again".into());
+                // A Windows-key hook does not make the background scene the
+                // recipient of input. Use the native task-switch operation for
+                // this explicit, scope-checked selection; do not attach input
+                // queues or synthesize Alt, which can interfere with the app.
+                unsafe { SwitchToThisWindow(hwnd, true); }
+                // Activation across input queues is asynchronous. The existing
+                // foreground WinEvent, not this request, acknowledges selection.
+                eprintln!("windows preview: requested native task switch");
             }
         },
     }
