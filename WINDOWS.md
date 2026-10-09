@@ -21,6 +21,20 @@ origins and different source/destination scales. A native four-window secondary
 display test exercised the matching Marea overview, including minimization,
 warm reuse and capture retirement; it did not validate compositor parity.
 
+`tests/windows-overview-projection.py` checks a real owned source on a secondary
+monitor against a closed, non-activating destination on another monitor. Native
+geometry matched (-1496, 208, 320, 208 logical units in the local run); no capture
+or foreground change occurred. A closed surface can retain a shown transparent
+composition HWND, so `IsWindowVisible` alone is not its scene-open state.
+
+`tests/windows-transition-probe.py` is a feasibility probe, not a production
+effect. On an owned ordinary window it confirmed that cross-process cloaking
+was denied, while a zero-alpha layered window remained capturable and its
+original style was restored. It only touches its own secondary-display fixture.
+It does not establish continuous capture latency, cancellation/recovery or
+compatibility with other application types. Both scripts require an explicit
+non-primary source monitor; the capture probe also needs Pillow.
+
 Upstream through `871808b` (0.2.28) is integrated, including its workspace-wave
 fix, independent Linux agent keyboard, Chromium emoji/clipboard handling and
 desktop cursor socket. The socket remains Linux-only; Windows reports global
