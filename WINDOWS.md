@@ -10,7 +10,7 @@ compose applications. No WSL, Wayland server or Unix shell is required.
 `--preview-monitor all --preview-project` gathers every eligible source monitor
 onto exactly one scene output. It rejects ambiguous output copies; the normal
 per-monitor provider and dock behavior are unchanged. Optional scene facts
-`win.$i.native.x`, `.y`, `.width` and `.height` receive the source rectangle in
+`win.$i.native.x`, `.y`, `.width` and `.height` receive the visible DWM frame in
 the destination output's logical coordinates. Capture dimensions continue to
 use the source monitor's DPI. This lets an overview animate its captured images
 without resizing or hiding the applications themselves.
@@ -23,7 +23,7 @@ warm reuse and capture retirement; it did not validate compositor parity.
 
 `tests/windows-overview-projection.py` checks a real owned source on a secondary
 monitor against a closed, non-activating destination on another monitor. Native
-geometry matched (-1496, 208, 320, 208 logical units in the local run); no capture
+geometry matched (-1489.6, 208, 307.2, 201.6 logical units in the local run); no capture
 or foreground change occurred. A closed surface can retain a shown transparent
 composition HWND, so `IsWindowVisible` alone is not its scene-open state.
 

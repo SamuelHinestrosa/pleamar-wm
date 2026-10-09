@@ -25,6 +25,7 @@ u.GetWindowLongPtrW.argtypes=[W.HWND,C.c_int];u.GetWindowLongPtrW.restype=C.c_ss
 callback=C.WINFUNCTYPE(W.BOOL,W.HWND,W.LPARAM)
 u.EnumWindows.argtypes=[callback,W.LPARAM];u.EnumWindows.restype=W.BOOL
 foreground=u.GetForegroundWindow();renderer=None;fixture=None
+dwm=C.WinDLL('dwmapi');dwm.DwmGetWindowAttribute.argtypes=[W.HWND,W.DWORD,W.LPVOID,W.DWORD];dwm.DwmGetWindowAttribute.restype=C.c_long
 report=dict(passed=False,source=source['name'],destination=destination['name'],input_injected=False)
 env=dict(os.environ,PLEAMAR_CONFIG=str(out/'config'),PLEAMAR_SOCKET_DIR='projection-'+str(os.getpid()))
 scene=out/'projection.plm'
@@ -63,8 +64,9 @@ try:
             time.sleep(.02)
         catalog=json.loads(subprocess.check_output([str(binary),'windows'],creationflags=flags,text=True))
         window=next(w for w in catalog if w['process']==fixture.pid)
-        bounds=window['bounds'];origin=destination['bounds'];scale=destination['scale']
-        expected=[(bounds['x']-origin['x'])/scale,(bounds['y']-origin['y'])/scale,bounds['width']/scale,bounds['height']/scale]
+        rect=W.RECT();assert dwm.DwmGetWindowAttribute(owner['hwnd'],9,C.byref(rect),C.sizeof(rect))==0
+        origin=destination['bounds'];scale=destination['scale']
+        expected=[(rect.left-origin['x'])/scale,(rect.top-origin['y'])/scale,(rect.right-rect.left)/scale,(rect.bottom-rect.top)/scale]
         actual=[float(ask('get win.0.native.'+key)) for key in ['x','y','width','height']]
         assert all(abs(left-right)<.01 for left,right in zip(expected,actual))
         assert ask('get win.count')=='1' and float(ask('get win.0.width'))==0

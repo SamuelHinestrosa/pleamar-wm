@@ -70,6 +70,21 @@ impl Outputs {
     }
 }
 static SCOPE:OnceLock<Scope> = OnceLock::new();
+
+fn presentation_bounds(window:&Window) -> Bounds {
+    // GetWindowRect includes invisible resize borders. WGC pictures cover the
+    // visible DWM frame; using placement bounds stretches their first frame.
+    let Some(raw)=window.id.split(':').nth(2).and_then(|s|usize::from_str_radix(s,16).ok()) else { return window.bounds.clone(); };
+    let hwnd=HWND(raw as _);
+    if !window.minimized && Identity::read(hwnd).is_some_and(|id|id.token()==window.id) {
+        let mut rect=RECT::default();
+        if unsafe { DwmGetWindowAttribute(hwnd,DWMWA_EXTENDED_FRAME_BOUNDS,&mut rect as *mut _ as _,size_of::<RECT>() as u32) }.is_ok()
+            && rect.right>rect.left && rect.bottom>rect.top {
+            return rect.into();
+        }
+    }
+    window.bounds.clone()
+}
 thread_local! { static CATALOG_DIRTY:Cell<bool> = const { Cell::new(true) }; }
 unsafe extern "system" fn changed(_:HWINEVENTHOOK,_:u32,_:HWND,object:i32,child:i32,_:u32,_:u32) {
     if object == 0 && child == 0 { CATALOG_DIRTY.set(true); }
@@ -146,7 +161,8 @@ impl Retry {
 }
 
 struct Slot { window:Window, capture:Option<capture::Capture>, received:bool, pixels:u64, born:Instant, next_frame:Instant,
-    configure:configure::Configure, visible:bool, retry:Retry, screen:usize, scale:f64, last_size:Option<(u32,u32)>, fullscreen:bool }
+    configure:configure::Configure, visible:bool, retry:Retry, screen:usize, scale:f64, last_size:Option<(u32,u32)>, fullscreen:bool,
+    rectangle:Option<[f32;4]> }
 impl Slot {
     // A minimized window still has its last texture in the renderer. It must
     // count towards the same bound even after its capture resources are freed.
@@ -240,7 +256,7 @@ impl Preview {
             }
         }
         for (window,screen,scale) in live {
-            let rectangle=self.outputs.rectangle(screen,&window.bounds,&screens);
+            let rectangle=self.outputs.rectangle(screen,&presentation_bounds(&window),&screens);
             let fullscreen=fullscreen::active(&window,&screens);
             let previous_app=self.programs.get(&window.id).and_then(Option::as_ref).map(|p|p.key()).unwrap_or_else(||window.app.clone());
             if self.slots.iter().flatten().any(|slot|slot.window.id==window.id
@@ -256,12 +272,13 @@ impl Preview {
                 let state=slot.window.minimized!=window.minimized;
                 let minimized=window.minimized;
                 let moved=slot.screen!=screen;
-                let repositioned=slot.window.bounds!=window.bounds;
+                let repositioned=slot.rectangle!=rectangle;
                 let resized=slot.scale!=scale;
                 let fullscreen_changed=slot.fullscreen!=fullscreen;
                 if minimized { slot.capture=None; }
                 slot.window=window;
                 slot.screen=screen;slot.scale=scale;
+                slot.rectangle=rectangle;
                 slot.fullscreen=fullscreen;
                 slot.configure.wake();
                 let retained=if resized { slot.last_size.map(|size|native_frame(i,size,scale,PieceContent::Kept)) } else { None };
@@ -286,7 +303,7 @@ impl Preview {
             self.tell(NestEvent::Minimized(i,window.minimized))?;
             self.tell(NestEvent::Fullscreen(i,fullscreen))?;
             self.slots[i]=Some(Slot {window,capture:None,received:false,pixels:0,born:Instant::now(),next_frame:Instant::now(),
-                configure:configure::Configure::default(),visible:self.visible.contains(&i),retry:Retry::default(),screen,scale,last_size:None,fullscreen});
+                configure:configure::Configure::default(),visible:self.visible.contains(&i),retry:Retry::default(),screen,scale,last_size:None,fullscreen,rectangle});
             self.capture(i);
         }
         self.order()?;
@@ -646,7 +663,7 @@ mod tests {
         window.process=13;assert!(!scope.allows(&window,Some(255)));
         window.process=12;window.monitor="primary".into();assert!(!scope.allows(&window,Some(255)));
         let mut slot=Slot {window,capture:None,received:true,pixels:1_000_000,born:Instant::now(),next_frame:Instant::now(),
-            configure:configure::Configure::default(),visible:false,retry:Retry::default(),screen:0,scale:1.0,last_size:None,fullscreen:false};
+            configure:configure::Configure::default(),visible:false,retry:Retry::default(),screen:0,scale:1.0,last_size:None,fullscreen:false,rectangle:None};
         assert_eq!(slot.pixels(),1_000_000,"suspended capture must retain its renderer memory budget");
         let now=Instant::now();
         slot.retry.failed(now);
