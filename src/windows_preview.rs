@@ -85,9 +85,10 @@ fn presentation_bounds(window:&Window) -> Bounds {
     }
     window.bounds.clone()
 }
-thread_local! { static CATALOG_DIRTY:Cell<bool> = const { Cell::new(true) }; }
-unsafe extern "system" fn changed(_:HWINEVENTHOOK,_:u32,_:HWND,object:i32,child:i32,_:u32,_:u32) {
-    if object == 0 && child == 0 { CATALOG_DIRTY.set(true); }
+thread_local! { static CATALOG_DIRTY:Cell<bool> = const { Cell::new(true) }; static FOCUS_DIRTY:Cell<bool> = const { Cell::new(true) }; }
+unsafe extern "system" fn changed(_:HWINEVENTHOOK,event:u32,_:HWND,object:i32,child:i32,_:u32,_:u32) {
+    if event == EVENT_SYSTEM_FOREGROUND { FOCUS_DIRTY.set(true); }
+    else if object == 0 && child == 0 { CATALOG_DIRTY.set(true); }
 }
 struct Hooks(Vec<HWINEVENTHOOK>);
 impl Hooks {
@@ -217,8 +218,10 @@ impl Preview {
     fn focus(&mut self) -> Result<()> {
         let foreground=unsafe { GetForegroundWindow() };
         let root=unsafe { GetAncestor(foreground,GA_ROOTOWNER) };
-        let id=Identity::read(root).map(Identity::token);
-        let now=self.slots.iter().position(|s|s.as_ref().is_some_and(|s|id.as_ref()==Some(&s.window.id)));
+        let id=Identity::read(foreground).map(Identity::token);
+        let owner=Identity::read(root).map(Identity::token);
+        let ids:Vec<_>=self.slots.iter().enumerate().filter_map(|(i,s)|s.as_ref().map(|s|(i,s.window.id.as_str()))).collect();
+        let now=focused_slot(id.as_deref(),owner.as_deref(),&ids);
         if now!=self.focused { self.tell(NestEvent::Focused(now))?;self.focused=now; }
         Ok(())
     }
@@ -389,6 +392,7 @@ impl Preview {
         let mut topology=Instant::now();
         loop {
             pump();
+            if FOCUS_DIRTY.replace(false) { self.focus()?; }
             for (id,result) in self.metadata.poll() {
                 let Some(slot)=self.slots.iter().position(|s|s.as_ref().is_some_and(|s|s.window.id==id)) else {continue;};
                 match result {
@@ -435,7 +439,12 @@ impl Preview {
                         if let Err(error)=result { eprintln!("windows preview: {error}"); }
                     },
                     Ok(message @ (ToNest::Focus(_)|ToNest::Close(_)|ToNest::Minimize(..)|ToNest::Send(..)|ToNest::Fullscreen(_))) => {
-                        if let Err(error)=self.action(message) { eprintln!("windows preview: {error}"); }
+                        let focusing=matches!(&message,ToNest::Focus(_));
+                        match self.action(message) {
+                            Ok(()) if focusing => self.focus()?,
+                            Ok(()) => {},
+                            Err(error) => eprintln!("windows preview: {error}"),
+                        }
                         CATALOG_DIRTY.set(true);
                     },
                     Ok(message) => {
@@ -527,6 +536,12 @@ fn native_frame(slot:usize,px:(u32,u32),scale:f64,content:PieceContent) -> NestE
     }]}
 }
 
+fn focused_slot(foreground:Option<&str>,owner:Option<&str>,ids:&[(usize,&str)]) -> Option<usize> {
+    // An APPWINDOW owned popup can have its own catalogue slot. Prefer its
+    // exact identity before mapping a modal dialog back to its root owner.
+    foreground.and_then(|id|ids.iter().find(|(_,candidate)|*candidate==id).map(|(i,_)|*i))
+        .or_else(||owner.and_then(|id|ids.iter().find(|(_,candidate)|*candidate==id).map(|(i,_)|*i)))
+}
 enum Action { Focus, Close, Minimize(bool), Fullscreen }
 fn act(scope:&Scope,created:Option<u64>,id:&str,action:Action) -> Result<()> {
     if !scope.actions { return Err("window actions require --window-actions; this scene is view-only".into()); }
@@ -555,6 +570,14 @@ fn act(scope:&Scope,created:Option<u64>,id:&str,action:Action) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn foreground_ack_prefers_the_selected_owned_appwindow() {
+        let slots=[(0,"owner"),(7,"owned-appwindow"),(2,"other-monitor")];
+        assert_eq!(focused_slot(Some("owned-appwindow"),Some("owner"),&slots),Some(7));
+        assert_eq!(focused_slot(Some("modal"),Some("owner"),&slots),Some(0));
+        assert_eq!(focused_slot(Some("other-monitor"),Some("other-monitor"),&slots),Some(2));
+        assert_eq!(focused_slot(Some("overview"),None,&slots),None);
+    }
     #[test]
     fn view_only_and_process_scopes_cannot_launch_programs() {
         let mut commands=launch::Launches::default();
