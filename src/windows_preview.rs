@@ -560,15 +560,21 @@ fn act(scope:&Scope,created:Option<u64>,id:&str,action:Action) -> Result<()> {
             let (hwnd,window)=target(id)?;
             if !scope.allows(&window,created) { return Err("window left the selected scope while restoring".into()); }
             if !unsafe { SetForegroundWindow(hwnd) }.as_bool() {
-                // A Windows-key hook does not make the background scene the
-                // recipient of input. Use the native task-switch operation for
-                // this explicit, scope-checked selection; do not attach input
-                // queues or synthesize Alt, which can interfere with the app.
-                unsafe { SwitchToThisWindow(hwnd, true); }
-                // Activation across input queues is asynchronous. The existing
-                // foreground WinEvent, not this request, acknowledges selection.
-                eprintln!("windows preview: requested native task switch");
+                // Hook-owned Win+Tab is consumed before it becomes input for
+                // the selector. Match PowerToys' activation handoff: a zeroed
+                // mouse INPUT changes no buttons, wheel or pointer position,
+                // but associates this explicit switch with the input stream.
+                // Never attach another application's input queue or send Alt.
+                use windows::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT};
+                let input = INPUT::default();
+                let sent = unsafe { SendInput(&[input], std::mem::size_of::<INPUT>() as i32) };
+                if sent != 1 || !unsafe { SetForegroundWindow(hwnd) }.as_bool() {
+                    return Err("Windows denied the selected window's foreground activation".into());
+                }
+                eprintln!("windows preview: explicit selection activation accepted");
             }
+            // Cross-thread activation completes asynchronously; only the
+            // foreground WinEvent acknowledges the selected slot to the scene.
         },
     }
     Ok(())

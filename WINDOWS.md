@@ -960,3 +960,21 @@ native results for this change must be read from the exact commit's CI run.
 This does not implement workspaces/pools, animated DWM transitions, in-preview
 input, or an independent agent seat. The intermittent WGC preview issue remains
 under investigation; a passing rerun is not a root-cause fix.
+
+
+### Explicit overview activation
+
+The Windows-logo hook consumes Win+Tab rather than delivering input to the
+selector. When a scope-validated `Focus` is refused, the native preview now
+uses a zeroed mouse INPUT followed by `SetForegroundWindow`, as in
+[PowerToys' foreground helper](https://github.com/microsoft/PowerToys/blob/main/src/common/ManagedCommon/WindowHelpers.cs).
+There is no mouse movement, click, wheel or synthetic modifier. This runs only
+for an explicit selection, never catalog refresh or capture. It does not join
+application input queues or modify global foreground policy. Submission and
+retry failures are reported, and the real foreground event remains the ack.
+
+On 2026-10-09 the user reproduced the old `SwitchToThisWindow` fallback failure,
+then confirmed physical Win+Tab release selecting the requested application
+without clicking with this change installed. The installed log confirms the
+new fallback and matching foreground event. This validates that reported case,
+not every elevated application, foreground lock or exclusive game.
