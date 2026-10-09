@@ -5,6 +5,22 @@ checkout starts the native desktop companion; it does **not** yet provide a
 complete Windows equivalent of the Linux compositor session. DWM continues to
 compose applications. No WSL, Wayland server or Unix shell is required.
 
+## Overview projection and transition geometry
+
+`--preview-monitor all --preview-project` gathers every eligible source monitor
+onto exactly one scene output. It rejects ambiguous output copies; the normal
+per-monitor provider and dock behavior are unchanged. Optional scene facts
+`win.$i.native.x`, `.y`, `.width` and `.height` receive the source rectangle in
+the destination output's logical coordinates. Capture dimensions continue to
+use the source monitor's DPI. This lets an overview animate its captured images
+without resizing or hiding the applications themselves.
+
+This is an overview primitive, not global opening/minimization/restoration
+effects. Those remain unimplemented. Tests cover projection scope, negative
+origins and different source/destination scales. A native four-window secondary
+display test exercised the matching Marea overview, including minimization,
+warm reuse and capture retirement; it did not validate compositor parity.
+
 Upstream through `871808b` (0.2.28) is integrated, including its workspace-wave
 fix, independent Linux agent keyboard, Chromium emoji/clipboard handling and
 desktop cursor socket. The socket remains Linux-only; Windows reports global

@@ -58,6 +58,7 @@ const HELP: &str = "pleamar-wm — experimental native Windows desktop companion
   window ID minimize|restore        act on one window from the current catalog
   --scene FILE [OPTIONS]            a native pleamar scene, including Luau and live reload
           --preview-monitor NAME   view-only live native windows in the scene (experimental)
+          --preview-project        gather --preview-monitor all onto one scene output
           --preview-process PID    restrict those pictures to one current process
           --window-actions         allow native focus, close, minimize, restore, scene size, send and launch
                                    fullscreen uses the session's recovery journal

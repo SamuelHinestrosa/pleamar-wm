@@ -9,7 +9,7 @@ use windows::Win32::UI::Accessibility::*;
 mod configure;
 
 #[derive(Clone)]
-struct Scope { monitor:String, process:Option<u32>, actions:bool }
+struct Scope { monitor:String, process:Option<u32>, actions:bool, project:bool }
 impl Scope {
     fn dock_actions(&self) -> Result<()> {
         if !self.actions { return Err("dock changes require --window-actions; this scene is view-only".into()); }
@@ -49,10 +49,24 @@ impl Outputs {
         Ok(name)
     }
     fn screen(&self, source:&str, scope:&Scope) -> Option<usize> {
+        if scope.project {
+            // A desktop overview gathers sources from every monitor onto one
+            // output. Do not guess if a scene is copied to multiple outputs.
+            return (self.0.len()==1).then(||self.0[0].0);
+        }
         self.0.iter().find(|(_,name)|name==source).map(|(index,_)|*index)
             // An explicitly chosen source can be previewed on a different
             // display. It belongs to the first live copy of that scene.
             .or_else(||(scope.monitor!="all").then(||self.0.first().map(|(i,_)|*i)).flatten())
+    }
+    fn rectangle(&self, output:usize, bounds:&Bounds, monitors:&[Monitor]) -> Option<[f32;4]> {
+        let name=&self.0.iter().find(|(i,_)|*i==output)?.1;
+        let monitor=monitors.iter().find(|m|&m.name==name)?;
+        let scale=monitor.scale;
+        if !scale.is_finite() || scale<=0.0 { return None; }
+        Some([(bounds.x as f64-monitor.bounds.x as f64)/scale,
+            (bounds.y as f64-monitor.bounds.y as f64)/scale,
+            bounds.width as f64/scale,bounds.height as f64/scale].map(|v|v as f32))
     }
 }
 static SCOPE:OnceLock<Scope> = OnceLock::new();
@@ -74,23 +88,26 @@ pub(super) fn prepare(args:&[String]) -> Result<Vec<String>> {
     let mut monitor=std::env::var("PLEAMAR_WM_PREVIEW_MONITOR").ok();
     let mut process=std::env::var("PLEAMAR_WM_PREVIEW_PROCESS").ok();
     let mut actions=false;
+    let mut project=false;
     let mut forwarded=Vec::new(); let mut it=args.iter();
     while let Some(argument)=it.next() {
         match argument.as_str() {
             "--preview-monitor" => monitor=Some(it.next().ok_or("preview monitor missing")?.clone()),
             "--preview-process" => process=Some(it.next().ok_or("preview process missing")?.clone()),
             "--window-actions" => actions=true,
+            "--preview-project" => project=true,
             _ => forwarded.push(argument.clone()),
         }
     }
     let Some(monitor)=monitor else {
-        if process.is_some() || actions { return Err("window previews and actions need an explicit preview monitor".into()); }
+        if process.is_some() || actions || project { return Err("window previews and actions need an explicit preview monitor".into()); }
         return Ok(forwarded);
     };
     let monitor=if monitor=="all" { monitor } else { select_monitor(&monitor)?.name };
     let process=process.map(|v|v.parse::<u32>()).transpose()?;
     if process==Some(0) || process==Some(std::process::id()) { return Err("invalid preview process".into()); }
-    SCOPE.set(Scope { monitor,process,actions }).map_err(|_|"window preview is already configured")?;
+    if project && monitor!="all" { return Err("--preview-project requires --preview-monitor all".into()); }
+    SCOPE.set(Scope { monitor,process,actions,project }).map_err(|_|"window preview is already configured")?;
     pleamar::provide_windows(start);
     Ok(forwarded)
 }
@@ -206,6 +223,7 @@ impl Preview {
     }
     fn refresh(&mut self) -> Result<()> {
         let screens=monitors()?;
+        let topology_changed=self.screens!=screens;
         self.screens=screens.clone();
         let live:Vec<_>=windows()?.into_iter().filter(|w| w.process!=std::process::id()
             && self.scope.allows(w,self.created)).filter_map(|window| {
@@ -222,6 +240,7 @@ impl Preview {
             }
         }
         for (window,screen,scale) in live {
+            let rectangle=self.outputs.rectangle(screen,&window.bounds,&screens);
             let fullscreen=fullscreen::active(&window,&screens);
             let previous_app=self.programs.get(&window.id).and_then(Option::as_ref).map(|p|p.key()).unwrap_or_else(||window.app.clone());
             if self.slots.iter().flatten().any(|slot|slot.window.id==window.id
@@ -237,6 +256,7 @@ impl Preview {
                 let state=slot.window.minimized!=window.minimized;
                 let minimized=window.minimized;
                 let moved=slot.screen!=screen;
+                let repositioned=slot.window.bounds!=window.bounds;
                 let resized=slot.scale!=scale;
                 let fullscreen_changed=slot.fullscreen!=fullscreen;
                 if minimized { slot.capture=None; }
@@ -246,6 +266,9 @@ impl Preview {
                 slot.configure.wake();
                 let retained=if resized { slot.last_size.map(|size|native_frame(i,size,scale,PieceContent::Kept)) } else { None };
                 if moved { self.tell(NestEvent::Screen(i,screen))?; }
+                if moved || repositioned || resized || topology_changed {
+                    if let Some(rect)=rectangle { self.tell(NestEvent::DesktopRect {slot:i,rect})?; }
+                }
                 if fullscreen_changed { self.tell(NestEvent::Fullscreen(i,fullscreen))?; }
                 if let Some(frame)=retained { self.tell(frame)?; }
                 if title { self.tell(NestEvent::Title(i,self.slots[i].as_ref().unwrap().window.title.clone()))?; }
@@ -258,6 +281,7 @@ impl Preview {
             }
             let Some(i)=self.slots.iter().position(Option::is_none) else { break; };
             self.tell(NestEvent::Opened {slot:i,title:window.title.clone(),app:app_id,screen})?;
+            if let Some(rect)=rectangle { self.tell(NestEvent::DesktopRect {slot:i,rect})?; }
             if let Some(program)=&program { self.tell(program.event(i))?; }
             self.tell(NestEvent::Minimized(i,window.minimized))?;
             self.tell(NestEvent::Fullscreen(i,fullscreen))?;
@@ -368,6 +392,7 @@ impl Preview {
                     Ok(ToNest::WindowsGpu(shared)) => self.gpu(shared),
                     Ok(ToNest::WindowsScreens(copies)) => {
                         self.outputs=Outputs::new(copies).unwrap_or_else(|error| { eprintln!("windows preview: {error}"); Outputs::default() });
+                        self.screens.clear();
                         CATALOG_DIRTY.set(true);
                     },
                     Ok(ToNest::Visible(slots)) => self.visible(slots)?,
@@ -516,8 +541,8 @@ mod tests {
     #[test]
     fn view_only_and_process_scopes_cannot_launch_programs() {
         let mut commands=launch::Launches::default();
-        for scope in [Scope {monitor:"all".into(),process:None,actions:false},
-            Scope {monitor:"all".into(),process:Some(123),actions:true}] {
+        for scope in [Scope {monitor:"all".into(),process:None,actions:false,project:false},
+            Scope {monitor:"all".into(),process:Some(123),actions:true,project:false}] {
             assert!(scope.launch(&mut commands,"exit 0").is_err());
             assert!(scope.dock_actions().is_err());
         }
@@ -525,8 +550,8 @@ mod tests {
     }
     #[test]
     fn source_outputs_follow_scene_names_and_keep_cross_display_single_previews() {
-        let all=Scope {monitor:"all".into(),process:None,actions:false};
-        let single=Scope {monitor:"SOURCE".into(),process:None,actions:false};
+        let all=Scope {monitor:"all".into(),process:None,actions:false,project:false};
+        let single=Scope {monitor:"SOURCE".into(),process:None,actions:false,project:false};
         let outputs=Outputs::new(vec![(1,"RIGHT".into()),(0,"LEFT".into()),(1,"RIGHT".into())]).unwrap();
         assert_eq!(outputs.screen("RIGHT",&all),Some(1));
         assert_eq!(outputs.screen("LEFT",&all),Some(0));
@@ -541,8 +566,40 @@ mod tests {
         assert!(Outputs::new(vec![(4,"FIFTH".into())]).is_err());
     }
     #[test]
+    fn desktop_projection_requires_one_output_and_keeps_native_action_scope() {
+        let scope=Scope {monitor:"all".into(),process:None,actions:true,project:true};
+        let outputs=Outputs::new(vec![(2,"RIGHT".into())]).unwrap();
+        for source in ["LEFT","RIGHT","THIRD"] { assert_eq!(outputs.screen(source,&scope),Some(2)); }
+        assert_eq!(outputs.destination(2,&scope).unwrap(),"RIGHT");
+        assert!(outputs.destination(0,&scope).is_err());
+        assert_eq!(Outputs::default().screen("LEFT",&scope),None);
+        let copies=Outputs::new(vec![(0,"LEFT".into()),(2,"RIGHT".into())]).unwrap();
+        assert_eq!(copies.screen("LEFT",&scope),None,"projection cannot guess an output");
+        assert!(prepare(&["--preview-project".into()]).is_err());
+    }
+    #[test]
+    fn desktop_rectangles_use_destination_dpi_and_preserve_offscreen_coordinates() {
+        let mut monitors=vec![
+            Monitor {name:"LEFT".into(),bounds:Bounds {x:-1920,y:180,width:1920,height:1080},
+                work:Bounds {x:-1920,y:180,width:1920,height:1040},scale:1.0,primary:false,refresh_hz:60},
+            Monitor {name:"RIGHT".into(),bounds:Bounds {x:0,y:0,width:2560,height:1440},
+                work:Bounds {x:0,y:0,width:2560,height:1400},scale:1.25,primary:true,refresh_hz:144},
+        ];
+        let outputs=Outputs::new(vec![(2,"RIGHT".into())]).unwrap();
+        let bounds=Bounds {x:-1800,y:300,width:800,height:600};
+        assert_eq!(outputs.rectangle(2,&bounds,&monitors),Some([-1440.0,240.0,640.0,480.0]));
+        let left=Outputs::new(vec![(1,"LEFT".into())]).unwrap();
+        assert_eq!(left.rectangle(1,&bounds,&monitors),Some([120.0,120.0,800.0,600.0]));
+        assert_eq!(outputs.rectangle(0,&bounds,&monitors),None);
+        assert_eq!(outputs.rectangle(2,&bounds,&[]),None);
+        for invalid in [0.0,-1.0,f64::NAN,f64::INFINITY] {
+            monitors[1].scale=invalid;
+            assert_eq!(outputs.rectangle(2,&bounds,&monitors),None);
+        }
+    }
+    #[test]
     fn send_resolves_scene_indices_and_refuses_view_only_or_ambiguous_destinations() {
-        let mut scope=Scope {monitor:"all".into(),process:None,actions:true};
+        let mut scope=Scope {monitor:"all".into(),process:None,actions:true,project:false};
         let outputs=Outputs::new(vec![(2,"LEFT".into()),(0,"RIGHT".into())]).unwrap();
         assert_eq!(outputs.destination(0,&scope).unwrap(),"RIGHT");
         assert_eq!(outputs.destination(2,&scope).unwrap(),"LEFT");
@@ -572,7 +629,7 @@ mod tests {
     }
     #[test]
     fn preview_actions_need_explicit_opt_in() {
-        let scope=Scope {monitor:"unused".into(),process:None,actions:false};
+        let scope=Scope {monitor:"unused".into(),process:None,actions:false,project:false};
         for action in [Action::Focus,Action::Close,Action::Minimize(true),Action::Minimize(false)] {
             assert!(act(&scope,None,"invalid",action).unwrap_err().to_string().contains("--window-actions"));
         }
@@ -580,7 +637,7 @@ mod tests {
     }
     #[test]
     fn actions_remain_scoped_after_catalog_changes() {
-        let scope=Scope {monitor:"secondary".into(),process:Some(12),actions:true};
+        let scope=Scope {monitor:"secondary".into(),process:Some(12),actions:true,project:false};
         let mut window=Window {id:"12:13:a:ff".into(),title:"fixture".into(),app:"fixture.exe".into(),
             class:"fixture".into(),process:12,monitor:scope.monitor.clone(),
             bounds:Bounds {x:0,y:0,width:400,height:300},minimized:true,maximized:false,resizable:true};
